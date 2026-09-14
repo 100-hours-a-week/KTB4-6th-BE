@@ -1,3 +1,9 @@
 spring:
   application:
     name: meety
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
