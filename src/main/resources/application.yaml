@@ -1,6 +1,9 @@
 spring:
   application:
     name: meety
+  profiles:
+    active:
+      - local
 
 management:
   endpoints:
