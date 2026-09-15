@@ -10,13 +10,17 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "user_auth_accounts")
+@Table(name = "user_auth_accounts",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_user_auth_accounts_provider_provider_user_id",
+                columnNames = {"provider", "provider_user_id"}))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class UserAuthAccount extends BaseEntity {
 
@@ -33,4 +37,14 @@ public class UserAuthAccount extends BaseEntity {
 
     @Column(name = "provider_user_id", nullable = false, length = 100)
     private String providerUserId;
+
+    private UserAuthAccount(User user, String provider, String providerUserId) {
+        this.user = user;
+        this.provider = provider;
+        this.providerUserId = providerUserId;
+    }
+
+    public static UserAuthAccount of(User user, String provider, String providerUserId) {
+        return new UserAuthAccount(user, provider, providerUserId);
+    }
 }

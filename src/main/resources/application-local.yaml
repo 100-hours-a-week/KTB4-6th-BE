@@ -1,4 +1,12 @@
 spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          kakao:
+            client-id: ${KAKAO_CLIENT_ID:local-kakao-client-id}
+            client-secret: ${KAKAO_CLIENT_SECRET:}
+            redirect-uri: ${KAKAO_REDIRECT_URI:http://localhost:3000/api/auth/kakao/callback}
   datasource:
     url: jdbc:mysql://localhost:${DB_PORT:3307}/${DB_NAME:meety}
     username: ${DB_USERNAME:root}
