@@ -6,7 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface MeetingRepository extends JpaRepository<Meeting, Long> {
+public interface MeetingRepository extends JpaRepository<Meeting, Long>, MeetingRepositoryCustom {
 
     @Query("""
             select count(m)
@@ -20,4 +20,14 @@ public interface MeetingRepository extends JpaRepository<Meeting, Long> {
             @Param("startOfDay") LocalDateTime startOfDay,
             @Param("nextDay") LocalDateTime nextDay
     );
+
+    @Query("""
+            select m
+            from Meeting m
+            join fetch m.team
+            join fetch m.createdByTeamMember
+            where m.id = :meetingId
+              and m.deletedAt is null
+            """)
+    java.util.Optional<Meeting> findDetailByIdAndDeletedAtIsNull(@Param("meetingId") Long meetingId);
 }
