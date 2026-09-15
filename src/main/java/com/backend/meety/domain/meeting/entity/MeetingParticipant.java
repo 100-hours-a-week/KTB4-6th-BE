@@ -13,6 +13,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -38,4 +39,35 @@ public class MeetingParticipant extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "participation_status", nullable = false, length = 30)
     private ParticipationStatus participationStatus = ParticipationStatus.JOINED;
+
+    public static MeetingParticipant create(Meeting meeting, TeamMember teamMember) {
+        MeetingParticipant meetingParticipant = new MeetingParticipant();
+        meetingParticipant.meeting = meeting;
+        meetingParticipant.teamMember = teamMember;
+        meetingParticipant.participationStatus = ParticipationStatus.JOINED;
+        meetingParticipant.restoreDeleted();
+        return meetingParticipant;
+    }
+
+    public void rejoin() {
+        this.participationStatus = ParticipationStatus.JOINED;
+        restoreDeleted();
+    }
+
+    public void leave(LocalDateTime leftAt) {
+        this.participationStatus = ParticipationStatus.LEFT;
+        markDeleted(leftAt);
+    }
+
+    public boolean isJoined() {
+        return participationStatus == ParticipationStatus.JOINED && getDeletedAt() == null;
+    }
+
+    public boolean isLeft() {
+        return participationStatus == ParticipationStatus.LEFT;
+    }
+
+    public boolean isDisconnected() {
+        return participationStatus == ParticipationStatus.DISCONNECTED;
+    }
 }
