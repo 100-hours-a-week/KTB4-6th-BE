@@ -13,7 +13,6 @@ import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2AuthorizationException;
-import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AccessTokenResponse;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationExchange;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
@@ -55,27 +54,23 @@ public class KakaoOAuthClient implements OAuthProviderClient {
         try {
             return tokenResponseClient.getTokenResponse(grantRequest);
         } catch (OAuth2AuthorizationException e) {
-            throw translateTokenError(e);
+            log.warn("카카오 토큰 교환에 실패했습니다. errorCode={}", e.getError().getErrorCode());
+            throw new AuthException(AuthErrorCode.KAKAO_AUTH_FAILED);
         } catch (RestClientException e) {
             log.error("카카오 토큰 교환 중 통신 오류가 발생했습니다.", e);
-            throw new AuthException(AuthErrorCode.OAUTH_PROVIDER_ERROR);
+            throw new AuthException(AuthErrorCode.AUTH_PROCESSING_FAILED);
         }
-    }
-
-    private AuthException translateTokenError(OAuth2AuthorizationException e) {
-        if (OAuth2ErrorCodes.INVALID_GRANT.equals(e.getError().getErrorCode())) {
-            return new AuthException(AuthErrorCode.INVALID_AUTHORIZATION_CODE);
-        }
-        log.error("카카오 토큰 교환에 실패했습니다. errorCode={}", e.getError().getErrorCode());
-        return new AuthException(AuthErrorCode.OAUTH_PROVIDER_ERROR);
     }
 
     private OAuth2User loadUser(ClientRegistration registration, OAuth2AccessTokenResponse tokenResponse) {
         try {
             return oAuth2UserService.loadUser(new OAuth2UserRequest(registration, tokenResponse.getAccessToken()));
-        } catch (OAuth2AuthenticationException | RestClientException e) {
-            log.error("카카오 사용자 정보 조회에 실패했습니다.", e);
-            throw new AuthException(AuthErrorCode.OAUTH_PROVIDER_ERROR);
+        } catch (OAuth2AuthenticationException e) {
+            log.warn("카카오 사용자 정보 조회에 실패했습니다.", e);
+            throw new AuthException(AuthErrorCode.KAKAO_AUTH_FAILED);
+        } catch (RestClientException e) {
+            log.error("카카오 사용자 정보 조회 중 통신 오류가 발생했습니다.", e);
+            throw new AuthException(AuthErrorCode.AUTH_PROCESSING_FAILED);
         }
     }
 }

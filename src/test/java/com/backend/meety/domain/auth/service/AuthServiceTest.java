@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 
 @ExtendWith(MockitoExtension.class)
@@ -88,14 +89,35 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("인가 코드가 유효하지 않으면 예외가 전파된다")
-    void loginFailsOnInvalidAuthorizationCode() {
+    @DisplayName("인가 코드가 비어 있으면 로그인이 거부된다")
+    void loginFailsOnBlankAuthorizationCode() {
+        assertThatThrownBy(() -> authService.login(PROVIDER, " "))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(AuthErrorCode.INVALID_AUTHORIZATION_CODE));
+    }
+
+    @Test
+    @DisplayName("카카오 인증에 실패하면 예외가 전파된다")
+    void loginFailsOnKakaoAuthFailure() {
         given(kakaoOAuthClient.fetchUserInfo("bad-code"))
-                .willThrow(new AuthException(AuthErrorCode.INVALID_AUTHORIZATION_CODE));
+                .willThrow(new AuthException(AuthErrorCode.KAKAO_AUTH_FAILED));
 
         assertThatThrownBy(() -> authService.login(PROVIDER, "bad-code"))
                 .isInstanceOfSatisfying(BusinessException.class,
-                        e -> assertThat(e.getErrorCode()).isEqualTo(AuthErrorCode.INVALID_AUTHORIZATION_CODE));
+                        e -> assertThat(e.getErrorCode()).isEqualTo(AuthErrorCode.KAKAO_AUTH_FAILED));
+    }
+
+    @Test
+    @DisplayName("사용자 저장 중 DB 오류가 발생하면 AUTH_PROCESSING_FAILED로 변환된다")
+    void loginFailsOnDataAccessFailure() {
+        given(kakaoOAuthClient.fetchUserInfo("auth-code"))
+                .willReturn(new OAuthUserInfo(PROVIDER, PROVIDER_USER_ID));
+        given(userAccountService.findOrCreate(PROVIDER, PROVIDER_USER_ID))
+                .willThrow(new DataAccessResourceFailureException("db down"));
+
+        assertThatThrownBy(() -> authService.login(PROVIDER, "auth-code"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(AuthErrorCode.AUTH_PROCESSING_FAILED));
     }
 
     @Test

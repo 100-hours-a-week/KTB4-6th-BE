@@ -10,6 +10,7 @@ import com.backend.meety.domain.user.service.UserAccountService;
 import com.backend.meety.global.security.JwtTokenProvider;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
@@ -23,12 +24,19 @@ public class AuthService {
     private final JwtTokenProvider jwtTokenProvider;
 
     public LoginResponse login(String provider, String authorizationCode) {
+        validateAuthorizationCode(authorizationCode);
         OAuthProviderClient client = findClient(provider);
         OAuthUserInfo userInfo = client.fetchUserInfo(authorizationCode);
         User user = findOrCreateUser(userInfo);
         String accessToken = jwtTokenProvider.createAccessToken(user.getId());
-        String refreshToken = refreshTokenService.issue(user);
+        String refreshToken = issueRefreshToken(user);
         return new LoginResponse(user.getId(), accessToken, refreshToken);
+    }
+
+    private void validateAuthorizationCode(String authorizationCode) {
+        if (authorizationCode == null || authorizationCode.isBlank()) {
+            throw new AuthException(AuthErrorCode.INVALID_AUTHORIZATION_CODE);
+        }
     }
 
     private OAuthProviderClient findClient(String provider) {
@@ -41,9 +49,22 @@ public class AuthService {
 
     private User findOrCreateUser(OAuthUserInfo userInfo) {
         try {
-            return userAccountService.findOrCreate(userInfo.provider(), userInfo.providerUserId());
-        } catch (DataIntegrityViolationException e) {
-            return userAccountService.getByProviderAndProviderUserId(userInfo.provider(), userInfo.providerUserId());
+            try {
+                return userAccountService.findOrCreate(userInfo.provider(), userInfo.providerUserId());
+            } catch (DataIntegrityViolationException e) {
+                return userAccountService.getByProviderAndProviderUserId(
+                        userInfo.provider(), userInfo.providerUserId());
+            }
+        } catch (DataAccessException e) {
+            throw new AuthException(AuthErrorCode.AUTH_PROCESSING_FAILED);
+        }
+    }
+
+    private String issueRefreshToken(User user) {
+        try {
+            return refreshTokenService.issue(user);
+        } catch (DataAccessException e) {
+            throw new AuthException(AuthErrorCode.AUTH_PROCESSING_FAILED);
         }
     }
 }

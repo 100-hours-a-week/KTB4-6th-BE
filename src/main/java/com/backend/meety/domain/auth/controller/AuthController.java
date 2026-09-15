@@ -4,7 +4,6 @@ import com.backend.meety.domain.auth.dto.LoginRequest;
 import com.backend.meety.domain.auth.dto.LoginResponse;
 import com.backend.meety.domain.auth.service.AuthService;
 import com.backend.meety.global.response.ApiResponse;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,8 +19,8 @@ public class AuthController {
     private final AuthService authService;
 
     @PostMapping("/{provider}/login")
-    public ApiResponse<LoginResponse> login(@PathVariable String provider,
-                                            @Valid @RequestBody LoginRequest request) {
+    public ApiResponse<LoginResponse> login(@PathVariable("provider") String provider,
+                                            @RequestBody LoginRequest request) {
         return ApiResponse.success(authService.login(provider, request.authorizationCode()));
     }
 }
