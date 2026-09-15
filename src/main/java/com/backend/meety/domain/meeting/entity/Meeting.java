@@ -61,4 +61,25 @@ public class Meeting extends BaseEntity {
 
     @Column(name = "ended_at")
     private LocalDateTime endedAt;
+
+    public static Meeting create(
+            Team team,
+            TeamMember createdByTeamMember,
+            String title,
+            String purpose,
+            String note,
+            LocalDateTime scheduledAt,
+            Integer targetDurationMinutes
+    ) {
+        Meeting meeting = new Meeting();
+        meeting.team = team;
+        meeting.createdByTeamMember = createdByTeamMember;
+        meeting.title = title;
+        meeting.purpose = purpose;
+        meeting.note = note;
+        meeting.scheduledAt = scheduledAt;
+        meeting.targetDurationMinutes = targetDurationMinutes;
+        meeting.status = MeetingStatus.WAITING;
+        return meeting;
+    }
 }
