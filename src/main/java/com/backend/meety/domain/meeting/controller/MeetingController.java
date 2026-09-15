@@ -4,15 +4,19 @@ import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
 import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
+import com.backend.meety.domain.meeting.dto.MeetingParticipantListResponse;
+import com.backend.meety.domain.meeting.dto.MeetingParticipantResponse;
+import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
 import com.backend.meety.global.response.ApiResponse;
 import jakarta.validation.Valid;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class MeetingController {
 
     private final MeetingService meetingService;
+    private final MeetingParticipantService meetingParticipantService;
 
     @PostMapping("/teams/{teamId}/meetings")
     public ResponseEntity<ApiResponse<MeetingCreateResponse>> createMeeting(
@@ -59,5 +64,32 @@ public class MeetingController {
     ) {
         MeetingListResponse response = meetingService.getMeetings(userId, teamId, keyword, from, to, cursor, size);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PostMapping("/meetings/{meetingId}/participants")
+    public ResponseEntity<ApiResponse<MeetingParticipantResponse>> joinMeeting(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long meetingId
+    ) {
+        MeetingParticipantResponse response = meetingParticipantService.joinMeeting(userId, meetingId);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(response));
+    }
+
+    @GetMapping("/meetings/{meetingId}/participants")
+    public ResponseEntity<ApiResponse<MeetingParticipantListResponse>> getParticipants(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long meetingId
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(meetingParticipantService.getParticipants(userId, meetingId)));
+    }
+
+    @DeleteMapping("/meetings/{meetingId}/participants/me")
+    public ResponseEntity<Void> leaveMeeting(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long meetingId
+    ) {
+        meetingParticipantService.leaveMeeting(userId, meetingId);
+        return ResponseEntity.noContent().build();
     }
 }
