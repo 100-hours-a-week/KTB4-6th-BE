@@ -12,4 +12,10 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
             Long userId,
             MembershipStatus membershipStatus
     );
+
+    boolean existsByTeamIdAndUserIdAndMembershipStatus(
+            Long teamId,
+            Long userId,
+            MembershipStatus membershipStatus
+    );
 }
