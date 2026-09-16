@@ -14,6 +14,7 @@ import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.security.oauth2.core.OAuth2AuthorizationException;
+import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AccessTokenResponse;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationExchange;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
@@ -88,6 +89,9 @@ public class KakaoOAuthClient implements OAuthProviderClient {
         try {
             return tokenResponseClient.getTokenResponse(grantRequest);
         } catch (OAuth2AuthorizationException e) {
+            if (OAuth2ErrorCodes.INVALID_GRANT.equals(e.getError().getErrorCode())) {
+                throw new AuthException(AuthErrorCode.INVALID_AUTHORIZATION_CODE);
+            }
             log.warn("카카오 토큰 교환에 실패했습니다. errorCode={}", e.getError().getErrorCode());
             throw new AuthException(AuthErrorCode.KAKAO_AUTH_FAILED);
         } catch (RestClientException e) {
