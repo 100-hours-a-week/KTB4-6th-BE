@@ -11,6 +11,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -46,5 +47,17 @@ public class UserAuthAccount extends BaseEntity {
 
     public static UserAuthAccount of(User user, String provider, String providerUserId) {
         return new UserAuthAccount(user, provider, providerUserId);
+    }
+
+    public void withdraw(LocalDateTime withdrawnAt) {
+        markDeleted(withdrawnAt);
+    }
+
+    public void reactivate() {
+        restoreDeleted();
+    }
+
+    public boolean isWithdrawn() {
+        return getDeletedAt() != null;
     }
 }

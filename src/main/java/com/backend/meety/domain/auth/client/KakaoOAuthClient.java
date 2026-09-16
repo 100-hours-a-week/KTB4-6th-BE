@@ -3,6 +3,7 @@ package com.backend.meety.domain.auth.client;
 import com.backend.meety.domain.auth.dto.OAuthUserInfo;
 import com.backend.meety.domain.auth.exception.AuthErrorCode;
 import com.backend.meety.domain.auth.exception.AuthException;
+import com.backend.meety.global.config.KakaoProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient;
@@ -17,9 +18,13 @@ import org.springframework.security.oauth2.core.endpoint.OAuth2AccessTokenRespon
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationExchange;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationResponse;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 @Slf4j
 @Component(KakaoOAuthClient.REGISTRATION_ID)
@@ -28,9 +33,14 @@ public class KakaoOAuthClient implements OAuthProviderClient {
 
     static final String REGISTRATION_ID = "kakao";
 
+    private static final String ADMIN_KEY_PREFIX = "KakaoAK ";
+    private static final String NOT_REGISTERED_ERROR_CODE = "-102";
+
     private final ClientRegistrationRepository clientRegistrationRepository;
     private final OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> tokenResponseClient;
     private final OAuth2UserService<OAuth2UserRequest, OAuth2User> oAuth2UserService;
+    private final RestClient oauthRestClient;
+    private final KakaoProperties kakaoProperties;
 
     @Override
     public OAuthUserInfo fetchUserInfo(String authorizationCode) {
@@ -40,6 +50,30 @@ public class KakaoOAuthClient implements OAuthProviderClient {
         return new OAuthUserInfo(REGISTRATION_ID, oAuth2User.getName());
     }
 
+    @Override
+    public boolean unlink(String providerUserId) {
+        try {
+            oauthRestClient.post()
+                    .uri(kakaoProperties.unlinkUri())
+                    .header(HttpHeaders.AUTHORIZATION, ADMIN_KEY_PREFIX + kakaoProperties.adminKey())
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .body("target_id_type=user_id&target_id=" + providerUserId)
+                    .retrieve()
+                    .toBodilessEntity();
+            return true;
+        } catch (RestClientResponseException e) {
+            if (e.getResponseBodyAsString().contains(NOT_REGISTERED_ERROR_CODE)) {
+                return true;
+            }
+            log.error("카카오 연결 끊기에 실패했습니다. status={}", e.getStatusCode());
+            return false;
+        } catch (RestClientException e) {
+            log.error("카카오 연결 끊기 중 통신 오류가 발생했습니다.", e);
+            return false;
+        }
+    }
+
+    // TODO: provider 추가 시 exchangeToken/loadUser는 카카오 특수성이 없는 공통 로직이므로 추상 클래스로 분리
     private OAuth2AccessTokenResponse exchangeToken(ClientRegistration registration, String authorizationCode) {
         OAuth2AuthorizationRequest authorizationRequest = OAuth2AuthorizationRequest.authorizationCode()
                 .clientId(registration.getClientId())
