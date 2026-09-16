@@ -82,4 +82,38 @@ public class Meeting extends BaseEntity {
         meeting.status = MeetingStatus.WAITING;
         return meeting;
     }
+
+    public void updateWaitingInfo(
+            String title,
+            String purpose,
+            String note,
+            LocalDateTime scheduledAt,
+            Integer targetDurationMinutes
+    ) {
+        if (title != null) {
+            this.title = title;
+        }
+        if (purpose != null) {
+            this.purpose = purpose;
+        }
+        if (note != null) {
+            this.note = note.isEmpty() ? null : note;
+        }
+        if (scheduledAt != null) {
+            this.scheduledAt = scheduledAt;
+        }
+        if (targetDurationMinutes != null) {
+            this.targetDurationMinutes = targetDurationMinutes;
+        }
+    }
+
+    public void rename(String title) {
+        if (title != null) {
+            this.title = title;
+        }
+    }
+
+    public void softDelete(LocalDateTime deletedAt) {
+        markDeleted(deletedAt);
+    }
 }

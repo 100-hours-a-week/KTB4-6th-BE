@@ -6,6 +6,8 @@ import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
 import com.backend.meety.domain.meeting.dto.MeetingParticipantListResponse;
 import com.backend.meety.domain.meeting.dto.MeetingParticipantResponse;
+import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
+import com.backend.meety.domain.meeting.dto.MeetingUpdateResponse;
 import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
 import com.backend.meety.global.response.ApiResponse;
@@ -19,6 +21,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -64,6 +67,25 @@ public class MeetingController {
     ) {
         MeetingListResponse response = meetingService.getMeetings(userId, teamId, keyword, from, to, cursor, size);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PatchMapping("/meetings/{meetingId}")
+    public ResponseEntity<ApiResponse<MeetingUpdateResponse>> updateMeeting(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long meetingId,
+            @Valid @RequestBody MeetingUpdateRequest request
+    ) {
+        MeetingUpdateResponse response = meetingService.updateMeeting(userId, meetingId, request);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @DeleteMapping("/meetings/{meetingId}")
+    public ResponseEntity<Void> deleteMeeting(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long meetingId
+    ) {
+        meetingService.deleteMeeting(userId, meetingId);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/meetings/{meetingId}/participants")
