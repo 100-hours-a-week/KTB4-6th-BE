@@ -6,6 +6,8 @@ import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
 import com.backend.meety.domain.meeting.dto.MeetingGroupResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListItemResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
+import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
+import com.backend.meety.domain.meeting.dto.MeetingUpdateResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
@@ -16,8 +18,10 @@ import com.backend.meety.domain.meeting.repository.support.MeetingListSearchCond
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.entity.TeamMemberRole;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.team.repository.TeamRepository;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -40,6 +44,7 @@ public class MeetingService {
     private final MeetingRepository meetingRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
+    private final Clock clock;
 
     @Transactional
     public MeetingCreateResponse createMeeting(Long userId, Long teamId, MeetingCreateRequest request) {
@@ -97,6 +102,48 @@ public class MeetingService {
         return MeetingDetailResponse.from(meeting);
     }
 
+    @Transactional
+    public MeetingUpdateResponse updateMeeting(Long userId, Long meetingId, MeetingUpdateRequest request) {
+        Meeting meeting = meetingRepository.findByIdForUpdateAndDeletedAtIsNull(meetingId)
+                .orElseThrow(() -> new MeetingException(MeetingErrorCode.MEETING_NOT_FOUND));
+        TeamMember teamMember = findActiveTeamMember(
+                userId,
+                meeting.getTeam().getId(),
+                MeetingErrorCode.MEETING_UPDATE_FORBIDDEN
+        );
+        validateUpdatePermission(teamMember, meeting);
+        validateMeetingUpdateAllowed(meeting, request);
+
+        if (meeting.getStatus() == MeetingStatus.WAITING) {
+            meeting.updateWaitingInfo(
+                    request.title(),
+                    request.purpose(),
+                    request.note(),
+                    request.scheduledAt(),
+                    request.targetDurationMinutes()
+            );
+        } else if (meeting.getStatus() == MeetingStatus.COMPLETED) {
+            meeting.rename(request.title());
+        }
+
+        return MeetingUpdateResponse.from(meeting);
+    }
+
+    @Transactional
+    public void deleteMeeting(Long userId, Long meetingId) {
+        Meeting meeting = meetingRepository.findByIdForUpdateAndDeletedAtIsNull(meetingId)
+                .orElseThrow(() -> new MeetingException(MeetingErrorCode.MEETING_NOT_FOUND));
+        TeamMember teamMember = findActiveTeamMember(
+                userId,
+                meeting.getTeam().getId(),
+                MeetingErrorCode.MEETING_DELETE_FORBIDDEN
+        );
+        validateDeletePermission(teamMember);
+        validateMeetingDeleteAllowed(meeting);
+
+        meeting.softDelete(LocalDateTime.now(clock));
+    }
+
     @Transactional(readOnly = true)
     public MeetingListResponse getMeetings(
             Long userId,
@@ -133,6 +180,47 @@ public class MeetingService {
 
     private void validateMeetingAccess(Long userId, Long teamId) {
         validateTeamMembership(userId, teamId, MeetingErrorCode.MEETING_ACCESS_DENIED);
+    }
+
+    private TeamMember findActiveTeamMember(Long userId, Long teamId, MeetingErrorCode errorCode) {
+        return teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(
+                        teamId,
+                        userId,
+                        MembershipStatus.ACTIVE
+                )
+                .orElseThrow(() -> new MeetingException(errorCode));
+    }
+
+    private void validateUpdatePermission(TeamMember teamMember, Meeting meeting) {
+        if (isLeader(teamMember) || teamMember.getId().equals(meeting.getCreatedByTeamMember().getId())) {
+            return;
+        }
+        throw new MeetingException(MeetingErrorCode.MEETING_UPDATE_FORBIDDEN);
+    }
+
+    private void validateDeletePermission(TeamMember teamMember) {
+        if (!isLeader(teamMember)) {
+            throw new MeetingException(MeetingErrorCode.MEETING_DELETE_FORBIDDEN);
+        }
+    }
+
+    private boolean isLeader(TeamMember teamMember) {
+        return teamMember.getRole() == TeamMemberRole.LEADER;
+    }
+
+    private void validateMeetingUpdateAllowed(Meeting meeting, MeetingUpdateRequest request) {
+        if (meeting.getStatus() == MeetingStatus.IN_PROGRESS) {
+            throw new MeetingException(MeetingErrorCode.MEETING_FIELD_UPDATE_NOT_ALLOWED);
+        }
+        if (meeting.getStatus() == MeetingStatus.COMPLETED && request.hasForbiddenCompletedField()) {
+            throw new MeetingException(MeetingErrorCode.MEETING_FIELD_UPDATE_NOT_ALLOWED);
+        }
+    }
+
+    private void validateMeetingDeleteAllowed(Meeting meeting) {
+        if (meeting.getStatus() == MeetingStatus.IN_PROGRESS) {
+            throw new MeetingException(MeetingErrorCode.MEETING_IN_PROGRESS);
+        }
     }
 
     private void validateTeamMembership(Long userId, Long teamId, MeetingErrorCode errorCode) {

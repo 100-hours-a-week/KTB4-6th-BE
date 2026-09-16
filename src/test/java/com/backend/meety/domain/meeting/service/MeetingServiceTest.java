@@ -13,6 +13,8 @@ import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
 import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
+import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
+import com.backend.meety.domain.meeting.dto.MeetingUpdateResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
@@ -23,8 +25,11 @@ import com.backend.meety.domain.meeting.repository.support.MeetingListSearchCond
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.entity.TeamMemberRole;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.team.repository.TeamRepository;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -44,6 +49,10 @@ class MeetingServiceTest {
     private static final Long TEAM_ID = 2L;
     private static final Long TEAM_MEMBER_ID = 3L;
     private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
+    private static final Clock FIXED_CLOCK = Clock.fixed(
+            Instant.parse("2026-09-15T03:00:00Z"),
+            KST_ZONE_ID
+    );
 
     private MeetingRepository meetingRepository;
     private TeamRepository teamRepository;
@@ -55,7 +64,7 @@ class MeetingServiceTest {
         meetingRepository = mock(MeetingRepository.class);
         teamRepository = mock(TeamRepository.class);
         teamMemberRepository = mock(TeamMemberRepository.class);
-        meetingService = new MeetingService(meetingRepository, teamRepository, teamMemberRepository);
+        meetingService = new MeetingService(meetingRepository, teamRepository, teamMemberRepository, FIXED_CLOCK);
     }
 
     @Test
@@ -603,6 +612,329 @@ class MeetingServiceTest {
                 .isEqualTo(MeetingErrorCode.INVALID_CURSOR);
     }
 
+    @Test
+    @DisplayName("LEADER는 WAITING 회의 정보를 수정할 수 있다")
+    void updateWaitingMeetingByLeader() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
+        TeamMember leader = teamMember(99L, TeamMemberRole.LEADER);
+        setUpLockedMeetingAndActiveMember(meeting, leader);
+
+        MeetingUpdateResponse response = meetingService.updateMeeting(
+                USER_ID,
+                100L,
+                new MeetingUpdateRequest(
+                        "수정된 회의",
+                        "수정된 목적",
+                        "수정된 메모",
+                        LocalDateTime.of(2026, 9, 21, 10, 0),
+                        45
+                )
+        );
+
+        assertThat(response.title()).isEqualTo("수정된 회의");
+        assertThat(response.purpose()).isEqualTo("수정된 목적");
+        assertThat(response.note()).isEqualTo("수정된 메모");
+        assertThat(response.scheduledAt()).isEqualTo(LocalDateTime.of(2026, 9, 21, 10, 0));
+        assertThat(response.targetDurationMinutes()).isEqualTo(45);
+        assertThat(meeting.getTitle()).isEqualTo("수정된 회의");
+        assertThat(meeting.getPurpose()).isEqualTo("수정된 목적");
+        assertThat(meeting.getNote()).isEqualTo("수정된 메모");
+        assertThat(meeting.getScheduledAt()).isEqualTo(LocalDateTime.of(2026, 9, 21, 10, 0));
+        assertThat(meeting.getTargetDurationMinutes()).isEqualTo(45);
+    }
+
+    @Test
+    @DisplayName("회의 생성자는 WAITING 회의 정보를 수정할 수 있다")
+    void updateWaitingMeetingByCreator() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
+        TeamMember creator = teamMember(TEAM_MEMBER_ID, TeamMemberRole.MEMBER);
+        setUpLockedMeetingAndActiveMember(meeting, creator);
+
+        meetingService.updateMeeting(USER_ID, 100L, new MeetingUpdateRequest("생성자 수정", null, null, null, null));
+
+        assertThat(meeting.getTitle()).isEqualTo("생성자 수정");
+        assertThat(meeting.getPurpose()).isEqualTo("진행 상황 공유");
+        assertThat(meeting.getNote()).isEqualTo("API 검토");
+    }
+
+    @Test
+    @DisplayName("일반 ACTIVE 팀원은 회의를 수정할 수 없다")
+    void updateMeetingByMemberForbidden() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
+        TeamMember member = teamMember(99L, TeamMemberRole.MEMBER);
+        setUpLockedMeetingAndActiveMember(meeting, member);
+
+        assertThatThrownBy(() -> meetingService.updateMeeting(
+                USER_ID,
+                100L,
+                new MeetingUpdateRequest("권한 없음", null, null, null, null)
+        ))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_UPDATE_FORBIDDEN);
+
+        assertThat(meeting.getTitle()).isEqualTo("회의 100");
+    }
+
+    @Test
+    @DisplayName("ACTIVE 팀원이 아니면 회의 생성자여도 수정할 수 없다")
+    void updateMeetingByInactiveCreatorForbidden() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
+        when(meetingRepository.findByIdForUpdateAndDeletedAtIsNull(100L)).thenReturn(Optional.of(meeting));
+        when(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> meetingService.updateMeeting(
+                USER_ID,
+                100L,
+                new MeetingUpdateRequest("비활성", null, null, null, null)
+        ))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_UPDATE_FORBIDDEN);
+
+        assertThat(meeting.getTitle()).isEqualTo("회의 100");
+    }
+
+    @Test
+    @DisplayName("WAITING 회의 수정에서 요청하지 않은 필드는 유지된다")
+    void updateWaitingMeetingKeepsUnspecifiedFields() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(TEAM_MEMBER_ID, TeamMemberRole.MEMBER));
+
+        meetingService.updateMeeting(USER_ID, 100L, new MeetingUpdateRequest(null, "목적만 수정", null, null, null));
+
+        assertThat(meeting.getTitle()).isEqualTo("회의 100");
+        assertThat(meeting.getPurpose()).isEqualTo("목적만 수정");
+        assertThat(meeting.getNote()).isEqualTo("API 검토");
+        assertThat(meeting.getScheduledAt()).isEqualTo(LocalDateTime.of(2026, 9, 20, 10, 0));
+        assertThat(meeting.getTargetDurationMinutes()).isEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("WAITING 회의 수정에서 note 빈 문자열은 null로 삭제한다")
+    void updateWaitingMeetingClearsNote() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(TEAM_MEMBER_ID, TeamMemberRole.MEMBER));
+
+        meetingService.updateMeeting(USER_ID, 100L, new MeetingUpdateRequest(null, null, "", null, null));
+
+        assertThat(meeting.getNote()).isNull();
+    }
+
+    @Test
+    @DisplayName("빈 PATCH 요청은 no-op으로 처리하고 기존 값을 반환한다")
+    void updateMeetingWithEmptyRequestNoop() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(TEAM_MEMBER_ID, TeamMemberRole.MEMBER));
+
+        MeetingUpdateResponse response = meetingService.updateMeeting(
+                USER_ID,
+                100L,
+                new MeetingUpdateRequest(null, null, null, null, null)
+        );
+
+        assertThat(response.title()).isEqualTo("회의 100");
+        assertThat(response.purpose()).isEqualTo("진행 상황 공유");
+        assertThat(response.note()).isEqualTo("API 검토");
+    }
+
+    @Test
+    @DisplayName("COMPLETED 회의는 title만 수정할 수 있다")
+    void updateCompletedMeetingTitleOnly() {
+        Meeting meeting = meeting(100L, MeetingStatus.COMPLETED, LocalDateTime.of(2026, 9, 20, 10, 0),
+                LocalDateTime.of(2026, 9, 20, 10, 0));
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(TEAM_MEMBER_ID, TeamMemberRole.MEMBER));
+
+        meetingService.updateMeeting(USER_ID, 100L, new MeetingUpdateRequest("종료 후 이름", null, null, null, null));
+
+        assertThat(meeting.getTitle()).isEqualTo("종료 후 이름");
+        assertThat(meeting.getPurpose()).isEqualTo("진행 상황 공유");
+    }
+
+    @Test
+    @DisplayName("COMPLETED 회의에서 title과 금지 필드를 함께 요청하면 전체 실패하고 부분 수정하지 않는다")
+    void updateCompletedMeetingForbiddenFieldFailsWithoutPartialMutation() {
+        Meeting meeting = meeting(100L, MeetingStatus.COMPLETED, LocalDateTime.of(2026, 9, 20, 10, 0),
+                LocalDateTime.of(2026, 9, 20, 10, 0));
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(TEAM_MEMBER_ID, TeamMemberRole.MEMBER));
+
+        assertThatThrownBy(() -> meetingService.updateMeeting(
+                USER_ID,
+                100L,
+                new MeetingUpdateRequest("부분 수정 금지", "금지 필드", null, null, null)
+        ))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_FIELD_UPDATE_NOT_ALLOWED);
+
+        assertThat(meeting.getTitle()).isEqualTo("회의 100");
+        assertThat(meeting.getPurpose()).isEqualTo("진행 상황 공유");
+    }
+
+    @Test
+    @DisplayName("COMPLETED 회의에서 note, scheduledAt, duration 수정 요청은 실패한다")
+    void updateCompletedMeetingForbiddenFieldsFail() {
+        Meeting meeting = meeting(100L, MeetingStatus.COMPLETED, LocalDateTime.of(2026, 9, 20, 10, 0),
+                LocalDateTime.of(2026, 9, 20, 10, 0));
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(TEAM_MEMBER_ID, TeamMemberRole.MEMBER));
+
+        assertThatThrownBy(() -> meetingService.updateMeeting(
+                USER_ID,
+                100L,
+                new MeetingUpdateRequest(null, null, "금지", null, null)
+        ))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_FIELD_UPDATE_NOT_ALLOWED);
+        assertThatThrownBy(() -> meetingService.updateMeeting(
+                USER_ID,
+                100L,
+                new MeetingUpdateRequest(null, null, null, LocalDateTime.of(2026, 9, 21, 10, 0), null)
+        ))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_FIELD_UPDATE_NOT_ALLOWED);
+        assertThatThrownBy(() -> meetingService.updateMeeting(
+                USER_ID,
+                100L,
+                new MeetingUpdateRequest(null, null, null, null, 40)
+        ))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_FIELD_UPDATE_NOT_ALLOWED);
+    }
+
+    @Test
+    @DisplayName("IN_PROGRESS 회의는 수정할 수 없고 Entity가 변경되지 않는다")
+    void updateInProgressMeetingFails() {
+        Meeting meeting = meeting(100L, MeetingStatus.IN_PROGRESS, LocalDateTime.of(2026, 9, 20, 10, 0),
+                LocalDateTime.of(2026, 9, 20, 10, 0));
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(TEAM_MEMBER_ID, TeamMemberRole.MEMBER));
+
+        assertThatThrownBy(() -> meetingService.updateMeeting(
+                USER_ID,
+                100L,
+                new MeetingUpdateRequest("진행 중 수정", null, null, null, null)
+        ))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_FIELD_UPDATE_NOT_ALLOWED);
+
+        assertThat(meeting.getTitle()).isEqualTo("회의 100");
+    }
+
+    @Test
+    @DisplayName("회의가 없거나 삭제된 회의이면 수정할 수 없다")
+    void updateMeetingNotFound() {
+        when(meetingRepository.findByIdForUpdateAndDeletedAtIsNull(100L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> meetingService.updateMeeting(
+                USER_ID,
+                100L,
+                new MeetingUpdateRequest("없음", null, null, null, null)
+        ))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("LEADER는 WAITING 회의를 soft delete할 수 있다")
+    void deleteWaitingMeetingByLeader() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(99L, TeamMemberRole.LEADER));
+
+        meetingService.deleteMeeting(USER_ID, 100L);
+
+        assertThat(meeting.getDeletedAt()).isEqualTo(LocalDateTime.of(2026, 9, 15, 12, 0));
+        verify(meetingRepository, never()).delete(any());
+    }
+
+    @Test
+    @DisplayName("LEADER는 COMPLETED 회의를 soft delete할 수 있다")
+    void deleteCompletedMeetingByLeader() {
+        Meeting meeting = meeting(100L, MeetingStatus.COMPLETED, LocalDateTime.of(2026, 9, 20, 10, 0),
+                LocalDateTime.of(2026, 9, 20, 10, 0));
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(99L, TeamMemberRole.LEADER));
+
+        meetingService.deleteMeeting(USER_ID, 100L);
+
+        assertThat(meeting.getDeletedAt()).isEqualTo(LocalDateTime.of(2026, 9, 15, 12, 0));
+    }
+
+    @Test
+    @DisplayName("회의 생성자라도 LEADER가 아니면 삭제할 수 없다")
+    void deleteMeetingByCreatorMemberForbidden() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(TEAM_MEMBER_ID, TeamMemberRole.MEMBER));
+
+        assertThatThrownBy(() -> meetingService.deleteMeeting(USER_ID, 100L))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_DELETE_FORBIDDEN);
+
+        assertThat(meeting.getDeletedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("일반 ACTIVE 팀원은 삭제할 수 없다")
+    void deleteMeetingByMemberForbidden() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(99L, TeamMemberRole.MEMBER));
+
+        assertThatThrownBy(() -> meetingService.deleteMeeting(USER_ID, 100L))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_DELETE_FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("ACTIVE 팀원이 아니면 삭제할 수 없다")
+    void deleteMeetingByInactiveMemberForbidden() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
+        when(meetingRepository.findByIdForUpdateAndDeletedAtIsNull(100L)).thenReturn(Optional.of(meeting));
+        when(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> meetingService.deleteMeeting(USER_ID, 100L))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_DELETE_FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("IN_PROGRESS 회의는 삭제할 수 없다")
+    void deleteInProgressMeetingFails() {
+        Meeting meeting = meeting(100L, MeetingStatus.IN_PROGRESS, LocalDateTime.of(2026, 9, 20, 10, 0),
+                LocalDateTime.of(2026, 9, 20, 10, 0));
+        setUpLockedMeetingAndActiveMember(meeting, teamMember(99L, TeamMemberRole.LEADER));
+
+        assertThatThrownBy(() -> meetingService.deleteMeeting(USER_ID, 100L))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_IN_PROGRESS);
+
+        assertThat(meeting.getDeletedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("회의가 없거나 이미 삭제된 회의이면 삭제할 수 없다")
+    void deleteMeetingNotFound() {
+        when(meetingRepository.findByIdForUpdateAndDeletedAtIsNull(100L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> meetingService.deleteMeeting(USER_ID, 100L))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_NOT_FOUND);
+    }
+
     private MeetingCreateResponse createMeetingWithTodayCount(long todayCount, MeetingCreateRequest request) {
         setUpCreatableMemberWithTodayCount(todayCount);
         when(meetingRepository.saveAndFlush(any(Meeting.class))).thenAnswer(invocation -> {
@@ -647,6 +979,22 @@ class MeetingServiceTest {
                 USER_ID,
                 MembershipStatus.ACTIVE
         )).thenReturn(true);
+    }
+
+    private void setUpLockedMeetingAndActiveMember(Meeting meeting, TeamMember teamMember) {
+        when(meetingRepository.findByIdForUpdateAndDeletedAtIsNull(100L)).thenReturn(Optional.of(meeting));
+        when(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(Optional.of(teamMember));
+    }
+
+    private TeamMember teamMember(Long teamMemberId, TeamMemberRole role) {
+        TeamMember teamMember = mock(TeamMember.class);
+        when(teamMember.getId()).thenReturn(teamMemberId);
+        when(teamMember.getRole()).thenReturn(role);
+        return teamMember;
     }
 
     private Meeting meeting(
