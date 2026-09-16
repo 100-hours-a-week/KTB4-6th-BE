@@ -3,15 +3,17 @@ package com.backend.meety.domain.auth.service;
 import com.backend.meety.domain.auth.client.OAuthProviderClient;
 import com.backend.meety.domain.auth.dto.LoginResponse;
 import com.backend.meety.domain.auth.dto.OAuthUserInfo;
+import com.backend.meety.domain.auth.dto.RefreshTokenRotation;
+import com.backend.meety.domain.auth.dto.TokenRefreshResult;
 import com.backend.meety.domain.auth.exception.AuthErrorCode;
 import com.backend.meety.domain.auth.exception.AuthException;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.user.service.UserAccountService;
+import com.backend.meety.global.security.AccessTokenBlacklist;
 import com.backend.meety.global.security.JwtTokenProvider;
 import java.util.Map;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DataAccessException;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -22,49 +24,30 @@ public class AuthService {
     private final UserAccountService userAccountService;
     private final RefreshTokenService refreshTokenService;
     private final JwtTokenProvider jwtTokenProvider;
+    private final AccessTokenBlacklist accessTokenBlacklist;
 
     public LoginResponse login(String provider, String authorizationCode) {
-        validateAuthorizationCode(authorizationCode);
         OAuthProviderClient client = findClient(provider);
         OAuthUserInfo userInfo = client.fetchUserInfo(authorizationCode);
-        User user = findOrCreateUser(userInfo);
+        User user = userAccountService.findOrCreate(userInfo.provider(), userInfo.providerUserId());
         String accessToken = jwtTokenProvider.createAccessToken(user.getId());
-        String refreshToken = issueRefreshToken(user);
+        String refreshToken = refreshTokenService.issue(user.getId());
         return new LoginResponse(user.getId(), accessToken, refreshToken);
     }
 
-    private void validateAuthorizationCode(String authorizationCode) {
-        if (authorizationCode == null || authorizationCode.isBlank()) {
-            throw new AuthException(AuthErrorCode.INVALID_AUTHORIZATION_CODE);
-        }
+    public void logout(String accessToken, String refreshToken) {
+        refreshTokenService.revoke(refreshToken);
+        accessTokenBlacklist.register(accessToken);
+    }
+
+    public TokenRefreshResult refresh(String refreshToken) {
+        RefreshTokenRotation rotation = refreshTokenService.rotate(refreshToken);
+        String accessToken = jwtTokenProvider.createAccessToken(rotation.userId());
+        return new TokenRefreshResult(accessToken, rotation.refreshToken());
     }
 
     private OAuthProviderClient findClient(String provider) {
-        OAuthProviderClient client = oAuthProviderClients.get(provider);
-        if (client == null) {
-            throw new AuthException(AuthErrorCode.UNSUPPORTED_OAUTH_PROVIDER);
-        }
-        return client;
-    }
-
-    private User findOrCreateUser(OAuthUserInfo userInfo) {
-        try {
-            try {
-                return userAccountService.findOrCreate(userInfo.provider(), userInfo.providerUserId());
-            } catch (DataIntegrityViolationException e) {
-                return userAccountService.getByProviderAndProviderUserId(
-                        userInfo.provider(), userInfo.providerUserId());
-            }
-        } catch (DataAccessException e) {
-            throw new AuthException(AuthErrorCode.AUTH_PROCESSING_FAILED);
-        }
-    }
-
-    private String issueRefreshToken(User user) {
-        try {
-            return refreshTokenService.issue(user);
-        } catch (DataAccessException e) {
-            throw new AuthException(AuthErrorCode.AUTH_PROCESSING_FAILED);
-        }
+        return Optional.ofNullable(oAuthProviderClients.get(provider))
+                .orElseThrow(() -> new AuthException(AuthErrorCode.UNSUPPORTED_OAUTH_PROVIDER));
     }
 }

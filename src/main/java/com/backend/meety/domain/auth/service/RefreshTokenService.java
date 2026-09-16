@@ -1,8 +1,10 @@
 package com.backend.meety.domain.auth.service;
 
+import com.backend.meety.domain.auth.dto.RefreshTokenRotation;
 import com.backend.meety.domain.auth.entity.RefreshToken;
+import com.backend.meety.domain.auth.exception.AuthErrorCode;
+import com.backend.meety.domain.auth.exception.AuthException;
 import com.backend.meety.domain.auth.repository.RefreshTokenRepository;
-import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.global.config.JwtProperties;
 import com.backend.meety.global.security.TokenConstants;
 import java.nio.charset.StandardCharsets;
@@ -27,11 +29,49 @@ public class RefreshTokenService {
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Transactional
-    public String issue(User user) {
+    public String issue(Long userId) {
+        return createToken(userId);
+    }
+
+    @Transactional
+    public RefreshTokenRotation rotate(String rawToken) {
+        String tokenHash = hash(rawToken);
+        RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(tokenHash)
+                .orElseThrow(() -> new AuthException(AuthErrorCode.INVALID_REFRESH_TOKEN));
+        LocalDateTime now = LocalDateTime.now(clock);
+        validateNotExpired(refreshToken, now);
+        markUsed(tokenHash, now);
+        Long userId = refreshToken.getUserId();
+        return new RefreshTokenRotation(userId, createToken(userId));
+    }
+
+    private String createToken(Long userId) {
         String rawToken = generateToken();
         LocalDateTime expiresAt = LocalDateTime.now(clock).plus(jwtProperties.refreshTokenValidity());
-        refreshTokenRepository.save(RefreshToken.of(user, hash(rawToken), expiresAt));
+        refreshTokenRepository.save(RefreshToken.of(userId, hash(rawToken), expiresAt));
         return rawToken;
+    }
+
+    @Transactional
+    public void revoke(String rawToken) {
+        refreshTokenRepository.markUsedIfActive(hash(rawToken), LocalDateTime.now(clock));
+    }
+
+    @Transactional
+    public void revokeAll(Long userId) {
+        refreshTokenRepository.revokeAllByUserId(userId, LocalDateTime.now(clock));
+    }
+
+    private void validateNotExpired(RefreshToken refreshToken, LocalDateTime now) {
+        if (refreshToken.isExpired(now)) {
+            throw new AuthException(AuthErrorCode.EXPIRED_REFRESH_TOKEN);
+        }
+    }
+
+    private void markUsed(String tokenHash, LocalDateTime now) {
+        if (refreshTokenRepository.markUsedIfActive(tokenHash, now) == 0) {
+            throw new AuthException(AuthErrorCode.INVALID_REFRESH_TOKEN);
+        }
     }
 
     private String generateToken() {

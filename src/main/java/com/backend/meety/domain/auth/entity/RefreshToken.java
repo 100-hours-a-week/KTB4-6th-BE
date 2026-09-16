@@ -1,15 +1,11 @@
 package com.backend.meety.domain.auth.entity;
 
-import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.global.entity.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
@@ -26,9 +22,8 @@ public class RefreshToken extends BaseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
 
     @Column(name = "token_hash", nullable = false, unique = true, length = 64)
     private String tokenHash;
@@ -36,13 +31,17 @@ public class RefreshToken extends BaseEntity {
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
 
-    private RefreshToken(User user, String tokenHash, LocalDateTime expiresAt) {
-        this.user = user;
+    private RefreshToken(Long userId, String tokenHash, LocalDateTime expiresAt) {
+        this.userId = userId;
         this.tokenHash = tokenHash;
         this.expiresAt = expiresAt;
     }
 
-    public static RefreshToken of(User user, String tokenHash, LocalDateTime expiresAt) {
-        return new RefreshToken(user, tokenHash, expiresAt);
+    public static RefreshToken of(Long userId, String tokenHash, LocalDateTime expiresAt) {
+        return new RefreshToken(userId, tokenHash, expiresAt);
+    }
+
+    public boolean isExpired(LocalDateTime now) {
+        return expiresAt.isBefore(now);
     }
 }
