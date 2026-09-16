@@ -19,5 +19,8 @@ spring:
         format_sql: true
     show-sql: true
 
+kakao:
+  admin-key: ${KAKAO_ADMIN_KEY:local-kakao-admin-key}
+
 jwt:
   secret: ${JWT_SECRET:local-dev-secret-key-meety-32bytes!!}

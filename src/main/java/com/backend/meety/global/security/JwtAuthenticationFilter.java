@@ -21,6 +21,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final AccessTokenBlacklist accessTokenBlacklist;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -46,6 +47,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     private void authenticate(HttpServletRequest request, String token) {
+        if (accessTokenBlacklist.contains(token)) {
+            request.setAttribute(TokenConstants.AUTH_FAILURE_ATTRIBUTE, AuthErrorCode.INVALID_ACCESS_TOKEN);
+            return;
+        }
         try {
             Claims claims = jwtTokenProvider.validateAndDecode(token);
             Long userId = Long.valueOf(claims.getSubject());

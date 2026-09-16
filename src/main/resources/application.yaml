@@ -22,6 +22,10 @@ spring:
             user-info-uri: https://kapi.kakao.com/v2/user/me
             user-name-attribute: id
 
+kakao:
+  admin-key: ${KAKAO_ADMIN_KEY}
+  unlink-uri: https://kapi.kakao.com/v1/user/unlink
+
 jwt:
   secret: ${JWT_SECRET}
   access-token-validity: 30m

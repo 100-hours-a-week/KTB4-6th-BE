@@ -14,6 +14,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final AccessTokenBlacklist accessTokenBlacklist;
     private final CustomAuthenticationEntryPoint authenticationEntryPoint;
 
     @Bean
@@ -28,7 +29,7 @@ public class SecurityConfig {
                         .requestMatchers(PermitAllUrls.URLS).permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(authenticationEntryPoint))
-                .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider),
+                .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider, accessTokenBlacklist),
                         UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

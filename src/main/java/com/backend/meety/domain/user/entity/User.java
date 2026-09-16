@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -22,5 +23,17 @@ public class User extends BaseEntity {
 
     public static User create() {
         return new User();
+    }
+
+    public void withdraw(LocalDateTime withdrawnAt) {
+        markDeleted(withdrawnAt);
+    }
+
+    public void reactivate() {
+        restoreDeleted();
+    }
+
+    public boolean isWithdrawn() {
+        return getDeletedAt() != null;
     }
 }

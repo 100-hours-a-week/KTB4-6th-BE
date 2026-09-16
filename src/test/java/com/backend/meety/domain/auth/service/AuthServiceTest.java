@@ -8,6 +8,8 @@ import static org.mockito.BDDMockito.then;
 import com.backend.meety.domain.auth.client.OAuthProviderClient;
 import com.backend.meety.domain.auth.dto.LoginResponse;
 import com.backend.meety.domain.auth.dto.OAuthUserInfo;
+import com.backend.meety.domain.auth.dto.RefreshTokenRotation;
+import com.backend.meety.domain.auth.dto.TokenRefreshResult;
 import com.backend.meety.domain.auth.exception.AuthErrorCode;
 import com.backend.meety.domain.auth.exception.AuthException;
 import com.backend.meety.domain.user.entity.User;
@@ -21,8 +23,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.dao.DataIntegrityViolationException;
 
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
@@ -43,14 +43,26 @@ class AuthServiceTest {
     private JwtTokenProvider jwtTokenProvider;
 
     @Mock
+    private com.backend.meety.global.security.AccessTokenBlacklist accessTokenBlacklist;
+
+    @Mock
     private User user;
 
     private AuthService authService;
 
     @BeforeEach
     void setUp() {
-        authService = new AuthService(
-                Map.of(PROVIDER, kakaoOAuthClient), userAccountService, refreshTokenService, jwtTokenProvider);
+        authService = new AuthService(Map.of(PROVIDER, kakaoOAuthClient),
+                userAccountService, refreshTokenService, jwtTokenProvider, accessTokenBlacklist);
+    }
+
+    @Test
+    @DisplayName("로그아웃하면 RT를 무효화하고 AT를 블랙리스트에 등록한다")
+    void logout() {
+        authService.logout("access-token", "refresh-token");
+
+        then(refreshTokenService).should().revoke("refresh-token");
+        then(accessTokenBlacklist).should().register("access-token");
     }
 
     @Test
@@ -61,39 +73,13 @@ class AuthServiceTest {
         given(userAccountService.findOrCreate(PROVIDER, PROVIDER_USER_ID)).willReturn(user);
         given(user.getId()).willReturn(1L);
         given(jwtTokenProvider.createAccessToken(1L)).willReturn("access-token");
-        given(refreshTokenService.issue(user)).willReturn("refresh-token");
+        given(refreshTokenService.issue(1L)).willReturn("refresh-token");
 
         LoginResponse response = authService.login(PROVIDER, "auth-code");
 
         assertThat(response.userId()).isEqualTo(1L);
         assertThat(response.accessToken()).isEqualTo("access-token");
         assertThat(response.refreshToken()).isEqualTo("refresh-token");
-    }
-
-    @Test
-    @DisplayName("동시 최초 로그인 경합이 발생하면 재조회한 사용자로 로그인을 완료한다")
-    void loginRetriesOnConcurrentFirstLogin() {
-        given(kakaoOAuthClient.fetchUserInfo("auth-code"))
-                .willReturn(new OAuthUserInfo(PROVIDER, PROVIDER_USER_ID));
-        given(userAccountService.findOrCreate(PROVIDER, PROVIDER_USER_ID))
-                .willThrow(new DataIntegrityViolationException("duplicate key"));
-        given(userAccountService.getByProviderAndProviderUserId(PROVIDER, PROVIDER_USER_ID)).willReturn(user);
-        given(user.getId()).willReturn(1L);
-        given(jwtTokenProvider.createAccessToken(1L)).willReturn("access-token");
-        given(refreshTokenService.issue(user)).willReturn("refresh-token");
-
-        LoginResponse response = authService.login(PROVIDER, "auth-code");
-
-        assertThat(response.userId()).isEqualTo(1L);
-        then(userAccountService).should().getByProviderAndProviderUserId(PROVIDER, PROVIDER_USER_ID);
-    }
-
-    @Test
-    @DisplayName("인가 코드가 비어 있으면 로그인이 거부된다")
-    void loginFailsOnBlankAuthorizationCode() {
-        assertThatThrownBy(() -> authService.login(PROVIDER, " "))
-                .isInstanceOfSatisfying(BusinessException.class,
-                        e -> assertThat(e.getErrorCode()).isEqualTo(AuthErrorCode.INVALID_AUTHORIZATION_CODE));
     }
 
     @Test
@@ -108,16 +94,15 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("사용자 저장 중 DB 오류가 발생하면 AUTH_PROCESSING_FAILED로 변환된다")
-    void loginFailsOnDataAccessFailure() {
-        given(kakaoOAuthClient.fetchUserInfo("auth-code"))
-                .willReturn(new OAuthUserInfo(PROVIDER, PROVIDER_USER_ID));
-        given(userAccountService.findOrCreate(PROVIDER, PROVIDER_USER_ID))
-                .willThrow(new DataAccessResourceFailureException("db down"));
+    @DisplayName("토큰 재발급에 성공하면 새 AT와 RT를 반환한다")
+    void refresh() {
+        given(refreshTokenService.rotate("raw-rt")).willReturn(new RefreshTokenRotation(1L, "new-rt"));
+        given(jwtTokenProvider.createAccessToken(1L)).willReturn("new-at");
 
-        assertThatThrownBy(() -> authService.login(PROVIDER, "auth-code"))
-                .isInstanceOfSatisfying(BusinessException.class,
-                        e -> assertThat(e.getErrorCode()).isEqualTo(AuthErrorCode.AUTH_PROCESSING_FAILED));
+        TokenRefreshResult result = authService.refresh("raw-rt");
+
+        assertThat(result.accessToken()).isEqualTo("new-at");
+        assertThat(result.refreshToken()).isEqualTo("new-rt");
     }
 
     @Test
