@@ -44,8 +44,7 @@ public class MeetingService {
 
     private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
     private static final long DAILY_MEETING_LIMIT = 5L;
-    private static final int DEFAULT_PAGE_SIZE = 20;
-    private static final int MAX_PAGE_SIZE = 50;
+    private static final int DATE_GROUP_LIMIT = 5;
 
     private final MeetingRepository meetingRepository;
     private final TeamRepository teamRepository;
@@ -157,31 +156,36 @@ public class MeetingService {
             String keyword,
             LocalDate from,
             LocalDate to,
-            String cursor,
-            Integer size
+            String cursor
     ) {
         validateTeamExists(teamId);
         validateTeamMembership(userId, teamId, MeetingErrorCode.TEAM_MEMBERSHIP_REQUIRED);
         validateDateRange(from, to);
 
-        int pageSize = resolvePageSize(size);
         MeetingCursor meetingCursor = MeetingCursor.decode(cursor);
         String normalizedKeyword = normalizeKeyword(keyword);
 
-        List<Meeting> meetings = meetingRepository.findMeetingsByCondition(new MeetingListSearchCondition(
+        MeetingListSearchCondition condition = new MeetingListSearchCondition(
                 teamId,
                 normalizedKeyword,
                 toStartOfDay(from),
                 toExclusiveStartOfDay(to),
-                meetingCursor,
-                pageSize + 1
-        ));
+                meetingCursor == null ? null : meetingCursor.date(),
+                DATE_GROUP_LIMIT + 1
+        );
 
-        boolean hasNext = meetings.size() > pageSize;
-        List<Meeting> pageMeetings = hasNext ? meetings.subList(0, pageSize) : meetings;
-        String nextCursor = hasNext ? toCursor(pageMeetings.get(pageMeetings.size() - 1)) : null;
+        List<LocalDate> meetingDates = meetingRepository.findMeetingDatesByCondition(condition);
+        boolean hasNext = meetingDates.size() > DATE_GROUP_LIMIT;
+        List<LocalDate> pageDates = hasNext ? meetingDates.subList(0, DATE_GROUP_LIMIT) : meetingDates;
 
-        return new MeetingListResponse(toGroups(pageMeetings), nextCursor, hasNext);
+        if (pageDates.isEmpty()) {
+            return new MeetingListResponse(List.of(), null, false);
+        }
+
+        List<Meeting> meetings = meetingRepository.findMeetingsByDates(condition, pageDates);
+        String nextCursor = hasNext ? new MeetingCursor(pageDates.get(pageDates.size() - 1)).encode() : null;
+
+        return new MeetingListResponse(toGroups(meetings), nextCursor, hasNext);
     }
 
     @Transactional(readOnly = true)
@@ -267,16 +271,6 @@ public class MeetingService {
         }
     }
 
-    private int resolvePageSize(Integer size) {
-        if (size == null) {
-            return DEFAULT_PAGE_SIZE;
-        }
-        if (size <= 0 || size > MAX_PAGE_SIZE) {
-            throw new MeetingException(MeetingErrorCode.INVALID_PAGE_SIZE);
-        }
-        return size;
-    }
-
     private String normalizeKeyword(String keyword) {
         if (keyword == null) {
             return null;
@@ -347,10 +341,6 @@ public class MeetingService {
         }
 
         return groups;
-    }
-
-    private String toCursor(Meeting meeting) {
-        return new MeetingCursor(effectiveStartAt(meeting), meeting.getId()).encode();
     }
 
     private LocalDateTime effectiveStartAt(Meeting meeting) {
