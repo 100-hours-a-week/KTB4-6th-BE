@@ -10,13 +10,17 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "team_invitation_codes")
+@Table(name = "team_invitation_codes",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_team_invitation_codes_code",
+                columnNames = "code"))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class TeamInvitationCode extends BaseEntity {
 
@@ -30,4 +34,13 @@ public class TeamInvitationCode extends BaseEntity {
 
     @Column(name = "code", nullable = false, length = 8, columnDefinition = "CHAR(8)")
     private String code;
+
+    private TeamInvitationCode(Team team, String code) {
+        this.team = team;
+        this.code = code;
+    }
+
+    public static TeamInvitationCode create(Team team, String code) {
+        return new TeamInvitationCode(team, code);
+    }
 }
