@@ -2,6 +2,9 @@ package com.backend.meety.domain.meeting.service;
 
 import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
+import com.backend.meety.domain.meeting.dto.MeetingCalendarDateResponse;
+import com.backend.meety.domain.meeting.dto.MeetingCalendarItemResponse;
+import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
 import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
 import com.backend.meety.domain.meeting.dto.MeetingGroupResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListItemResponse;
@@ -21,7 +24,10 @@ import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.entity.TeamMemberRole;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.team.repository.TeamRepository;
+import com.backend.meety.global.exception.BusinessException;
+import com.backend.meety.global.exception.CommonErrorCode;
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -38,8 +44,7 @@ public class MeetingService {
 
     private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
     private static final long DAILY_MEETING_LIMIT = 5L;
-    private static final int DEFAULT_PAGE_SIZE = 20;
-    private static final int MAX_PAGE_SIZE = 50;
+    private static final int DATE_GROUP_LIMIT = 5;
 
     private final MeetingRepository meetingRepository;
     private final TeamRepository teamRepository;
@@ -151,31 +156,52 @@ public class MeetingService {
             String keyword,
             LocalDate from,
             LocalDate to,
-            String cursor,
-            Integer size
+            String cursor
     ) {
         validateTeamExists(teamId);
         validateTeamMembership(userId, teamId, MeetingErrorCode.TEAM_MEMBERSHIP_REQUIRED);
         validateDateRange(from, to);
 
-        int pageSize = resolvePageSize(size);
         MeetingCursor meetingCursor = MeetingCursor.decode(cursor);
         String normalizedKeyword = normalizeKeyword(keyword);
 
-        List<Meeting> meetings = meetingRepository.findMeetingsByCondition(new MeetingListSearchCondition(
+        MeetingListSearchCondition condition = new MeetingListSearchCondition(
                 teamId,
                 normalizedKeyword,
                 toStartOfDay(from),
                 toExclusiveStartOfDay(to),
-                meetingCursor,
-                pageSize + 1
-        ));
+                meetingCursor == null ? null : meetingCursor.date(),
+                DATE_GROUP_LIMIT + 1
+        );
 
-        boolean hasNext = meetings.size() > pageSize;
-        List<Meeting> pageMeetings = hasNext ? meetings.subList(0, pageSize) : meetings;
-        String nextCursor = hasNext ? toCursor(pageMeetings.get(pageMeetings.size() - 1)) : null;
+        List<LocalDate> meetingDates = meetingRepository.findMeetingDatesByCondition(condition);
+        boolean hasNext = meetingDates.size() > DATE_GROUP_LIMIT;
+        List<LocalDate> pageDates = hasNext ? meetingDates.subList(0, DATE_GROUP_LIMIT) : meetingDates;
 
-        return new MeetingListResponse(toGroups(pageMeetings), nextCursor, hasNext);
+        if (pageDates.isEmpty()) {
+            return new MeetingListResponse(List.of(), null, false);
+        }
+
+        List<Meeting> meetings = meetingRepository.findMeetingsByDates(condition, pageDates);
+        String nextCursor = hasNext ? new MeetingCursor(pageDates.get(pageDates.size() - 1)).encode() : null;
+
+        return new MeetingListResponse(toGroups(meetings), nextCursor, hasNext);
+    }
+
+    @Transactional(readOnly = true)
+    public MeetingCalendarResponse getMeetingCalendar(Long userId, Long teamId, Integer year, Integer month) {
+        validateTeamExists(teamId);
+        validateTeamMembership(userId, teamId, MeetingErrorCode.TEAM_MEMBERSHIP_REQUIRED);
+
+        LocalDateTime monthStart = toMonthStart(year, month);
+        LocalDateTime nextMonthStart = monthStart.toLocalDate().plusMonths(1).atStartOfDay();
+        List<Meeting> meetings = meetingRepository.findCalendarMeetingsByTeamIdAndEffectiveStartAtBetween(
+                teamId,
+                monthStart,
+                nextMonthStart
+        );
+
+        return new MeetingCalendarResponse(year, month, toCalendarDates(meetings));
     }
 
     private void validateMeetingAccess(Long userId, Long teamId) {
@@ -245,16 +271,6 @@ public class MeetingService {
         }
     }
 
-    private int resolvePageSize(Integer size) {
-        if (size == null) {
-            return DEFAULT_PAGE_SIZE;
-        }
-        if (size <= 0 || size > MAX_PAGE_SIZE) {
-            throw new MeetingException(MeetingErrorCode.INVALID_PAGE_SIZE);
-        }
-        return size;
-    }
-
     private String normalizeKeyword(String keyword) {
         if (keyword == null) {
             return null;
@@ -273,6 +289,36 @@ public class MeetingService {
 
     private LocalDateTime toExclusiveStartOfDay(LocalDate date) {
         return date == null ? null : date.plusDays(1).atStartOfDay();
+    }
+
+    private LocalDateTime toMonthStart(Integer year, Integer month) {
+        try {
+            return LocalDate.of(year, month, 1).atStartOfDay();
+        } catch (DateTimeException e) {
+            throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
+        }
+    }
+
+    private List<MeetingCalendarDateResponse> toCalendarDates(List<Meeting> meetings) {
+        List<MeetingCalendarDateResponse> dates = new ArrayList<>();
+        LocalDate currentDate = null;
+        List<MeetingCalendarItemResponse> currentMeetings = new ArrayList<>();
+
+        for (Meeting meeting : meetings) {
+            LocalDate meetingDate = effectiveStartAt(meeting).toLocalDate();
+            if (currentDate != null && !currentDate.equals(meetingDate)) {
+                dates.add(new MeetingCalendarDateResponse(currentDate, currentMeetings));
+                currentMeetings = new ArrayList<>();
+            }
+            currentDate = meetingDate;
+            currentMeetings.add(MeetingCalendarItemResponse.from(meeting));
+        }
+
+        if (currentDate != null) {
+            dates.add(new MeetingCalendarDateResponse(currentDate, currentMeetings));
+        }
+
+        return dates;
     }
 
     private List<MeetingGroupResponse> toGroups(List<Meeting> meetings) {
@@ -295,10 +341,6 @@ public class MeetingService {
         }
 
         return groups;
-    }
-
-    private String toCursor(Meeting meeting) {
-        return new MeetingCursor(effectiveStartAt(meeting), meeting.getId()).encode();
     }
 
     private LocalDateTime effectiveStartAt(Meeting meeting) {

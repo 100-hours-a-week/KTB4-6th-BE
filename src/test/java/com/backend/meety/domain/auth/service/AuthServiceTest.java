@@ -14,8 +14,10 @@ import com.backend.meety.domain.auth.exception.AuthErrorCode;
 import com.backend.meety.domain.auth.exception.AuthException;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.user.service.UserAccountService;
+import com.backend.meety.global.config.JwtProperties;
 import com.backend.meety.global.exception.BusinessException;
 import com.backend.meety.global.security.JwtTokenProvider;
+import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -29,6 +31,8 @@ class AuthServiceTest {
 
     private static final String PROVIDER = "kakao";
     private static final String PROVIDER_USER_ID = "123456789";
+    private static final JwtProperties JWT_PROPERTIES =
+            new JwtProperties("test-secret", Duration.ofMinutes(30), Duration.ofDays(14));
 
     @Mock
     private OAuthProviderClient kakaoOAuthClient;
@@ -53,7 +57,8 @@ class AuthServiceTest {
     @BeforeEach
     void setUp() {
         authService = new AuthService(Map.of(PROVIDER, kakaoOAuthClient),
-                userAccountService, refreshTokenService, jwtTokenProvider, accessTokenBlacklist);
+                userAccountService, refreshTokenService, jwtTokenProvider, accessTokenBlacklist,
+                JWT_PROPERTIES);
     }
 
     @Test
@@ -80,6 +85,8 @@ class AuthServiceTest {
         assertThat(response.userId()).isEqualTo(1L);
         assertThat(response.accessToken()).isEqualTo("access-token");
         assertThat(response.refreshToken()).isEqualTo("refresh-token");
+        assertThat(response.accessTokenExpiresIn()).isEqualTo(1800L);
+        assertThat(response.refreshTokenExpiresIn()).isEqualTo(1209600L);
     }
 
     @Test
@@ -103,6 +110,8 @@ class AuthServiceTest {
 
         assertThat(result.accessToken()).isEqualTo("new-at");
         assertThat(result.refreshToken()).isEqualTo("new-rt");
+        assertThat(result.accessTokenExpiresIn()).isEqualTo(1800L);
+        assertThat(result.refreshTokenExpiresIn()).isEqualTo(1209600L);
     }
 
     @Test

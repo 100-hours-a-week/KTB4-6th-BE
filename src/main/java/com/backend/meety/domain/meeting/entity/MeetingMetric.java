@@ -12,6 +12,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -36,4 +37,7 @@ public class MeetingMetric extends BaseEntity {
 
     @Column(name = "metrics", nullable = false, columnDefinition = "JSON")
     private String metrics;
+
+    @Column(name = "speech_balance_score", precision = 5, scale = 2, columnDefinition = "DECIMAL(5,2)")
+    private BigDecimal speechBalanceScore;
 }
