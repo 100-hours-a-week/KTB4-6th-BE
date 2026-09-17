@@ -8,14 +8,13 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
+import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamJoinRequest;
 import com.backend.meety.domain.team.dto.TeamMemberListResponse;
-import com.backend.meety.domain.team.dto.TeamJoinResponse;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamInvitationCode;
 import com.backend.meety.domain.team.entity.TeamMember;
-import com.backend.meety.domain.team.entity.TeamMemberRole;
 import com.backend.meety.domain.team.exception.TeamErrorCode;
 import com.backend.meety.domain.team.repository.TeamBlockRepository;
 import com.backend.meety.domain.team.repository.TeamInvitationCodeRepository;
@@ -94,13 +93,10 @@ class TeamMemberServiceTest {
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
 
-        TeamJoinResponse response = teamMemberService.join(1L, REQUEST);
+        MyTeamResponse response = teamMemberService.join(1L, REQUEST);
 
+        assertThat(response.hasActiveTeam()).isTrue();
         assertThat(response.teamId()).isEqualTo(7L);
-        assertThat(response.teamName()).isEqualTo("미티팀");
-        assertThat(response.displayName()).isEqualTo("hoon");
-        assertThat(response.role()).isEqualTo(TeamMemberRole.MEMBER);
-        assertThat(response.membershipStatus()).isEqualTo(MembershipStatus.ACTIVE);
         then(teamInvitationCodeRepository).should(times(2)).findByCodeAndDeletedAtIsNull(CODE);
     }
 
