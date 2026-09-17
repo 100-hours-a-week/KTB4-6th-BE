@@ -33,12 +33,6 @@ public class TeamMemberService {
     private final TeamInvitationCodeRepository teamInvitationCodeRepository;
     private final TeamBlockRepository teamBlockRepository;
 
-    /*
-     * 잠금 순서 규칙: user 행 → team 행. 멤버십을 변경하는 모든 유스케이스가 이 순서를 지켜야 데드락이 없다.
-     * READ_COMMITTED: 두 잠금 사이에 일반 조회(코드로 팀 식별)가 끼므로, REPEATABLE READ면
-     * 그 시점 스냅샷이 고정되어 team 잠금 획득 후의 정원·이름·코드 검증이 낡은 상태를 읽는다.
-     * 문장마다 최신 커밋을 읽어야 잠금 직렬화가 검증에 반영된다.
-     */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public TeamJoinResponse join(Long userId, TeamJoinRequest request) {
         User user = userRepository.findByIdForUpdate(userId)
