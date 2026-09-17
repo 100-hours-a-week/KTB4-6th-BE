@@ -104,6 +104,22 @@ class TeamServiceTest {
     }
 
     @Test
+    @DisplayName("오늘 팀을 나간 사용자는 팀을 생성할 수 없다")
+    void failOnTeamLeftToday() {
+        given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(User.create()));
+        given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(false);
+        given(teamMemberRepository.existsByUserIdAndMembershipStatusAndDeletedAtGreaterThanEqual(
+                1L, MembershipStatus.LEFT, LocalDateTime.of(2026, 9, 17, 0, 0)))
+                .willReturn(true);
+
+        assertThatThrownBy(() -> teamService.create(1L, new TeamCreateRequest("Meety Team", "jay")))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_CREATE_DAILY_LIMIT_EXCEEDED));
+        then(teamRepository).should(never()).save(any(Team.class));
+    }
+
+    @Test
     @DisplayName("사용자가 존재하지 않으면 팀을 생성할 수 없다")
     void failOnUnknownUser() {
         given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.empty());

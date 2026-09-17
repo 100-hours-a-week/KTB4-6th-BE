@@ -1,6 +1,7 @@
 package com.backend.meety.domain.team.service;
 
 import com.backend.meety.domain.team.dto.TeamJoinRequest;
+import com.backend.meety.domain.team.dto.TeamMemberListResponse;
 import com.backend.meety.domain.team.dto.TeamJoinResponse;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
@@ -14,6 +15,9 @@ import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.team.repository.TeamRepository;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.user.repository.UserRepository;
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
@@ -32,6 +36,7 @@ public class TeamMemberService {
     private final TeamMemberRepository teamMemberRepository;
     private final TeamInvitationCodeRepository teamInvitationCodeRepository;
     private final TeamBlockRepository teamBlockRepository;
+    private final Clock clock;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public TeamJoinResponse join(Long userId, TeamJoinRequest request) {
@@ -51,6 +56,48 @@ public class TeamMemberService {
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.TEAM_MEMBERSHIP_CREATE_FAILED);
         }
+    }
+
+    @Transactional(readOnly = true)
+    public TeamMemberListResponse getMembers(Long userId, Long teamId) {
+        validateActiveMembership(teamId, userId);
+        try {
+            List<TeamMember> members = teamMemberRepository
+                    .findAllActiveOrderByLeaderFirst(teamId, MembershipStatus.ACTIVE);
+            return TeamMemberListResponse.from(members);
+        } catch (DataAccessException e) {
+            throw new TeamException(TeamErrorCode.TEAM_MEMBER_LOOKUP_FAILED);
+        }
+    }
+
+    @Transactional
+    public void leave(Long userId, Long teamId) {
+        Team team = teamRepository.findByIdForUpdate(teamId)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
+        if (team.isDeleted()) {
+            throw new TeamException(TeamErrorCode.TEAM_NOT_FOUND);
+        }
+        TeamMember teamMember = teamMemberRepository
+                .findByTeamIdAndUserIdAndMembershipStatus(teamId, userId, MembershipStatus.ACTIVE)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_MEMBERSHIP_REQUIRED));
+        if (teamMember.isLeader()) {
+            throw new TeamException(TeamErrorCode.LEADER_CANNOT_LEAVE_TEAM);
+        }
+        teamMember.leave(LocalDateTime.now(clock));
+        // TODO: 명시적 flush는 커밋 시점 UPDATE 실패를 TEAM_LEAVE_FAILED로 번역하기 위한 장치.
+        //  이 에러 코드를 유지할지(= flush 유지) 공통 500으로 갈지(= flush 제거) 팀 논의 필요
+        try {
+            teamMemberRepository.flush();
+        } catch (DataAccessException e) {
+            throw new TeamException(TeamErrorCode.TEAM_LEAVE_FAILED);
+        }
+    }
+
+    private void validateActiveMembership(Long teamId, Long userId) {
+        teamRepository.findByIdAndDeletedAtIsNull(teamId)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
+        teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(teamId, userId, MembershipStatus.ACTIVE)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_MEMBERSHIP_REQUIRED));
     }
 
     private Team resolveTeamByCode(String code) {

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
 import com.backend.meety.domain.team.dto.TeamJoinRequest;
+import com.backend.meety.domain.team.dto.TeamMemberListResponse;
 import com.backend.meety.domain.team.dto.TeamJoinResponse;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
@@ -23,13 +24,16 @@ import com.backend.meety.domain.team.repository.TeamRepository;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.user.repository.UserRepository;
 import com.backend.meety.global.exception.BusinessException;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -40,6 +44,8 @@ class TeamMemberServiceTest {
 
     private static final String CODE = "ABCD1234";
     private static final TeamJoinRequest REQUEST = new TeamJoinRequest("abcd1234", "hoon");
+    private static final Clock FIXED_CLOCK =
+            Clock.fixed(Instant.parse("2026-09-17T03:00:00Z"), ZoneId.of("Asia/Seoul"));
 
     @Mock
     private UserRepository userRepository;
@@ -56,7 +62,6 @@ class TeamMemberServiceTest {
     @Mock
     private TeamBlockRepository teamBlockRepository;
 
-    @InjectMocks
     private TeamMemberService teamMemberService;
 
     private User user;
@@ -65,6 +70,8 @@ class TeamMemberServiceTest {
 
     @BeforeEach
     void setUp() {
+        teamMemberService = new TeamMemberService(userRepository, teamRepository,
+                teamMemberRepository, teamInvitationCodeRepository, teamBlockRepository, FIXED_CLOCK);
         user = User.create();
         team = Team.create("미티팀");
         ReflectionTestUtils.setField(team, "id", 7L);
@@ -239,5 +246,110 @@ class TeamMemberServiceTest {
         assertThatThrownBy(() -> teamMemberService.join(1L, REQUEST))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_MEMBERSHIP_CREATE_FAILED));
+    }
+
+    @Test
+    @DisplayName("팀원은 활성 팀원 목록을 가입순으로 조회한다")
+    void getMembers() {
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        TeamMember member = TeamMember.createMember(User.create(), team, "hoon");
+        given(teamRepository.findByIdAndDeletedAtIsNull(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamMemberRepository.findAllActiveOrderByLeaderFirst(7L, MembershipStatus.ACTIVE))
+                .willReturn(List.of(leader, member));
+
+        TeamMemberListResponse response = teamMemberService.getMembers(1L, 7L);
+
+        assertThat(response.members()).hasSize(2);
+        assertThat(response.members().get(0).displayName()).isEqualTo("leader");
+        assertThat(response.members().get(1).displayName()).isEqualTo("hoon");
+    }
+
+    @Test
+    @DisplayName("팀원이 아니면 팀원 목록을 조회할 수 없다")
+    void getMembersFailOnNonMember() {
+        given(teamRepository.findByIdAndDeletedAtIsNull(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamMemberService.getMembers(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_MEMBERSHIP_REQUIRED));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 팀의 팀원 목록은 조회할 수 없다")
+    void getMembersFailOnUnknownTeam() {
+        given(teamRepository.findByIdAndDeletedAtIsNull(7L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamMemberService.getMembers(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("목록 조회 중 DB 오류가 나면 팀원 목록 조회에 실패한다")
+    void getMembersFailOnDataAccessError() {
+        given(teamRepository.findByIdAndDeletedAtIsNull(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(TeamMember.createLeader(user, team, "leader")));
+        given(teamMemberRepository.findAllActiveOrderByLeaderFirst(7L, MembershipStatus.ACTIVE))
+                .willThrow(new DataIntegrityViolationException("select failed"));
+
+        assertThatThrownBy(() -> teamMemberService.getMembers(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_MEMBER_LOOKUP_FAILED));
+    }
+
+    @Test
+    @DisplayName("팀원이 나가면 멤버십이 LEFT로 바뀌고 떠난 시각이 기록된다")
+    void leave() {
+        TeamMember member = TeamMember.createMember(user, team, "hoon");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(member));
+
+        teamMemberService.leave(1L, 7L);
+
+        assertThat(member.getMembershipStatus()).isEqualTo(MembershipStatus.LEFT);
+        assertThat(member.getDeletedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("팀장은 팀을 나갈 수 없다")
+    void leaveFailOnLeader() {
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+
+        assertThatThrownBy(() -> teamMemberService.leave(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.LEADER_CANNOT_LEAVE_TEAM));
+        assertThat(leader.getMembershipStatus()).isEqualTo(MembershipStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("팀원이 아니면 팀을 나갈 수 없다")
+    void leaveFailOnNonMember() {
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamMemberService.leave(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_MEMBERSHIP_REQUIRED));
+    }
+
+    @Test
+    @DisplayName("삭제된 팀에서는 나가기 요청이 실패한다")
+    void leaveFailOnDeletedTeam() {
+        ReflectionTestUtils.setField(team, "deletedAt", LocalDateTime.of(2026, 9, 16, 10, 0));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+
+        assertThatThrownBy(() -> teamMemberService.leave(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
     }
 }

@@ -14,6 +14,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -67,5 +68,10 @@ public class TeamMember extends BaseEntity {
 
     public boolean isLeader() {
         return role == TeamMemberRole.LEADER;
+    }
+
+    public void leave(LocalDateTime leftAt) {
+        this.membershipStatus = MembershipStatus.LEFT;
+        markDeleted(leftAt);
     }
 }

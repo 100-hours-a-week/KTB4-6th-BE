@@ -45,6 +45,7 @@ public class TeamService {
         User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new TeamException(TeamErrorCode.USER_NOT_FOUND));
         validateNoActiveTeam(userId);
+        validateNoTeamLeftToday(userId);
         try {
             Team team = teamRepository.save(Team.create(request.name()));
             TeamMember leader = teamMemberRepository.save(
@@ -122,6 +123,14 @@ public class TeamService {
     private void validateNoActiveTeam(Long userId) {
         if (teamMemberRepository.existsByUserIdAndMembershipStatus(userId, MembershipStatus.ACTIVE)) {
             throw new TeamException(TeamErrorCode.ACTIVE_TEAM_ALREADY_EXISTS);
+        }
+    }
+
+    private void validateNoTeamLeftToday(Long userId) {
+        LocalDateTime startOfToday = LocalDate.now(clock.withZone(KST_ZONE_ID)).atStartOfDay();
+        if (teamMemberRepository.existsByUserIdAndMembershipStatusAndDeletedAtGreaterThanEqual(
+                userId, MembershipStatus.LEFT, startOfToday)) {
+            throw new TeamException(TeamErrorCode.TEAM_CREATE_DAILY_LIMIT_EXCEEDED);
         }
     }
 
