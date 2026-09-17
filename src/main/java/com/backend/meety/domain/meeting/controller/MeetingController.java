@@ -2,6 +2,7 @@ package com.backend.meety.domain.meeting.controller;
 
 import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
+import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
 import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
 import com.backend.meety.domain.meeting.dto.MeetingParticipantListResponse;
@@ -12,6 +13,9 @@ import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
 import com.backend.meety.global.response.ApiResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -27,7 +31,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
 
+@Validated
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/v1")
@@ -66,6 +72,20 @@ public class MeetingController {
             @RequestParam(required = false) Integer size
     ) {
         MeetingListResponse response = meetingService.getMeetings(userId, teamId, keyword, from, to, cursor, size);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @GetMapping("/teams/{teamId}/meeting-calendar")
+    public ResponseEntity<ApiResponse<MeetingCalendarResponse>> getMeetingCalendar(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long teamId,
+            @RequestParam @NotNull(message = "조회 연도를 입력해주세요.") Integer year,
+            @RequestParam @NotNull(message = "조회 월을 입력해주세요.")
+            @Min(value = 1, message = "조회 월은 1월 이상이어야 합니다.")
+            @Max(value = 12, message = "조회 월은 12월 이하이어야 합니다.")
+            Integer month
+    ) {
+        MeetingCalendarResponse response = meetingService.getMeetingCalendar(userId, teamId, year, month);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

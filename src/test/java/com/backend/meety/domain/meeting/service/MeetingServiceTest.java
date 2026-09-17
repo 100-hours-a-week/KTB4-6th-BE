@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
+import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
 import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
@@ -610,6 +611,153 @@ class MeetingServiceTest {
                 .isInstanceOf(MeetingException.class)
                 .extracting("errorCode")
                 .isEqualTo(MeetingErrorCode.INVALID_CURSOR);
+    }
+
+    @Test
+    @DisplayName("ACTIVE 팀원은 캘린더를 조회할 수 있고 월 경계를 전달한다")
+    void getMeetingCalendar() {
+        when(teamRepository.existsById(TEAM_ID)).thenReturn(true);
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(true);
+        Meeting first = meeting(101L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 3, 9, 0), null);
+        Meeting second = meeting(102L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 18, 10, 0), null);
+        when(meetingRepository.findCalendarMeetingsByTeamIdAndEffectiveStartAtBetween(
+                TEAM_ID,
+                LocalDateTime.of(2026, 9, 1, 0, 0),
+                LocalDateTime.of(2026, 10, 1, 0, 0)
+        )).thenReturn(List.of(first, second));
+
+        MeetingCalendarResponse response = meetingService.getMeetingCalendar(USER_ID, TEAM_ID, 2026, 9);
+
+        assertThat(response.year()).isEqualTo(2026);
+        assertThat(response.month()).isEqualTo(9);
+        assertThat(response.dates()).hasSize(2);
+        assertThat(response.dates()).extracting("date")
+                .containsExactly(LocalDate.of(2026, 9, 3), LocalDate.of(2026, 9, 18));
+        assertThat(response.dates().get(0).meetings()).extracting("meetingId").containsExactly(101L);
+        assertThat(response.dates().get(1).meetings()).extracting("meetingId").containsExactly(102L);
+    }
+
+    @Test
+    @DisplayName("캘린더는 month 1과 12의 다음 달 경계를 계산한다")
+    void getMeetingCalendarMonthBoundaries() {
+        when(teamRepository.existsById(TEAM_ID)).thenReturn(true);
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(true);
+        when(meetingRepository.findCalendarMeetingsByTeamIdAndEffectiveStartAtBetween(any(), any(), any()))
+                .thenReturn(List.of());
+
+        meetingService.getMeetingCalendar(USER_ID, TEAM_ID, 2026, 1);
+        meetingService.getMeetingCalendar(USER_ID, TEAM_ID, 2026, 12);
+
+        verify(meetingRepository).findCalendarMeetingsByTeamIdAndEffectiveStartAtBetween(
+                TEAM_ID,
+                LocalDateTime.of(2026, 1, 1, 0, 0),
+                LocalDateTime.of(2026, 2, 1, 0, 0)
+        );
+        verify(meetingRepository).findCalendarMeetingsByTeamIdAndEffectiveStartAtBetween(
+                TEAM_ID,
+                LocalDateTime.of(2026, 12, 1, 0, 0),
+                LocalDateTime.of(2027, 1, 1, 0, 0)
+        );
+    }
+
+    @Test
+    @DisplayName("캘린더는 WAITING은 scheduledAt, IN_PROGRESS와 COMPLETED는 startedAt 기준으로 그룹화한다")
+    void getMeetingCalendarGroupsByEffectiveStartAt() {
+        when(teamRepository.existsById(TEAM_ID)).thenReturn(true);
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(true);
+        Meeting waiting = meeting(101L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 3, 9, 0), null);
+        Meeting inProgress = meeting(102L, MeetingStatus.IN_PROGRESS, LocalDateTime.of(2026, 9, 4, 9, 0),
+                LocalDateTime.of(2026, 9, 3, 10, 0));
+        Meeting completed = meeting(103L, MeetingStatus.COMPLETED, LocalDateTime.of(2026, 8, 31, 9, 0),
+                LocalDateTime.of(2026, 9, 18, 10, 0));
+        when(meetingRepository.findCalendarMeetingsByTeamIdAndEffectiveStartAtBetween(any(), any(), any()))
+                .thenReturn(List.of(waiting, inProgress, completed));
+
+        MeetingCalendarResponse response = meetingService.getMeetingCalendar(USER_ID, TEAM_ID, 2026, 9);
+
+        assertThat(response.dates()).hasSize(2);
+        assertThat(response.dates().get(0).date()).isEqualTo(LocalDate.of(2026, 9, 3));
+        assertThat(response.dates().get(0).meetings()).extracting("meetingId").containsExactly(101L, 102L);
+        assertThat(response.dates().get(1).date()).isEqualTo(LocalDate.of(2026, 9, 18));
+        assertThat(response.dates().get(1).meetings()).extracting("meetingId").containsExactly(103L);
+    }
+
+    @Test
+    @DisplayName("캘린더는 빈 결과이면 dates 빈 배열을 반환한다")
+    void getMeetingCalendarEmpty() {
+        when(teamRepository.existsById(TEAM_ID)).thenReturn(true);
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(true);
+        when(meetingRepository.findCalendarMeetingsByTeamIdAndEffectiveStartAtBetween(any(), any(), any()))
+                .thenReturn(List.of());
+
+        MeetingCalendarResponse response = meetingService.getMeetingCalendar(USER_ID, TEAM_ID, 2026, 9);
+
+        assertThat(response.year()).isEqualTo(2026);
+        assertThat(response.month()).isEqualTo(9);
+        assertThat(response.dates()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("캘린더 조회는 팀이 없으면 실패한다")
+    void getMeetingCalendarTeamNotFound() {
+        when(teamRepository.existsById(TEAM_ID)).thenReturn(false);
+
+        assertThatThrownBy(() -> meetingService.getMeetingCalendar(USER_ID, TEAM_ID, 2026, 9))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.TEAM_NOT_FOUND);
+
+        verify(meetingRepository, never()).findCalendarMeetingsByTeamIdAndEffectiveStartAtBetween(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("캘린더 조회는 ACTIVE 팀원이 아니면 실패한다")
+    void getMeetingCalendarWithoutActiveMembership() {
+        when(teamRepository.existsById(TEAM_ID)).thenReturn(true);
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(false);
+
+        assertThatThrownBy(() -> meetingService.getMeetingCalendar(USER_ID, TEAM_ID, 2026, 9))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.TEAM_MEMBERSHIP_REQUIRED);
+
+        verify(meetingRepository, never()).findCalendarMeetingsByTeamIdAndEffectiveStartAtBetween(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("캘린더 조회는 LocalDate로 생성할 수 없는 year이면 공통 입력 예외를 던진다")
+    void getMeetingCalendarWithInvalidYear() {
+        when(teamRepository.existsById(TEAM_ID)).thenReturn(true);
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(true);
+
+        assertThatThrownBy(() -> meetingService.getMeetingCalendar(USER_ID, TEAM_ID, Integer.MAX_VALUE, 9))
+                .isInstanceOf(com.backend.meety.global.exception.BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(com.backend.meety.global.exception.CommonErrorCode.INVALID_INPUT_VALUE);
     }
 
     @Test
