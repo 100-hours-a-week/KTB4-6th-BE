@@ -1,7 +1,7 @@
 package com.backend.meety.domain.team.service;
 
+import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamJoinRequest;
-import com.backend.meety.domain.team.dto.TeamJoinResponse;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamInvitationCode;
@@ -34,7 +34,7 @@ public class TeamMemberService {
     private final TeamBlockRepository teamBlockRepository;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public TeamJoinResponse join(Long userId, TeamJoinRequest request) {
+    public MyTeamResponse join(Long userId, TeamJoinRequest request) {
         User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new TeamException(TeamErrorCode.USER_NOT_FOUND));
         validateNoActiveTeam(userId);
@@ -45,9 +45,8 @@ public class TeamMemberService {
         validateCapacity(team.getId());
         validateDisplayNameAvailable(team.getId(), request.displayName());
         try {
-            TeamMember teamMember = teamMemberRepository.save(
-                    TeamMember.createMember(user, team, request.displayName()));
-            return TeamJoinResponse.of(team, teamMember);
+            teamMemberRepository.save(TeamMember.createMember(user, team, request.displayName()));
+            return MyTeamResponse.of(team.getId());
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.TEAM_MEMBERSHIP_CREATE_FAILED);
         }
