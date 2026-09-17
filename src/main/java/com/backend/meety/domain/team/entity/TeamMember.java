@@ -45,4 +45,15 @@ public class TeamMember extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "membership_status", nullable = false, length = 30)
     private MembershipStatus membershipStatus = MembershipStatus.ACTIVE;
+
+    private TeamMember(User user, Team team, String displayName, TeamMemberRole role) {
+        this.user = user;
+        this.team = team;
+        this.displayName = displayName;
+        this.role = role;
+    }
+
+    public static TeamMember createLeader(User user, Team team, String displayName) {
+        return new TeamMember(user, team, displayName, TeamMemberRole.LEADER);
+    }
 }

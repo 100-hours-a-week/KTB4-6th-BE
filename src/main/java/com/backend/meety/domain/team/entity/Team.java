@@ -23,4 +23,12 @@ public class Team extends BaseEntity {
 
     @Column(name = "name", nullable = false, length = 20)
     private String name;
+
+    private Team(String name) {
+        this.name = name;
+    }
+
+    public static Team create(String name) {
+        return new Team(name);
+    }
 }
