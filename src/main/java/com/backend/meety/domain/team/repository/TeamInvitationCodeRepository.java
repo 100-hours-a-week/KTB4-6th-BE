@@ -8,5 +8,7 @@ public interface TeamInvitationCodeRepository extends JpaRepository<TeamInvitati
 
     Optional<TeamInvitationCode> findByTeamIdAndDeletedAtIsNull(Long teamId);
 
+    Optional<TeamInvitationCode> findByCodeAndDeletedAtIsNull(String code);
+
     boolean existsByCode(String code);
 }

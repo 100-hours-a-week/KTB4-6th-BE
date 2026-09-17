@@ -38,4 +38,6 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
     );
 
     long countByTeamIdAndMembershipStatus(Long teamId, MembershipStatus membershipStatus);
+
+    boolean existsByTeamIdAndDisplayName(Long teamId, String displayName);
 }

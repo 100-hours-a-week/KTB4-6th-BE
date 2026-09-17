@@ -13,13 +13,17 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "team_members")
+@Table(name = "team_members",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_team_members_team_id_display_name",
+                columnNames = {"team_id", "display_name"}))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class TeamMember extends BaseEntity {
 
@@ -55,5 +59,13 @@ public class TeamMember extends BaseEntity {
 
     public static TeamMember createLeader(User user, Team team, String displayName) {
         return new TeamMember(user, team, displayName, TeamMemberRole.LEADER);
+    }
+
+    public static TeamMember createMember(User user, Team team, String displayName) {
+        return new TeamMember(user, team, displayName, TeamMemberRole.MEMBER);
+    }
+
+    public boolean isLeader() {
+        return role == TeamMemberRole.LEADER;
     }
 }
