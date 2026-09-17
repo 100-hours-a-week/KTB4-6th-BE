@@ -1,7 +1,7 @@
 package com.backend.meety.domain.team.controller;
 
+import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamJoinRequest;
-import com.backend.meety.domain.team.dto.TeamJoinResponse;
 import com.backend.meety.domain.team.service.TeamMemberService;
 import com.backend.meety.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -22,11 +22,11 @@ public class TeamMemberController {
     private final TeamMemberService teamMemberService;
 
     @PostMapping
-    public ResponseEntity<ApiResponse<TeamJoinResponse>> join(
+    public ResponseEntity<ApiResponse<MyTeamResponse>> join(
             @AuthenticationPrincipal Long userId,
             @Valid @RequestBody TeamJoinRequest request
     ) {
-        TeamJoinResponse response = teamMemberService.join(userId, request);
+        MyTeamResponse response = teamMemberService.join(userId, request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(response));
     }
