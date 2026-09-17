@@ -2,6 +2,9 @@ package com.backend.meety.domain.meeting.service;
 
 import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
+import com.backend.meety.domain.meeting.dto.MeetingCalendarDateResponse;
+import com.backend.meety.domain.meeting.dto.MeetingCalendarItemResponse;
+import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
 import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
 import com.backend.meety.domain.meeting.dto.MeetingGroupResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListItemResponse;
@@ -21,7 +24,10 @@ import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.entity.TeamMemberRole;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.team.repository.TeamRepository;
+import com.backend.meety.global.exception.BusinessException;
+import com.backend.meety.global.exception.CommonErrorCode;
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -178,6 +184,22 @@ public class MeetingService {
         return new MeetingListResponse(toGroups(pageMeetings), nextCursor, hasNext);
     }
 
+    @Transactional(readOnly = true)
+    public MeetingCalendarResponse getMeetingCalendar(Long userId, Long teamId, Integer year, Integer month) {
+        validateTeamExists(teamId);
+        validateTeamMembership(userId, teamId, MeetingErrorCode.TEAM_MEMBERSHIP_REQUIRED);
+
+        LocalDateTime monthStart = toMonthStart(year, month);
+        LocalDateTime nextMonthStart = monthStart.toLocalDate().plusMonths(1).atStartOfDay();
+        List<Meeting> meetings = meetingRepository.findCalendarMeetingsByTeamIdAndEffectiveStartAtBetween(
+                teamId,
+                monthStart,
+                nextMonthStart
+        );
+
+        return new MeetingCalendarResponse(year, month, toCalendarDates(meetings));
+    }
+
     private void validateMeetingAccess(Long userId, Long teamId) {
         validateTeamMembership(userId, teamId, MeetingErrorCode.MEETING_ACCESS_DENIED);
     }
@@ -273,6 +295,36 @@ public class MeetingService {
 
     private LocalDateTime toExclusiveStartOfDay(LocalDate date) {
         return date == null ? null : date.plusDays(1).atStartOfDay();
+    }
+
+    private LocalDateTime toMonthStart(Integer year, Integer month) {
+        try {
+            return LocalDate.of(year, month, 1).atStartOfDay();
+        } catch (DateTimeException e) {
+            throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
+        }
+    }
+
+    private List<MeetingCalendarDateResponse> toCalendarDates(List<Meeting> meetings) {
+        List<MeetingCalendarDateResponse> dates = new ArrayList<>();
+        LocalDate currentDate = null;
+        List<MeetingCalendarItemResponse> currentMeetings = new ArrayList<>();
+
+        for (Meeting meeting : meetings) {
+            LocalDate meetingDate = effectiveStartAt(meeting).toLocalDate();
+            if (currentDate != null && !currentDate.equals(meetingDate)) {
+                dates.add(new MeetingCalendarDateResponse(currentDate, currentMeetings));
+                currentMeetings = new ArrayList<>();
+            }
+            currentDate = meetingDate;
+            currentMeetings.add(MeetingCalendarItemResponse.from(meeting));
+        }
+
+        if (currentDate != null) {
+            dates.add(new MeetingCalendarDateResponse(currentDate, currentMeetings));
+        }
+
+        return dates;
     }
 
     private List<MeetingGroupResponse> toGroups(List<Meeting> meetings) {

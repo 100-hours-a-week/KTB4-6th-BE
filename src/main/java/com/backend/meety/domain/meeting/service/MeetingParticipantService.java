@@ -53,7 +53,10 @@ public class MeetingParticipantService {
                 .map(MeetingParticipantResponse::from)
                 .toList();
 
-        return new MeetingParticipantListResponse(participants);
+        return new MeetingParticipantListResponse(
+                participants.size(),
+                participants
+        );
     }
 
     @Transactional

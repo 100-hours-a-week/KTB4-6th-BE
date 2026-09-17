@@ -50,4 +50,29 @@ class MeetingRepositoryTest {
         assertThat(query.value()).contains("join fetch m.createdByTeamMember");
         assertThat(query.value()).contains("m.deletedAt is null");
     }
+
+    @Test
+    @DisplayName("캘린더 조회 query는 effectiveStartAt 월 범위와 오름차순 정렬을 사용한다")
+    void findCalendarMeetingsByTeamIdAndEffectiveStartAtBetweenQuery() throws NoSuchMethodException {
+        Query query = MeetingRepository.class
+                .getMethod(
+                        "findCalendarMeetingsByTeamIdAndEffectiveStartAtBetween",
+                        Long.class,
+                        LocalDateTime.class,
+                        LocalDateTime.class
+                )
+                .getAnnotation(Query.class);
+
+        assertThat(query).isNotNull();
+        assertThat(query.value()).contains("m.team.id = :teamId");
+        assertThat(query.value()).contains("m.deletedAt is null");
+        assertThat(query.value()).contains("when m.status = com.backend.meety.domain.meeting.entity.MeetingStatus.WAITING");
+        assertThat(query.value()).contains("then m.scheduledAt");
+        assertThat(query.value()).contains("else m.startedAt");
+        assertThat(query.value()).contains(">= :start");
+        assertThat(query.value()).contains("< :endExclusive");
+        assertThat(query.value()).contains("end asc");
+        assertThat(query.value()).contains("m.id asc");
+        assertThat(query.value()).doesNotContain("join fetch");
+    }
 }
