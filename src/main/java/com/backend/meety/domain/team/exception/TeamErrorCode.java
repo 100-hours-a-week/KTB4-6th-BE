@@ -10,6 +10,8 @@ import org.springframework.http.HttpStatus;
 public enum TeamErrorCode implements BaseCode {
 
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."),
+    TEAM_NOT_FOUND(HttpStatus.NOT_FOUND, "TEAM_NOT_FOUND", "팀을 찾을 수 없습니다."),
+    TEAM_ACCESS_DENIED(HttpStatus.FORBIDDEN, "TEAM_ACCESS_DENIED", "팀에 접근할 권한이 없습니다."),
     ACTIVE_TEAM_ALREADY_EXISTS(HttpStatus.CONFLICT, "ACTIVE_TEAM_ALREADY_EXISTS", "이미 참여 중인 팀이 있습니다."),
     TEAM_CREATE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "TEAM_CREATE_FAILED", "팀을 생성하지 못했습니다. 다시 시도해주세요.");
 

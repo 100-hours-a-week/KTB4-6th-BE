@@ -1,7 +1,9 @@
 package com.backend.meety.domain.team.service;
 
+import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
+import com.backend.meety.domain.team.dto.TeamDetailResponse;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamInvitationCode;
@@ -45,6 +47,26 @@ public class TeamService {
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.TEAM_CREATE_FAILED);
         }
+    }
+
+    @Transactional(readOnly = true)
+    public MyTeamResponse getMyTeam(Long userId) {
+        return teamMemberRepository.findByUserIdAndMembershipStatus(userId, MembershipStatus.ACTIVE)
+                .map(teamMember -> MyTeamResponse.of(teamMember.getTeam().getId()))
+                .orElseGet(MyTeamResponse::noTeam);
+    }
+
+    @Transactional(readOnly = true)
+    public TeamDetailResponse getTeam(Long userId, Long teamId) {
+        Team team = teamRepository.findByIdAndDeletedAtIsNull(teamId)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
+        TeamMember teamMember = teamMemberRepository
+                .findByTeamIdAndUserIdAndMembershipStatus(teamId, userId, MembershipStatus.ACTIVE)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_ACCESS_DENIED));
+        TeamInvitationCode invitationCode = teamInvitationCodeRepository
+                .findByTeamIdAndDeletedAtIsNull(teamId)
+                .orElseThrow(() -> new IllegalStateException("활성 팀에 유효한 초대 코드가 없습니다."));
+        return TeamDetailResponse.of(team, teamMember, invitationCode.getCode());
     }
 
     private void validateNoActiveTeam(Long userId) {

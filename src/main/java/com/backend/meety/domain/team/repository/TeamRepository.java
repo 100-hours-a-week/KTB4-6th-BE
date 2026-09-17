@@ -13,4 +13,6 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select t from Team t where t.id = :teamId")
     Optional<Team> findByIdForUpdate(@Param("teamId") Long teamId);
+
+    Optional<Team> findByIdAndDeletedAtIsNull(Long teamId);
 }

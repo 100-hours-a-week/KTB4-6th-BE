@@ -1,7 +1,9 @@
 package com.backend.meety.domain.team.controller;
 
+import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
+import com.backend.meety.domain.team.dto.TeamDetailResponse;
 import com.backend.meety.domain.team.service.TeamService;
 import com.backend.meety.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -9,6 +11,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,4 +35,16 @@ public class TeamController {
                 .body(ApiResponse.success(response));
     }
 
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<MyTeamResponse>> getMyTeam(@AuthenticationPrincipal Long userId) {
+        return ResponseEntity.ok(ApiResponse.success(teamService.getMyTeam(userId)));
+    }
+
+    @GetMapping("/{teamId}")
+    public ResponseEntity<ApiResponse<TeamDetailResponse>> getTeam(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long teamId
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(teamService.getTeam(userId, teamId)));
+    }
 }
