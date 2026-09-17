@@ -31,4 +31,8 @@ public class Team extends BaseEntity {
     public static Team create(String name) {
         return new Team(name);
     }
+
+    public boolean isDeleted() {
+        return getDeletedAt() != null;
+    }
 }

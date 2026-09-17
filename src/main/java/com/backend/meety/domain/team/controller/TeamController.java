@@ -1,5 +1,6 @@
 package com.backend.meety.domain.team.controller;
 
+import com.backend.meety.domain.team.dto.InvitationCodeResponse;
 import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
@@ -46,5 +47,15 @@ public class TeamController {
             @PathVariable Long teamId
     ) {
         return ResponseEntity.ok(ApiResponse.success(teamService.getTeam(userId, teamId)));
+    }
+
+    @PostMapping("/{teamId}/invitation-codes")
+    public ResponseEntity<ApiResponse<InvitationCodeResponse>> regenerateInvitationCode(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long teamId
+    ) {
+        InvitationCodeResponse response = teamService.regenerateInvitationCode(userId, teamId);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(response));
     }
 }

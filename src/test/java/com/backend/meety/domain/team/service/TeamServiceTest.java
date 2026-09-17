@@ -9,6 +9,7 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
+import com.backend.meety.domain.team.dto.InvitationCodeResponse;
 import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
@@ -25,11 +26,15 @@ import com.backend.meety.domain.team.repository.TeamRepository;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.user.repository.UserRepository;
 import com.backend.meety.global.exception.BusinessException;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -37,6 +42,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class TeamServiceTest {
+
+    private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
+    private static final Clock FIXED_CLOCK =
+            Clock.fixed(Instant.parse("2026-09-17T03:00:00Z"), KST_ZONE_ID);
 
     @Mock
     private TeamRepository teamRepository;
@@ -50,8 +59,13 @@ class TeamServiceTest {
     @Mock
     private UserRepository userRepository;
 
-    @InjectMocks
     private TeamService teamService;
+
+    @BeforeEach
+    void setUp() {
+        teamService = new TeamService(teamRepository, teamMemberRepository,
+                teamInvitationCodeRepository, userRepository, FIXED_CLOCK);
+    }
 
     @Test
     @DisplayName("팀을 생성하면 팀장 멤버십과 초대 코드가 함께 생성된다")
@@ -180,6 +194,121 @@ class TeamServiceTest {
 
         assertThat(response.hasActiveTeam()).isFalse();
         assertThat(response.teamId()).isNull();
+    }
+
+    @Test
+    @DisplayName("팀장이 재생성하면 기존 코드를 폐기하고 새 코드를 발급한다")
+    void regenerateInvitationCode() {
+        Team team = Team.create("Meety Team");
+        TeamMember leader = TeamMember.createLeader(User.create(), team, "jay");
+        TeamInvitationCode currentCode = TeamInvitationCode.create(team, "OLDCODE1");
+        ReflectionTestUtils.setField(currentCode, "createdAt", LocalDateTime.of(2026, 9, 16, 10, 0));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamInvitationCodeRepository.findByTeamIdAndDeletedAtIsNull(7L))
+                .willReturn(Optional.of(currentCode));
+        given(teamInvitationCodeRepository.existsByCode(anyString())).willReturn(false);
+        given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        InvitationCodeResponse response = teamService.regenerateInvitationCode(1L, 7L);
+
+        assertThat(currentCode.getDeletedAt()).isNotNull();
+        assertThat(response.code()).matches("[A-Z0-9]{8}");
+        assertThat(response.code()).isNotEqualTo("OLDCODE1");
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 팀의 초대 코드는 재생성할 수 없다")
+    void regenerateFailOnUnknownTeam() {
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamService.regenerateInvitationCode(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("삭제된 팀의 초대 코드는 재생성할 수 없다")
+    void regenerateFailOnDeletedTeam() {
+        Team team = Team.create("Meety Team");
+        ReflectionTestUtils.setField(team, "deletedAt", LocalDateTime.of(2026, 9, 16, 10, 0));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+
+        assertThatThrownBy(() -> teamService.regenerateInvitationCode(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("팀원이 아니면 초대 코드를 재생성할 수 없다")
+    void regenerateFailOnNonMember() {
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(Team.create("Meety Team")));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamService.regenerateInvitationCode(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_LEADER_REQUIRED));
+    }
+
+    @Test
+    @DisplayName("팀장이 아닌 팀원은 초대 코드를 재생성할 수 없다")
+    void regenerateFailOnNonLeader() {
+        Team team = Team.create("Meety Team");
+        TeamMember member = TeamMember.createLeader(User.create(), team, "jay");
+        ReflectionTestUtils.setField(member, "role", TeamMemberRole.MEMBER);
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(member));
+
+        assertThatThrownBy(() -> teamService.regenerateInvitationCode(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_LEADER_REQUIRED));
+        then(teamInvitationCodeRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("오늘 생성된 초대 코드가 있으면 재생성할 수 없다")
+    void regenerateFailOnDailyLimit() {
+        Team team = Team.create("Meety Team");
+        TeamMember leader = TeamMember.createLeader(User.create(), team, "jay");
+        TeamInvitationCode todayCode = TeamInvitationCode.create(team, "TODAY123");
+        ReflectionTestUtils.setField(todayCode, "createdAt", LocalDateTime.of(2026, 9, 17, 9, 0));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamInvitationCodeRepository.findByTeamIdAndDeletedAtIsNull(7L))
+                .willReturn(Optional.of(todayCode));
+
+        assertThatThrownBy(() -> teamService.regenerateInvitationCode(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode())
+                                .isEqualTo(TeamErrorCode.INVITATION_CODE_REGENERATION_LIMIT_EXCEEDED));
+        assertThat(todayCode.getDeletedAt()).isNull();
+        then(teamInvitationCodeRepository).should(never()).save(any(TeamInvitationCode.class));
+    }
+
+    @Test
+    @DisplayName("새 코드 저장에 실패하면 초대 코드 재생성에 실패한다")
+    void regenerateFailOnDataAccessError() {
+        Team team = Team.create("Meety Team");
+        TeamMember leader = TeamMember.createLeader(User.create(), team, "jay");
+        TeamInvitationCode currentCode = TeamInvitationCode.create(team, "OLDCODE1");
+        ReflectionTestUtils.setField(currentCode, "createdAt", LocalDateTime.of(2026, 9, 16, 10, 0));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamInvitationCodeRepository.findByTeamIdAndDeletedAtIsNull(7L))
+                .willReturn(Optional.of(currentCode));
+        given(teamInvitationCodeRepository.existsByCode(anyString())).willReturn(false);
+        given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
+                .willThrow(new DataIntegrityViolationException("insert failed"));
+
+        assertThatThrownBy(() -> teamService.regenerateInvitationCode(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.INVITATION_CODE_CREATE_FAILED));
     }
 
     @Test

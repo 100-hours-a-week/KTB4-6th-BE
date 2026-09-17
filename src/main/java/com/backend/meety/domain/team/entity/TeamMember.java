@@ -56,4 +56,8 @@ public class TeamMember extends BaseEntity {
     public static TeamMember createLeader(User user, Team team, String displayName) {
         return new TeamMember(user, team, displayName, TeamMemberRole.LEADER);
     }
+
+    public boolean isLeader() {
+        return role == TeamMemberRole.LEADER;
+    }
 }

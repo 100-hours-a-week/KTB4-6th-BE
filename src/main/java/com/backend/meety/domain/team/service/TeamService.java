@@ -1,5 +1,6 @@
 package com.backend.meety.domain.team.service;
 
+import com.backend.meety.domain.team.dto.InvitationCodeResponse;
 import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
@@ -16,6 +17,11 @@ import com.backend.meety.domain.team.repository.TeamRepository;
 import com.backend.meety.domain.team.util.InvitationCodeGenerator;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.user.repository.UserRepository;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
@@ -26,11 +32,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class TeamService {
 
     private static final int MAX_INVITATION_CODE_ATTEMPTS = 5;
+    private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
 
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final TeamInvitationCodeRepository teamInvitationCodeRepository;
     private final UserRepository userRepository;
+    private final Clock clock;
 
     @Transactional
     public TeamCreateResponse create(Long userId, TeamCreateRequest request) {
@@ -41,11 +49,53 @@ public class TeamService {
             Team team = teamRepository.save(Team.create(request.name()));
             TeamMember leader = teamMemberRepository.save(
                     TeamMember.createLeader(user, team, request.displayName()));
+            String code = generateUniqueCode()
+                    .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_CREATE_FAILED));
             TeamInvitationCode invitationCode = teamInvitationCodeRepository.save(
-                    TeamInvitationCode.create(team, generateUniqueCode()));
+                    TeamInvitationCode.create(team, code));
             return TeamCreateResponse.of(team, leader, invitationCode);
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.TEAM_CREATE_FAILED);
+        }
+    }
+
+    @Transactional
+    public InvitationCodeResponse regenerateInvitationCode(Long userId, Long teamId) {
+        Team team = teamRepository.findByIdForUpdate(teamId)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
+        if (team.isDeleted()) {
+            throw new TeamException(TeamErrorCode.TEAM_NOT_FOUND);
+        }
+        validateLeader(teamId, userId);
+        TeamInvitationCode currentCode = teamInvitationCodeRepository
+                .findByTeamIdAndDeletedAtIsNull(teamId)
+                .orElseThrow(() -> new IllegalStateException("활성 팀에 유효한 초대 코드가 없습니다."));
+        validateDailyRegenerationLimit(currentCode);
+        currentCode.revoke(LocalDateTime.now(clock));
+        String code = generateUniqueCode()
+                .orElseThrow(() -> new TeamException(TeamErrorCode.INVITATION_CODE_CREATE_FAILED));
+        try {
+            TeamInvitationCode newCode = teamInvitationCodeRepository.save(
+                    TeamInvitationCode.create(team, code));
+            return InvitationCodeResponse.from(newCode);
+        } catch (DataAccessException e) {
+            throw new TeamException(TeamErrorCode.INVITATION_CODE_CREATE_FAILED);
+        }
+    }
+
+    private void validateLeader(Long teamId, Long userId) {
+        TeamMember teamMember = teamMemberRepository
+                .findByTeamIdAndUserIdAndMembershipStatus(teamId, userId, MembershipStatus.ACTIVE)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED));
+        if (!teamMember.isLeader()) {
+            throw new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED);
+        }
+    }
+
+    private void validateDailyRegenerationLimit(TeamInvitationCode currentCode) {
+        LocalDate today = LocalDate.now(clock.withZone(KST_ZONE_ID));
+        if (currentCode.isCreatedOn(today)) {
+            throw new TeamException(TeamErrorCode.INVITATION_CODE_REGENERATION_LIMIT_EXCEEDED);
         }
     }
 
@@ -75,13 +125,13 @@ public class TeamService {
         }
     }
 
-    private String generateUniqueCode() {
+    private Optional<String> generateUniqueCode() {
         for (int attempt = 0; attempt < MAX_INVITATION_CODE_ATTEMPTS; attempt++) {
             String code = InvitationCodeGenerator.generate();
             if (!teamInvitationCodeRepository.existsByCode(code)) {
-                return code;
+                return Optional.of(code);
             }
         }
-        throw new TeamException(TeamErrorCode.TEAM_CREATE_FAILED);
+        return Optional.empty();
     }
 }

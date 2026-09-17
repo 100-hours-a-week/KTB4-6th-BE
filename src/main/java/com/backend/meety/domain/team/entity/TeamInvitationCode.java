@@ -11,6 +11,8 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -42,5 +44,13 @@ public class TeamInvitationCode extends BaseEntity {
 
     public static TeamInvitationCode create(Team team, String code) {
         return new TeamInvitationCode(team, code);
+    }
+
+    public void revoke(LocalDateTime revokedAt) {
+        markDeleted(revokedAt);
+    }
+
+    public boolean isCreatedOn(LocalDate date) {
+        return getCreatedAt().toLocalDate().isEqual(date);
     }
 }
