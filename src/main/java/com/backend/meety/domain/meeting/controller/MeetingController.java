@@ -68,10 +68,9 @@ public class MeetingController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestParam(required = false) String cursor,
-            @RequestParam(required = false) Integer size
+            @RequestParam(required = false) String cursor
     ) {
-        MeetingListResponse response = meetingService.getMeetings(userId, teamId, keyword, from, to, cursor, size);
+        MeetingListResponse response = meetingService.getMeetings(userId, teamId, keyword, from, to, cursor);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

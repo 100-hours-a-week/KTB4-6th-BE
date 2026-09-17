@@ -34,6 +34,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -355,19 +356,16 @@ class MeetingServiceTest {
     @Test
     @DisplayName("활성 팀원은 회의 목록을 조회할 수 있다")
     void getMeetings() {
-        when(teamRepository.existsById(TEAM_ID)).thenReturn(true);
-        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
-                TEAM_ID,
-                USER_ID,
-                MembershipStatus.ACTIVE
-        )).thenReturn(true);
+        setUpListPermission();
+        List<LocalDate> dates = List.of(LocalDate.of(2026, 9, 16), LocalDate.of(2026, 9, 15));
         List<Meeting> meetings = List.of(
                 meeting(101L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 16, 9, 0), null),
                 meeting(102L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 16, 14, 0), null),
                 meeting(103L, MeetingStatus.COMPLETED, LocalDateTime.of(2026, 9, 15, 16, 0),
                         LocalDateTime.of(2026, 9, 15, 10, 0))
         );
-        when(meetingRepository.findMeetingsByCondition(any())).thenReturn(meetings);
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(dates);
+        when(meetingRepository.findMeetingsByDates(any(), any())).thenReturn(meetings);
 
         MeetingListResponse response = meetingService.getMeetings(
                 USER_ID,
@@ -375,8 +373,7 @@ class MeetingServiceTest {
                 "  스프린트  ",
                 LocalDate.of(2026, 9, 15),
                 LocalDate.of(2026, 9, 16),
-                null,
-                20
+                null
         );
 
         assertThat(response.hasNext()).isFalse();
@@ -388,43 +385,44 @@ class MeetingServiceTest {
 
         ArgumentCaptor<MeetingListSearchCondition> conditionCaptor =
                 ArgumentCaptor.forClass(MeetingListSearchCondition.class);
-        verify(meetingRepository).findMeetingsByCondition(conditionCaptor.capture());
+        verify(meetingRepository).findMeetingDatesByCondition(conditionCaptor.capture());
         MeetingListSearchCondition condition = conditionCaptor.getValue();
         assertThat(condition.keyword()).isEqualTo("스프린트");
         assertThat(condition.fromInclusive()).isEqualTo(LocalDateTime.of(2026, 9, 15, 0, 0));
         assertThat(condition.toExclusive()).isEqualTo(LocalDateTime.of(2026, 9, 17, 0, 0));
-        assertThat(condition.limit()).isEqualTo(21);
+        assertThat(condition.limit()).isEqualTo(6);
+        verify(meetingRepository).findMeetingsByDates(condition, dates);
     }
 
     @Test
     @DisplayName("목록 조회 keyword가 null 또는 blank이면 검색 조건을 사용하지 않는다")
     void getMeetingsWithoutKeyword() {
         setUpListPermission();
-        when(meetingRepository.findMeetingsByCondition(any())).thenReturn(List.of());
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(List.of());
 
-        meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null, null);
-        meetingService.getMeetings(USER_ID, TEAM_ID, "   ", null, null, null, null);
+        meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null);
+        meetingService.getMeetings(USER_ID, TEAM_ID, "   ", null, null, null);
 
         ArgumentCaptor<MeetingListSearchCondition> conditionCaptor =
                 ArgumentCaptor.forClass(MeetingListSearchCondition.class);
-        verify(meetingRepository, org.mockito.Mockito.times(2)).findMeetingsByCondition(conditionCaptor.capture());
+        verify(meetingRepository, org.mockito.Mockito.times(2)).findMeetingDatesByCondition(conditionCaptor.capture());
         assertThat(conditionCaptor.getAllValues()).extracting(MeetingListSearchCondition::keyword)
                 .containsExactly(null, null);
         assertThat(conditionCaptor.getAllValues()).extracting(MeetingListSearchCondition::limit)
-                .containsExactly(21, 21);
+                .containsExactly(6, 6);
     }
 
     @Test
     @DisplayName("from만 있으면 시작일 00:00 이상 조건을 전달한다")
     void getMeetingsWithFromOnly() {
         setUpListPermission();
-        when(meetingRepository.findMeetingsByCondition(any())).thenReturn(List.of());
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(List.of());
 
-        meetingService.getMeetings(USER_ID, TEAM_ID, null, LocalDate.of(2026, 9, 15), null, null, 20);
+        meetingService.getMeetings(USER_ID, TEAM_ID, null, LocalDate.of(2026, 9, 15), null, null);
 
         ArgumentCaptor<MeetingListSearchCondition> conditionCaptor =
                 ArgumentCaptor.forClass(MeetingListSearchCondition.class);
-        verify(meetingRepository).findMeetingsByCondition(conditionCaptor.capture());
+        verify(meetingRepository).findMeetingDatesByCondition(conditionCaptor.capture());
         assertThat(conditionCaptor.getValue().fromInclusive()).isEqualTo(LocalDateTime.of(2026, 9, 15, 0, 0));
         assertThat(conditionCaptor.getValue().toExclusive()).isNull();
     }
@@ -433,13 +431,13 @@ class MeetingServiceTest {
     @DisplayName("to만 있으면 종료일 다음날 00:00 미만 조건을 전달한다")
     void getMeetingsWithToOnly() {
         setUpListPermission();
-        when(meetingRepository.findMeetingsByCondition(any())).thenReturn(List.of());
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(List.of());
 
-        meetingService.getMeetings(USER_ID, TEAM_ID, null, null, LocalDate.of(2026, 9, 15), null, 20);
+        meetingService.getMeetings(USER_ID, TEAM_ID, null, null, LocalDate.of(2026, 9, 15), null);
 
         ArgumentCaptor<MeetingListSearchCondition> conditionCaptor =
                 ArgumentCaptor.forClass(MeetingListSearchCondition.class);
-        verify(meetingRepository).findMeetingsByCondition(conditionCaptor.capture());
+        verify(meetingRepository).findMeetingDatesByCondition(conditionCaptor.capture());
         assertThat(conditionCaptor.getValue().fromInclusive()).isNull();
         assertThat(conditionCaptor.getValue().toExclusive()).isEqualTo(LocalDateTime.of(2026, 9, 16, 0, 0));
     }
@@ -449,9 +447,10 @@ class MeetingServiceTest {
     void groupWaitingMeetingByScheduledAt() {
         setUpListPermission();
         Meeting meeting = meeting(101L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 16, 9, 0), null);
-        when(meetingRepository.findMeetingsByCondition(any())).thenReturn(List.of(meeting));
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(List.of(LocalDate.of(2026, 9, 16)));
+        when(meetingRepository.findMeetingsByDates(any(), any())).thenReturn(List.of(meeting));
 
-        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null, 20);
+        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null);
 
         assertThat(response.groups()).hasSize(1);
         assertThat(response.groups().get(0).date()).isEqualTo(LocalDate.of(2026, 9, 16));
@@ -463,9 +462,10 @@ class MeetingServiceTest {
         setUpListPermission();
         Meeting meeting = meeting(101L, MeetingStatus.IN_PROGRESS, LocalDateTime.of(2026, 9, 16, 9, 0),
                 LocalDateTime.of(2026, 9, 15, 10, 0));
-        when(meetingRepository.findMeetingsByCondition(any())).thenReturn(List.of(meeting));
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(List.of(LocalDate.of(2026, 9, 15)));
+        when(meetingRepository.findMeetingsByDates(any(), any())).thenReturn(List.of(meeting));
 
-        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null, 20);
+        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null);
 
         assertThat(response.groups()).hasSize(1);
         assertThat(response.groups().get(0).date()).isEqualTo(LocalDate.of(2026, 9, 15));
@@ -477,64 +477,133 @@ class MeetingServiceTest {
         setUpListPermission();
         Meeting meeting = meeting(101L, MeetingStatus.COMPLETED, LocalDateTime.of(2026, 9, 16, 9, 0),
                 LocalDateTime.of(2026, 9, 15, 10, 0));
-        when(meetingRepository.findMeetingsByCondition(any())).thenReturn(List.of(meeting));
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(List.of(LocalDate.of(2026, 9, 15)));
+        when(meetingRepository.findMeetingsByDates(any(), any())).thenReturn(List.of(meeting));
 
-        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null, 20);
+        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null);
 
         assertThat(response.groups()).hasSize(1);
         assertThat(response.groups().get(0).date()).isEqualTo(LocalDate.of(2026, 9, 15));
     }
 
     @Test
-    @DisplayName("목록 조회는 다음 페이지가 있으면 nextCursor를 반환한다")
-    void getMeetingsWithNextCursor() {
+    @DisplayName("날짜 그룹이 6개이면 5개만 반환하고 마지막 날짜 cursor를 반환한다")
+    void getMeetingsWithNextDateCursor() {
         setUpListPermission();
-        Meeting first = meeting(101L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 16, 9, 0), null);
-        Meeting second = meeting(102L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 16, 14, 0), null);
-        when(meetingRepository.findMeetingsByCondition(any())).thenReturn(List.of(first, second));
+        List<LocalDate> dates = List.of(
+                LocalDate.of(2026, 9, 17),
+                LocalDate.of(2026, 9, 16),
+                LocalDate.of(2026, 9, 15),
+                LocalDate.of(2026, 9, 14),
+                LocalDate.of(2026, 9, 13),
+                LocalDate.of(2026, 9, 12)
+        );
+        List<Meeting> meetings = List.of(
+                meeting(101L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 17, 9, 0), null),
+                meeting(102L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 16, 9, 0), null),
+                meeting(103L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 15, 9, 0), null),
+                meeting(104L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 14, 9, 0), null),
+                meeting(105L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 13, 9, 0), null)
+        );
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(dates);
+        when(meetingRepository.findMeetingsByDates(any(), any())).thenReturn(meetings);
 
-        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null, 1);
+        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null);
 
         assertThat(response.hasNext()).isTrue();
-        assertThat(response.groups()).hasSize(1);
-        assertThat(response.groups().get(0).meetings()).hasSize(1);
+        assertThat(response.groups()).hasSize(5);
         assertThat(MeetingCursor.decode(response.nextCursor()))
-                .isEqualTo(new MeetingCursor(LocalDateTime.of(2026, 9, 16, 9, 0), 101L));
+                .isEqualTo(new MeetingCursor(LocalDate.of(2026, 9, 13)));
+
+        ArgumentCaptor<List<LocalDate>> datesCaptor = ArgumentCaptor.forClass(List.class);
+        verify(meetingRepository).findMeetingsByDates(any(), datesCaptor.capture());
+        assertThat(datesCaptor.getValue()).containsExactly(
+                LocalDate.of(2026, 9, 17),
+                LocalDate.of(2026, 9, 16),
+                LocalDate.of(2026, 9, 15),
+                LocalDate.of(2026, 9, 14),
+                LocalDate.of(2026, 9, 13)
+        );
     }
 
     @Test
-    @DisplayName("같은 날짜 그룹이 페이지 사이에서 나뉘어도 현재 페이지 group 개수만 반환한다")
-    void getMeetingsWithSameDateGroupSplitByPage() {
+    @DisplayName("한 날짜에 회의가 여러 개이면 날짜 그룹이 페이지 사이에서 분할되지 않는다")
+    void getMeetingsDoesNotSplitDateGroup() {
         setUpListPermission();
         Meeting first = meeting(101L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 15, 9, 0), null);
         Meeting second = meeting(102L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 15, 10, 0), null);
         Meeting third = meeting(103L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 15, 11, 0), null);
-        when(meetingRepository.findMeetingsByCondition(any())).thenReturn(List.of(first, second, third));
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(List.of(LocalDate.of(2026, 9, 15)));
+        when(meetingRepository.findMeetingsByDates(any(), any())).thenReturn(List.of(first, second, third));
 
-        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null, 2);
+        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null);
 
-        assertThat(response.hasNext()).isTrue();
+        assertThat(response.hasNext()).isFalse();
+        assertThat(response.nextCursor()).isNull();
         assertThat(response.groups()).hasSize(1);
         assertThat(response.groups().get(0).date()).isEqualTo(LocalDate.of(2026, 9, 15));
-        assertThat(response.groups().get(0).meetingCount()).isEqualTo(2);
-        assertThat(response.groups().get(0).meetings()).extracting("meetingId").containsExactly(101L, 102L);
-        assertThat(MeetingCursor.decode(response.nextCursor()))
-                .isEqualTo(new MeetingCursor(LocalDateTime.of(2026, 9, 15, 10, 0), 102L));
+        assertThat(response.groups().get(0).meetingCount()).isEqualTo(3);
+        assertThat(response.groups().get(0).meetings()).extracting("meetingId").containsExactly(101L, 102L, 103L);
     }
 
     @Test
-    @DisplayName("cursor가 있으면 목록 조회 조건으로 전달한다")
+    @DisplayName("cursor가 있으면 마지막 응답 날짜보다 이전 날짜 그룹을 조회한다")
     void getMeetingsWithCursor() {
         setUpListPermission();
-        MeetingCursor cursor = new MeetingCursor(LocalDateTime.of(2026, 9, 16, 9, 0), 101L);
-        when(meetingRepository.findMeetingsByCondition(any())).thenReturn(List.of());
+        MeetingCursor cursor = new MeetingCursor(LocalDate.of(2026, 9, 13));
+        Meeting meeting = meeting(101L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 12, 9, 0), null);
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(List.of(LocalDate.of(2026, 9, 12)));
+        when(meetingRepository.findMeetingsByDates(any(), any())).thenReturn(List.of(meeting));
 
-        meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, cursor.encode(), 20);
+        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, cursor.encode());
 
         ArgumentCaptor<MeetingListSearchCondition> conditionCaptor =
                 ArgumentCaptor.forClass(MeetingListSearchCondition.class);
-        verify(meetingRepository).findMeetingsByCondition(conditionCaptor.capture());
-        assertThat(conditionCaptor.getValue().cursor()).isEqualTo(cursor);
+        verify(meetingRepository).findMeetingDatesByCondition(conditionCaptor.capture());
+        assertThat(conditionCaptor.getValue().cursorDate()).isEqualTo(LocalDate.of(2026, 9, 13));
+        assertThat(response.groups()).extracting("date").containsExactly(LocalDate.of(2026, 9, 12));
+    }
+
+    @Test
+    @DisplayName("조건에 맞는 날짜 그룹이 없으면 빈 결과를 반환하고 회의 조회를 하지 않는다")
+    void getMeetingsEmpty() {
+        setUpListPermission();
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(List.of());
+
+        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null);
+
+        assertThat(response.groups()).isEmpty();
+        assertThat(response.nextCursor()).isNull();
+        assertThat(response.hasNext()).isFalse();
+        verify(meetingRepository, never()).findMeetingsByDates(any(), any());
+    }
+
+    @Test
+    @DisplayName("5개 날짜 각각 회의 5개이면 25개 회의를 모두 반환한다")
+    void getMeetingsReturnsAllMeetingsInFiveDateGroups() {
+        setUpListPermission();
+        List<LocalDate> dates = List.of(
+                LocalDate.of(2026, 9, 17),
+                LocalDate.of(2026, 9, 16),
+                LocalDate.of(2026, 9, 15),
+                LocalDate.of(2026, 9, 14),
+                LocalDate.of(2026, 9, 13)
+        );
+        List<Meeting> meetings = new ArrayList<>();
+        long meetingId = 100L;
+        for (LocalDate date : dates) {
+            for (int hour = 9; hour < 14; hour++) {
+                meetings.add(meeting(meetingId++, MeetingStatus.WAITING, date.atTime(hour, 0), null));
+            }
+        }
+        when(meetingRepository.findMeetingDatesByCondition(any())).thenReturn(dates);
+        when(meetingRepository.findMeetingsByDates(any(), any())).thenReturn(meetings);
+
+        MeetingListResponse response = meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null);
+
+        assertThat(response.groups()).hasSize(5);
+        assertThat(response.groups()).extracting("meetingCount").containsExactly(5, 5, 5, 5, 5);
+        assertThat(response.groups().stream().mapToInt(group -> group.meetings().size()).sum()).isEqualTo(25);
     }
 
     @Test
@@ -542,12 +611,12 @@ class MeetingServiceTest {
     void getMeetingsWithNotFoundTeam() {
         when(teamRepository.existsById(TEAM_ID)).thenReturn(false);
 
-        assertThatThrownBy(() -> meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null, 20))
+        assertThatThrownBy(() -> meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null))
                 .isInstanceOf(MeetingException.class)
                 .extracting("errorCode")
                 .isEqualTo(MeetingErrorCode.TEAM_NOT_FOUND);
 
-        verify(meetingRepository, never()).findMeetingsByCondition(any());
+        verify(meetingRepository, never()).findMeetingDatesByCondition(any());
     }
 
     @Test
@@ -560,12 +629,12 @@ class MeetingServiceTest {
                 MembershipStatus.ACTIVE
         )).thenReturn(false);
 
-        assertThatThrownBy(() -> meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null, 20))
+        assertThatThrownBy(() -> meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null))
                 .isInstanceOf(MeetingException.class)
                 .extracting("errorCode")
                 .isEqualTo(MeetingErrorCode.TEAM_MEMBERSHIP_REQUIRED);
 
-        verify(meetingRepository, never()).findMeetingsByCondition(any());
+        verify(meetingRepository, never()).findMeetingDatesByCondition(any());
     }
 
     @Test
@@ -579,8 +648,7 @@ class MeetingServiceTest {
                 null,
                 LocalDate.of(2026, 9, 16),
                 LocalDate.of(2026, 9, 15),
-                null,
-                20
+                null
         ))
                 .isInstanceOf(MeetingException.class)
                 .extracting("errorCode")
@@ -588,26 +656,11 @@ class MeetingServiceTest {
     }
 
     @Test
-    @DisplayName("목록 조회 size가 0 이하 또는 50 초과이면 실패한다")
-    void getMeetingsWithInvalidPageSize() {
-        setUpListPermission();
-
-        assertThatThrownBy(() -> meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null, 0))
-                .isInstanceOf(MeetingException.class)
-                .extracting("errorCode")
-                .isEqualTo(MeetingErrorCode.INVALID_PAGE_SIZE);
-        assertThatThrownBy(() -> meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, null, 51))
-                .isInstanceOf(MeetingException.class)
-                .extracting("errorCode")
-                .isEqualTo(MeetingErrorCode.INVALID_PAGE_SIZE);
-    }
-
-    @Test
     @DisplayName("잘못된 cursor이면 목록 조회에 실패한다")
     void getMeetingsWithInvalidCursor() {
         setUpListPermission();
 
-        assertThatThrownBy(() -> meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, "invalid", 20))
+        assertThatThrownBy(() -> meetingService.getMeetings(USER_ID, TEAM_ID, null, null, null, "invalid"))
                 .isInstanceOf(MeetingException.class)
                 .extracting("errorCode")
                 .isEqualTo(MeetingErrorCode.INVALID_CURSOR);

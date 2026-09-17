@@ -2,9 +2,9 @@ package com.backend.meety.domain.meeting.repository;
 
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
-import com.backend.meety.domain.meeting.repository.support.MeetingCursor;
 import com.backend.meety.domain.meeting.repository.support.MeetingListSearchCondition;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 import jakarta.persistence.TypedQuery;
 import java.time.LocalDate;
 import java.util.HashMap;
@@ -26,7 +26,39 @@ public class MeetingRepositoryImpl implements MeetingRepositoryCustom {
     private final EntityManager entityManager;
 
     @Override
-    public List<Meeting> findMeetingsByCondition(MeetingListSearchCondition condition) {
+    public List<LocalDate> findMeetingDatesByCondition(MeetingListSearchCondition condition) {
+        Map<String, Object> parameters = new HashMap<>();
+        StringBuilder jpql = new StringBuilder("""
+                select distinct %s
+                from Meeting m
+                where m.team.id = :teamId
+                  and m.deletedAt is null
+                """.formatted(EFFECTIVE_DATE));
+        putBaseParameters(parameters, condition);
+
+        appendKeywordCondition(jpql, parameters, condition);
+        appendDateRangeCondition(jpql, parameters, condition);
+        appendDateCursorCondition(jpql, parameters, condition);
+
+        jpql.append("""
+                order by
+                  %s desc
+                """.formatted(EFFECTIVE_DATE));
+
+        Query query = entityManager.createQuery(jpql.toString());
+        parameters.forEach(query::setParameter);
+        query.setMaxResults(condition.limit());
+        return query.getResultList().stream()
+                .map(this::toLocalDate)
+                .toList();
+    }
+
+    @Override
+    public List<Meeting> findMeetingsByDates(MeetingListSearchCondition condition, List<LocalDate> dates) {
+        if (dates.isEmpty()) {
+            return List.of();
+        }
+
         Map<String, Object> parameters = new HashMap<>();
         StringBuilder jpql = new StringBuilder("""
                 select m
@@ -34,12 +66,11 @@ public class MeetingRepositoryImpl implements MeetingRepositoryCustom {
                 where m.team.id = :teamId
                   and m.deletedAt is null
                 """);
-        parameters.put("teamId", condition.teamId());
-        parameters.put("waitingStatus", MeetingStatus.WAITING);
+        putBaseParameters(parameters, condition);
 
         appendKeywordCondition(jpql, parameters, condition);
         appendDateRangeCondition(jpql, parameters, condition);
-        appendCursorCondition(jpql, parameters, condition.cursor());
+        appendSelectedDatesCondition(jpql, parameters, dates);
 
         jpql.append("""
                 order by
@@ -50,8 +81,12 @@ public class MeetingRepositoryImpl implements MeetingRepositoryCustom {
 
         TypedQuery<Meeting> query = entityManager.createQuery(jpql.toString(), Meeting.class);
         parameters.forEach(query::setParameter);
-        query.setMaxResults(condition.limit());
         return query.getResultList();
+    }
+
+    private void putBaseParameters(Map<String, Object> parameters, MeetingListSearchCondition condition) {
+        parameters.put("teamId", condition.teamId());
+        parameters.put("waitingStatus", MeetingStatus.WAITING);
     }
 
     private void appendKeywordCondition(
@@ -82,43 +117,57 @@ public class MeetingRepositoryImpl implements MeetingRepositoryCustom {
         }
     }
 
-    private void appendCursorCondition(
+    private void appendDateCursorCondition(
             StringBuilder jpql,
             Map<String, Object> parameters,
-            MeetingCursor cursor
+            MeetingListSearchCondition condition
     ) {
-        if (cursor == null) {
+        if (condition.cursorDate() == null) {
             return;
         }
 
-        jpql.append("""
-                  and (
-                    %s < :cursorDateStart
-                    or (
-                      %s >= :cursorDateStart
-                      and %s < :cursorNextDateStart
-                      and %s > :cursorEffectiveStartAt
-                    )
-                    or (
-                      %s >= :cursorDateStart
-                      and %s < :cursorNextDateStart
-                      and %s = :cursorEffectiveStartAt
-                      and m.id > :cursorMeetingId
-                    )
-                  )
-                """.formatted(
-                EFFECTIVE_START_AT,
-                EFFECTIVE_START_AT,
-                EFFECTIVE_START_AT,
-                EFFECTIVE_START_AT,
-                EFFECTIVE_START_AT,
-                EFFECTIVE_START_AT,
-                EFFECTIVE_START_AT
-        ));
-        LocalDate cursorDate = cursor.effectiveStartAt().toLocalDate();
-        parameters.put("cursorDateStart", cursorDate.atStartOfDay());
-        parameters.put("cursorNextDateStart", cursorDate.plusDays(1).atStartOfDay());
-        parameters.put("cursorEffectiveStartAt", cursor.effectiveStartAt());
-        parameters.put("cursorMeetingId", cursor.meetingId());
+        jpql.append("  and ").append(EFFECTIVE_START_AT).append(" < :cursorDateStart\n");
+        parameters.put("cursorDateStart", condition.cursorDate().atStartOfDay());
+    }
+
+    private void appendSelectedDatesCondition(
+            StringBuilder jpql,
+            Map<String, Object> parameters,
+            List<LocalDate> dates
+    ) {
+        jpql.append("  and (\n");
+        for (int i = 0; i < dates.size(); i++) {
+            if (i > 0) {
+                jpql.append("    or\n");
+            }
+            String startParameter = "selectedDateStart" + i;
+            String endParameter = "selectedDateEnd" + i;
+            jpql.append("    (")
+                    .append(EFFECTIVE_START_AT)
+                    .append(" >= :")
+                    .append(startParameter)
+                    .append(" and ")
+                    .append(EFFECTIVE_START_AT)
+                    .append(" < :")
+                    .append(endParameter)
+                    .append(")\n");
+            LocalDate date = dates.get(i);
+            parameters.put(startParameter, date.atStartOfDay());
+            parameters.put(endParameter, date.plusDays(1).atStartOfDay());
+        }
+        jpql.append("  )\n");
+    }
+
+    private LocalDate toLocalDate(Object value) {
+        if (value instanceof LocalDate localDate) {
+            return localDate;
+        }
+        if (value instanceof java.sql.Date date) {
+            return date.toLocalDate();
+        }
+        if (value instanceof CharSequence text) {
+            return LocalDate.parse(text);
+        }
+        throw new IllegalStateException("Unsupported effective date type: " + value.getClass().getName());
     }
 }
