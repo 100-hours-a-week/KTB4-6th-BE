@@ -82,11 +82,7 @@ public class TeamMemberService {
 
     @Transactional
     public void leave(Long userId, Long teamId) {
-        Team team = teamRepository.findByIdForUpdate(teamId)
-                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
-        if (team.isDeleted()) {
-            throw new TeamException(TeamErrorCode.TEAM_NOT_FOUND);
-        }
+        lockActiveTeam(teamId);
         TeamMember teamMember = teamMemberRepository
                 .findByTeamIdAndUserIdAndMembershipStatus(teamId, userId, MembershipStatus.ACTIVE)
                 .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_MEMBERSHIP_REQUIRED));
@@ -105,12 +101,8 @@ public class TeamMemberService {
 
     @Transactional
     public void kick(Long userId, Long teamId, Long teamMemberId) {
-        Team team = teamRepository.findByIdForUpdate(teamId)
-                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
-        if (team.isDeleted()) {
-            throw new TeamException(TeamErrorCode.TEAM_NOT_FOUND);
-        }
-        validateLeader(teamId, userId);
+        Team team = lockActiveTeam(teamId);
+        requireLeader(teamId, userId);
         TeamMember target = teamMemberRepository.findById(teamMemberId)
                 .filter(member -> member.getTeam().getId().equals(teamId))
                 .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_MEMBER_NOT_FOUND));
@@ -130,20 +122,52 @@ public class TeamMemberService {
         }
     }
 
-    private void validateLeader(Long teamId, Long userId) {
+    @Transactional
+    public void delegateLeader(Long userId, Long teamId, Long targetTeamMemberId) {
+        lockActiveTeam(teamId);
+        TeamMember leader = requireLeader(teamId, userId);
+        TeamMember target = teamMemberRepository.findById(targetTeamMemberId)
+                .filter(member -> member.getTeam().getId().equals(teamId))
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_MEMBER_NOT_FOUND));
+        if (target.getId().equals(leader.getId())) {
+            throw new TeamException(TeamErrorCode.LEADER_ALREADY_ASSIGNED);
+        }
+        if (target.getMembershipStatus() != MembershipStatus.ACTIVE) {
+            throw new TeamException(TeamErrorCode.TARGET_TEAM_MEMBER_NOT_ACTIVE);
+        }
+        leader.demoteToMember();
+        target.promoteToLeader();
+        try {
+            teamMemberRepository.flush();
+        } catch (DataAccessException e) {
+            throw new TeamException(TeamErrorCode.TEAM_LEADER_UPDATE_FAILED);
+        }
+    }
+
+    private Team lockActiveTeam(Long teamId) {
+        Team team = teamRepository.findByIdForUpdate(teamId)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
+        if (team.isDeleted()) {
+            throw new TeamException(TeamErrorCode.TEAM_NOT_FOUND);
+        }
+        return team;
+    }
+
+    private TeamMember requireLeader(Long teamId, Long userId) {
         TeamMember requester = teamMemberRepository
                 .findByTeamIdAndUserIdAndMembershipStatus(teamId, userId, MembershipStatus.ACTIVE)
                 .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED));
         if (!requester.isLeader()) {
             throw new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED);
         }
+        return requester;
     }
 
     @Transactional(readOnly = true)
     public TeamBlockListResponse getBlocks(Long userId, Long teamId) {
         teamRepository.findByIdAndDeletedAtIsNull(teamId)
                 .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
-        validateLeader(teamId, userId);
+        requireLeader(teamId, userId);
         try {
             List<TeamBlock> blocks = teamBlockRepository.findAllByTeamIdAndDeletedAtIsNullOrderByIdAsc(teamId);
             Map<Long, String> displayNames = findLatestDisplayNames(teamId, blocks);
@@ -157,12 +181,8 @@ public class TeamMemberService {
 
     @Transactional
     public void unblock(Long userId, Long teamId, Long blockId) {
-        Team team = teamRepository.findByIdForUpdate(teamId)
-                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
-        if (team.isDeleted()) {
-            throw new TeamException(TeamErrorCode.TEAM_NOT_FOUND);
-        }
-        validateLeader(teamId, userId);
+        lockActiveTeam(teamId);
+        requireLeader(teamId, userId);
         TeamBlock block = teamBlockRepository.findById(blockId)
                 .filter(found -> found.getTeam().getId().equals(teamId))
                 .filter(TeamBlock::isActive)
