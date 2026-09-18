@@ -22,6 +22,9 @@ public enum TeamErrorCode implements BaseCode {
     LEADER_CANNOT_LEAVE_TEAM(HttpStatus.CONFLICT, "LEADER_CANNOT_LEAVE_TEAM", "팀장 권한을 위임하거나 팀을 삭제해주세요."),
     CANNOT_KICK_SELF(HttpStatus.CONFLICT, "CANNOT_KICK_SELF", "자기 자신을 강퇴할 수 없습니다."),
     TEAM_MEMBER_NOT_ACTIVE(HttpStatus.CONFLICT, "TEAM_MEMBER_NOT_ACTIVE", "활성 상태의 팀원이 아닙니다."),
+    TARGET_TEAM_MEMBER_NOT_ACTIVE(HttpStatus.CONFLICT,
+            "TARGET_TEAM_MEMBER_NOT_ACTIVE", "활성 팀원에게만 팀장을 위임할 수 있습니다."),
+    LEADER_ALREADY_ASSIGNED(HttpStatus.CONFLICT, "LEADER_ALREADY_ASSIGNED", "이미 해당 팀원이 팀장입니다."),
     TEAM_CREATE_DAILY_LIMIT_EXCEEDED(HttpStatus.CONFLICT,
             "TEAM_CREATE_DAILY_LIMIT_EXCEEDED", "팀에서 나간 당일에는 팀을 만들 수 없습니다. 다음 날 다시 시도해주세요."),
     TEAM_MEMBER_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "TEAM_MEMBER_LIMIT_EXCEEDED", "참여 인원이 가득 찼습니다."),
@@ -41,7 +44,9 @@ public enum TeamErrorCode implements BaseCode {
     TEAM_BLOCK_LIST_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
             "TEAM_BLOCK_LIST_FAILED", "차단 목록을 조회하지 못했습니다."),
     TEAM_BLOCK_RELEASE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
-            "TEAM_BLOCK_RELEASE_FAILED", "차단 해제에 실패했습니다.");
+            "TEAM_BLOCK_RELEASE_FAILED", "차단 해제에 실패했습니다."),
+    TEAM_LEADER_UPDATE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
+            "TEAM_LEADER_UPDATE_FAILED", "팀장 위임에 실패했습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;

@@ -603,4 +603,104 @@ class TeamMemberServiceTest {
         assertThat(existing.getDeletedAt()).isNull();
         then(teamMemberRepository).should(never()).save(any(TeamMember.class));
     }
+
+    @Test
+    @DisplayName("팀장이 위임하면 자신은 MEMBER가 되고 대상이 LEADER가 된다")
+    void delegateLeader() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        ReflectionTestUtils.setField(leader, "id", 1L);
+        TeamMember target = TeamMember.createMember(User.create(), team, "hoon");
+        ReflectionTestUtils.setField(target, "id", 10L);
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamMemberRepository.findById(10L)).willReturn(Optional.of(target));
+
+        teamMemberService.delegateLeader(1L, 7L, 10L);
+
+        assertThat(leader.isLeader()).isFalse();
+        assertThat(target.isLeader()).isTrue();
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 팀에서는 위임할 수 없다")
+    void delegateFailOnUnknownTeam() {
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamMemberService.delegateLeader(1L, 7L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("팀장이 아니면 위임할 수 없다")
+    void delegateFailOnNonLeader() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember member = TeamMember.createMember(user, team, "hoon");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(member));
+
+        assertThatThrownBy(() -> teamMemberService.delegateLeader(1L, 7L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_LEADER_REQUIRED));
+    }
+
+    @Test
+    @DisplayName("자기 자신에게는 위임할 수 없다")
+    void delegateFailOnSelf() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        ReflectionTestUtils.setField(leader, "id", 1L);
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamMemberRepository.findById(1L)).willReturn(Optional.of(leader));
+
+        assertThatThrownBy(() -> teamMemberService.delegateLeader(1L, 7L, 1L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.LEADER_ALREADY_ASSIGNED));
+        assertThat(leader.isLeader()).isTrue();
+    }
+
+    @Test
+    @DisplayName("비활성 팀원에게는 위임할 수 없다")
+    void delegateFailOnInactiveTarget() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        ReflectionTestUtils.setField(leader, "id", 1L);
+        TeamMember target = TeamMember.createMember(User.create(), team, "hoon");
+        ReflectionTestUtils.setField(target, "id", 10L);
+        target.leave(LocalDateTime.of(2026, 9, 17, 10, 0));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamMemberRepository.findById(10L)).willReturn(Optional.of(target));
+
+        assertThatThrownBy(() -> teamMemberService.delegateLeader(1L, 7L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TARGET_TEAM_MEMBER_NOT_ACTIVE));
+        assertThat(leader.isLeader()).isTrue();
+    }
+
+    @Test
+    @DisplayName("다른 팀 소속에게는 위임할 수 없다")
+    void delegateFailOnOtherTeamTarget() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        ReflectionTestUtils.setField(leader, "id", 1L);
+        Team otherTeam = Team.create("다른팀");
+        ReflectionTestUtils.setField(otherTeam, "id", 8L);
+        TeamMember target = TeamMember.createMember(User.create(), otherTeam, "hoon");
+        ReflectionTestUtils.setField(target, "id", 10L);
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamMemberRepository.findById(10L)).willReturn(Optional.of(target));
+
+        assertThatThrownBy(() -> teamMemberService.delegateLeader(1L, 7L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_MEMBER_NOT_FOUND));
+    }
 }

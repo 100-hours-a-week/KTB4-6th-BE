@@ -80,6 +80,14 @@ public class TeamMember extends BaseEntity {
         markDeleted(kickedAt);
     }
 
+    public void promoteToLeader() {
+        this.role = TeamMemberRole.LEADER;
+    }
+
+    public void demoteToMember() {
+        this.role = TeamMemberRole.MEMBER;
+    }
+
     public void releaseKick() {
         this.membershipStatus = MembershipStatus.LEFT;
     }

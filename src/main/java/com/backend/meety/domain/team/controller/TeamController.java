@@ -2,6 +2,7 @@ package com.backend.meety.domain.team.controller;
 
 import com.backend.meety.domain.team.dto.InvitationCodeResponse;
 import com.backend.meety.domain.team.dto.MyTeamResponse;
+import com.backend.meety.domain.team.dto.LeaderDelegateRequest;
 import com.backend.meety.domain.team.dto.TeamBlockListResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -78,6 +80,16 @@ public class TeamController {
             @PathVariable Long teamMemberId
     ) {
         teamMemberService.kick(userId, teamId, teamMemberId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PutMapping("/{teamId}/leader")
+    public ResponseEntity<Void> delegateLeader(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long teamId,
+            @Valid @RequestBody LeaderDelegateRequest request
+    ) {
+        teamMemberService.delegateLeader(userId, teamId, request.teamMemberId());
         return ResponseEntity.noContent().build();
     }
 
