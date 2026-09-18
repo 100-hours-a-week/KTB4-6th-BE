@@ -5,6 +5,7 @@ import com.backend.meety.domain.team.dto.TeamJoinRequest;
 import com.backend.meety.domain.team.dto.TeamMemberListResponse;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
+import com.backend.meety.domain.team.entity.TeamBlock;
 import com.backend.meety.domain.team.entity.TeamInvitationCode;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.exception.TeamErrorCode;
@@ -89,6 +90,42 @@ public class TeamMemberService {
             teamMemberRepository.flush();
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.TEAM_LEAVE_FAILED);
+        }
+    }
+
+    @Transactional
+    public void kick(Long userId, Long teamId, Long teamMemberId) {
+        Team team = teamRepository.findByIdForUpdate(teamId)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
+        if (team.isDeleted()) {
+            throw new TeamException(TeamErrorCode.TEAM_NOT_FOUND);
+        }
+        validateLeader(teamId, userId);
+        TeamMember target = teamMemberRepository.findById(teamMemberId)
+                .filter(member -> member.getTeam().getId().equals(teamId))
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_MEMBER_NOT_FOUND));
+        if (target.getUser().getId().equals(userId)) {
+            throw new TeamException(TeamErrorCode.CANNOT_KICK_SELF);
+        }
+        if (target.getMembershipStatus() != MembershipStatus.ACTIVE) {
+            throw new TeamException(TeamErrorCode.TEAM_MEMBER_NOT_ACTIVE);
+        }
+        target.kick(LocalDateTime.now(clock));
+        // TODO: 명시적 flush는 커밋 시점 UPDATE 실패를 TEAM_MEMBER_KICK_FAILED로 번역하기 위한 장치 (leave와 동일 논의 대상)
+        try {
+            teamBlockRepository.save(TeamBlock.create(team, target.getUser()));
+            teamMemberRepository.flush();
+        } catch (DataAccessException e) {
+            throw new TeamException(TeamErrorCode.TEAM_MEMBER_KICK_FAILED);
+        }
+    }
+
+    private void validateLeader(Long teamId, Long userId) {
+        TeamMember requester = teamMemberRepository
+                .findByTeamIdAndUserIdAndMembershipStatus(teamId, userId, MembershipStatus.ACTIVE)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED));
+        if (!requester.isLeader()) {
+            throw new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED);
         }
     }
 

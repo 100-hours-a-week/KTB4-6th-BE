@@ -70,6 +70,16 @@ public class TeamController {
         return ResponseEntity.noContent().build();
     }
 
+    @DeleteMapping("/{teamId}/members/{teamMemberId}")
+    public ResponseEntity<Void> kick(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long teamId,
+            @PathVariable Long teamMemberId
+    ) {
+        teamMemberService.kick(userId, teamId, teamMemberId);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/{teamId}/invitation-codes")
     public ResponseEntity<ApiResponse<InvitationCodeResponse>> regenerateInvitationCode(
             @AuthenticationPrincipal Long userId,

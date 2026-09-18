@@ -31,4 +31,13 @@ public class TeamBlock extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    private TeamBlock(Team team, User user) {
+        this.team = team;
+        this.user = user;
+    }
+
+    public static TeamBlock create(Team team, User user) {
+        return new TeamBlock(team, user);
+    }
 }
