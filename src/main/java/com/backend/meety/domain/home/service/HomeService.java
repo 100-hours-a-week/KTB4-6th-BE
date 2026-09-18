@@ -67,7 +67,7 @@ public class HomeService {
                 meetingMetricRepository.averageSpeechBalanceScoreByTeamId(teamId)
         );
 
-        LocalDate today = LocalDate.now(KST_ZONE_ID);
+        LocalDate today = LocalDate.now(clock.withZone(KST_ZONE_ID));
         List<Meeting> todayMeetings = meetingRepository.findTodayMeetingsByTeamIdAndEffectiveStartAtBetween(
                 teamId,
                 today.atStartOfDay(),
