@@ -3,6 +3,7 @@ package com.backend.meety.domain.team.repository;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.TeamMember;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -64,9 +65,9 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
 
     List<TeamMember> findAllByTeamIdAndUserIdIn(Long teamId, List<Long> userIds);
 
-    boolean existsByUserIdAndMembershipStatusAndDeletedAtGreaterThanEqual(
+    boolean existsByUserIdAndMembershipStatusInAndDeletedAtGreaterThanEqual(
             Long userId,
-            MembershipStatus membershipStatus,
+            Collection<MembershipStatus> membershipStatuses,
             LocalDateTime deletedAt
     );
 }

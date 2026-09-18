@@ -21,6 +21,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
@@ -33,6 +34,8 @@ public class TeamService {
 
     private static final int MAX_INVITATION_CODE_ATTEMPTS = 5;
     private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
+    private static final List<MembershipStatus> TEAM_DEPARTURE_STATUSES =
+            List.of(MembershipStatus.LEFT, MembershipStatus.KICKED, MembershipStatus.TEAM_DELETED);
 
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
@@ -128,8 +131,8 @@ public class TeamService {
 
     private void validateNoTeamLeftToday(Long userId) {
         LocalDateTime startOfToday = LocalDate.now(clock.withZone(KST_ZONE_ID)).atStartOfDay();
-        if (teamMemberRepository.existsByUserIdAndMembershipStatusAndDeletedAtGreaterThanEqual(
-                userId, MembershipStatus.LEFT, startOfToday)) {
+        if (teamMemberRepository.existsByUserIdAndMembershipStatusInAndDeletedAtGreaterThanEqual(
+                userId, TEAM_DEPARTURE_STATUSES, startOfToday)) {
             throw new TeamException(TeamErrorCode.TEAM_CREATE_DAILY_LIMIT_EXCEEDED);
         }
     }
