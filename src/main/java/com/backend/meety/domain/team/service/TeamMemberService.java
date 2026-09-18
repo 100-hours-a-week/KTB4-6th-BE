@@ -269,7 +269,7 @@ public class TeamMemberService {
     }
 
     private void validateDisplayNameAvailable(Long teamId, Long userId, String displayName) {
-        if (teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(teamId, displayName, userId)) {
+        if (teamMemberRepository.existsDisplayNameUsedByOthers(teamId, displayName, userId)) {
             throw new TeamException(TeamErrorCode.DISPLAY_NAME_DUPLICATED);
         }
     }

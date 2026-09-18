@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
@@ -374,5 +375,77 @@ class TeamServiceTest {
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_ACCESS_DENIED));
         then(teamInvitationCodeRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("팀장이 팀을 삭제하면 팀·멤버십·초대 코드가 함께 정리된다")
+    void deleteTeam() {
+        Team team = Team.create("Meety Team");
+        ReflectionTestUtils.setField(team, "id", 7L);
+        TeamMember leader = TeamMember.createLeader(User.create(), team, "jay");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+
+        teamService.delete(1L, 7L);
+
+        assertThat(team.isDeleted()).isTrue();
+        then(teamMemberRepository).should().markAllActiveAsTeamDeleted(eq(7L), any(LocalDateTime.class));
+        then(teamInvitationCodeRepository).should().revokeAllByTeamId(eq(7L), any(LocalDateTime.class));
+    }
+
+    @Test
+    @DisplayName("팀장이 아니면 팀을 삭제할 수 없다")
+    void deleteTeamFailOnNonLeader() {
+        Team team = Team.create("Meety Team");
+        ReflectionTestUtils.setField(team, "id", 7L);
+        TeamMember member = TeamMember.createMember(User.create(), team, "hoon");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(member));
+
+        assertThatThrownBy(() -> teamService.delete(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_LEADER_REQUIRED));
+        assertThat(team.isDeleted()).isFalse();
+        then(teamMemberRepository).should(never())
+                .markAllActiveAsTeamDeleted(any(Long.class), any(LocalDateTime.class));
+    }
+
+    @Test
+    @DisplayName("팀원이 아니면 팀을 삭제할 수 없다")
+    void deleteTeamFailOnNonMember() {
+        Team team = Team.create("Meety Team");
+        ReflectionTestUtils.setField(team, "id", 7L);
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamService.delete(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_LEADER_REQUIRED));
+    }
+
+    @Test
+    @DisplayName("이미 삭제된 팀은 다시 삭제할 수 없다")
+    void deleteTeamFailOnDeletedTeam() {
+        Team team = Team.create("Meety Team");
+        ReflectionTestUtils.setField(team, "id", 7L);
+        ReflectionTestUtils.setField(team, "deletedAt", LocalDateTime.of(2026, 9, 17, 10, 0));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+
+        assertThatThrownBy(() -> teamService.delete(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 팀은 삭제할 수 없다")
+    void deleteTeamFailOnUnknownTeam() {
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamService.delete(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
     }
 }

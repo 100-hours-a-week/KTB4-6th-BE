@@ -91,7 +91,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L)).willReturn(false);
+        given(teamMemberRepository.existsDisplayNameUsedByOthers(7L, "hoon", 1L)).willReturn(false);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
 
@@ -218,7 +218,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L)).willReturn(true);
+        given(teamMemberRepository.existsDisplayNameUsedByOthers(7L, "hoon", 1L)).willReturn(true);
 
         assertThatThrownBy(() -> teamMemberService.join(1L, REQUEST))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -237,7 +237,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L)).willReturn(false);
+        given(teamMemberRepository.existsDisplayNameUsedByOthers(7L, "hoon", 1L)).willReturn(false);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willThrow(new DataIntegrityViolationException("insert failed"));
 
@@ -592,7 +592,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L))
+        given(teamMemberRepository.existsDisplayNameUsedByOthers(7L, "hoon", 1L))
                 .willReturn(false);
         given(teamMemberRepository.findByTeamIdAndUserId(7L, 1L)).willReturn(Optional.of(existing));
 

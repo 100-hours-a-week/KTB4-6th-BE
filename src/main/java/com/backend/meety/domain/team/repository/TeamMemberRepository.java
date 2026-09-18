@@ -7,6 +7,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -42,7 +43,16 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
 
     long countByTeamIdAndMembershipStatus(Long teamId, MembershipStatus membershipStatus);
 
-    boolean existsByTeamIdAndDisplayNameAndUserIdNot(Long teamId, String displayName, Long userId);
+    @Query("select count(tm) > 0 "
+            + "from TeamMember tm "
+            + "where tm.team.id = :teamId "
+            + "and tm.displayName = :displayName "
+            + "and tm.user.id <> :userId")
+    boolean existsDisplayNameUsedByOthers(
+            @Param("teamId") Long teamId,
+            @Param("displayName") String displayName,
+            @Param("userId") Long userId
+    );
 
     Optional<TeamMember> findByTeamIdAndUserId(Long teamId, Long userId);
 
@@ -64,6 +74,14 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
     );
 
     List<TeamMember> findAllByTeamIdAndUserIdIn(Long teamId, List<Long> userIds);
+
+    @Modifying
+    @Query("update TeamMember tm "
+            + "set tm.membershipStatus = com.backend.meety.domain.team.entity.MembershipStatus.TEAM_DELETED, "
+            + "tm.deletedAt = :now "
+            + "where tm.team.id = :teamId "
+            + "and tm.membershipStatus = com.backend.meety.domain.team.entity.MembershipStatus.ACTIVE")
+    void markAllActiveAsTeamDeleted(@Param("teamId") Long teamId, @Param("now") LocalDateTime now);
 
     boolean existsByUserIdAndMembershipStatusInAndDeletedAtGreaterThanEqual(
             Long userId,
