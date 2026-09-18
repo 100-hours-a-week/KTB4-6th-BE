@@ -56,6 +56,15 @@ public class TeamController {
         return ResponseEntity.ok(ApiResponse.success(teamService.getTeam(userId, teamId)));
     }
 
+    @DeleteMapping("/{teamId}")
+    public ResponseEntity<Void> delete(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long teamId
+    ) {
+        teamService.delete(userId, teamId);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/{teamId}/members")
     public ResponseEntity<ApiResponse<TeamMemberListResponse>> getMembers(
             @AuthenticationPrincipal Long userId,

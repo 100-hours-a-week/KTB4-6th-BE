@@ -33,9 +33,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class TeamService {
 
     private static final int MAX_INVITATION_CODE_ATTEMPTS = 5;
+    // TODO: HomeService, MeetingService에도 같은 선언이 있음. 전역 규칙이므로 공용 상수로 통합 필요 (팀 논의)
     private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
-    private static final List<MembershipStatus> TEAM_DEPARTURE_STATUSES =
-            List.of(MembershipStatus.LEFT, MembershipStatus.KICKED, MembershipStatus.TEAM_DELETED);
 
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
@@ -65,11 +64,7 @@ public class TeamService {
 
     @Transactional
     public InvitationCodeResponse regenerateInvitationCode(Long userId, Long teamId) {
-        Team team = teamRepository.findByIdForUpdate(teamId)
-                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
-        if (team.isDeleted()) {
-            throw new TeamException(TeamErrorCode.TEAM_NOT_FOUND);
-        }
+        Team team = lockActiveTeam(teamId);
         validateLeader(teamId, userId);
         TeamInvitationCode currentCode = teamInvitationCodeRepository
                 .findByTeamIdAndDeletedAtIsNull(teamId)
@@ -84,22 +79,6 @@ public class TeamService {
             return InvitationCodeResponse.from(newCode);
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.INVITATION_CODE_CREATE_FAILED);
-        }
-    }
-
-    private void validateLeader(Long teamId, Long userId) {
-        TeamMember teamMember = teamMemberRepository
-                .findByTeamIdAndUserIdAndMembershipStatus(teamId, userId, MembershipStatus.ACTIVE)
-                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED));
-        if (!teamMember.isLeader()) {
-            throw new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED);
-        }
-    }
-
-    private void validateDailyRegenerationLimit(TeamInvitationCode currentCode) {
-        LocalDate today = LocalDate.now(clock.withZone(KST_ZONE_ID));
-        if (currentCode.isCreatedOn(today)) {
-            throw new TeamException(TeamErrorCode.INVITATION_CODE_REGENERATION_LIMIT_EXCEEDED);
         }
     }
 
@@ -123,6 +102,46 @@ public class TeamService {
         return TeamDetailResponse.of(team, teamMember, invitationCode.getCode());
     }
 
+    @Transactional
+    public void delete(Long userId, Long teamId) {
+        Team team = lockActiveTeam(teamId);
+        validateLeader(teamId, userId);
+        LocalDateTime now = LocalDateTime.now(clock);
+        try {
+            team.delete(now);
+            teamRepository.flush();
+            teamMemberRepository.markAllActiveAsTeamDeleted(teamId, now);
+            teamInvitationCodeRepository.revokeAllByTeamId(teamId, now);
+        } catch (DataAccessException e) {
+            throw new TeamException(TeamErrorCode.TEAM_DELETE_FAILED);
+        }
+    }
+
+    private Team lockActiveTeam(Long teamId) {
+        Team team = teamRepository.findByIdForUpdate(teamId)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_NOT_FOUND));
+        if (team.isDeleted()) {
+            throw new TeamException(TeamErrorCode.TEAM_NOT_FOUND);
+        }
+        return team;
+    }
+
+    private void validateLeader(Long teamId, Long userId) {
+        TeamMember teamMember = teamMemberRepository
+                .findByTeamIdAndUserIdAndMembershipStatus(teamId, userId, MembershipStatus.ACTIVE)
+                .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED));
+        if (!teamMember.isLeader()) {
+            throw new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED);
+        }
+    }
+
+    private void validateDailyRegenerationLimit(TeamInvitationCode currentCode) {
+        LocalDate today = LocalDate.now(clock.withZone(KST_ZONE_ID));
+        if (currentCode.isCreatedOn(today)) {
+            throw new TeamException(TeamErrorCode.INVITATION_CODE_REGENERATION_LIMIT_EXCEEDED);
+        }
+    }
+
     private void validateNoActiveTeam(Long userId) {
         if (teamMemberRepository.existsByUserIdAndMembershipStatus(userId, MembershipStatus.ACTIVE)) {
             throw new TeamException(TeamErrorCode.ACTIVE_TEAM_ALREADY_EXISTS);
@@ -132,7 +151,9 @@ public class TeamService {
     private void validateNoTeamLeftToday(Long userId) {
         LocalDateTime startOfToday = LocalDate.now(clock.withZone(KST_ZONE_ID)).atStartOfDay();
         if (teamMemberRepository.existsByUserIdAndMembershipStatusInAndDeletedAtGreaterThanEqual(
-                userId, TEAM_DEPARTURE_STATUSES, startOfToday)) {
+                userId,
+                List.of(MembershipStatus.LEFT, MembershipStatus.KICKED, MembershipStatus.TEAM_DELETED),
+                startOfToday)) {
             throw new TeamException(TeamErrorCode.TEAM_CREATE_DAILY_LIMIT_EXCEEDED);
         }
     }

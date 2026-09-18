@@ -46,7 +46,8 @@ public enum TeamErrorCode implements BaseCode {
     TEAM_BLOCK_RELEASE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
             "TEAM_BLOCK_RELEASE_FAILED", "차단 해제에 실패했습니다."),
     TEAM_LEADER_UPDATE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
-            "TEAM_LEADER_UPDATE_FAILED", "팀장 위임에 실패했습니다.");
+            "TEAM_LEADER_UPDATE_FAILED", "팀장 위임에 실패했습니다."),
+    TEAM_DELETE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "TEAM_DELETE_FAILED", "팀을 삭제하지 못했습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;
