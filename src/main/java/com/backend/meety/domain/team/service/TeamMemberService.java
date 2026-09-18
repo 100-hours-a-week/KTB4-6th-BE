@@ -8,7 +8,6 @@ import com.backend.meety.domain.team.dto.TeamMemberListResponse;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamBlock;
-import com.backend.meety.domain.team.entity.TeamBlock;
 import com.backend.meety.domain.team.entity.TeamInvitationCode;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.exception.TeamErrorCode;
@@ -55,9 +54,14 @@ public class TeamMemberService {
         validateCodeStillActive(code, team.getId());
         validateNotBlocked(team.getId(), userId);
         validateCapacity(team.getId());
-        validateDisplayNameAvailable(team.getId(), request.displayName());
+        validateDisplayNameAvailable(team.getId(), userId, request.displayName());
         try {
-            teamMemberRepository.save(TeamMember.createMember(user, team, request.displayName()));
+            teamMemberRepository.findByTeamIdAndUserId(team.getId(), userId)
+                    .ifPresentOrElse(
+                            existing -> existing.rejoin(request.displayName()),
+                            () -> teamMemberRepository.save(
+                                    TeamMember.createMember(user, team, request.displayName())));
+            teamMemberRepository.flush();
             return MyTeamResponse.of(team.getId());
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.TEAM_MEMBERSHIP_CREATE_FAILED);
@@ -244,8 +248,8 @@ public class TeamMemberService {
         }
     }
 
-    private void validateDisplayNameAvailable(Long teamId, String displayName) {
-        if (teamMemberRepository.existsByTeamIdAndDisplayName(teamId, displayName)) {
+    private void validateDisplayNameAvailable(Long teamId, Long userId, String displayName) {
+        if (teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(teamId, displayName, userId)) {
             throw new TeamException(TeamErrorCode.DISPLAY_NAME_DUPLICATED);
         }
     }

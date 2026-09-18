@@ -91,7 +91,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsByTeamIdAndDisplayName(7L, "hoon")).willReturn(false);
+        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L)).willReturn(false);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
 
@@ -218,7 +218,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsByTeamIdAndDisplayName(7L, "hoon")).willReturn(true);
+        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L)).willReturn(true);
 
         assertThatThrownBy(() -> teamMemberService.join(1L, REQUEST))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -237,7 +237,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsByTeamIdAndDisplayName(7L, "hoon")).willReturn(false);
+        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L)).willReturn(false);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willThrow(new DataIntegrityViolationException("insert failed"));
 
@@ -475,6 +475,7 @@ class TeamMemberServiceTest {
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_MEMBER_KICK_FAILED));
     }
+
     @Test
     @DisplayName("팀장은 차단 목록을 최신 이력 이름과 함께 조회한다")
     void getBlocks() {
@@ -576,4 +577,30 @@ class TeamMemberServiceTest {
                         e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_BLOCK_NOT_FOUND));
     }
 
+    @Test
+    @DisplayName("차단 해제 후 재입장하면 기존 멤버십 행이 복구된다")
+    void rejoinRestoresExistingRow() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember existing = TeamMember.createMember(user, team, "옛이름");
+        existing.kick(LocalDateTime.of(2026, 9, 17, 10, 0));
+        given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
+        given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(false);
+        given(teamInvitationCodeRepository.findByCodeAndDeletedAtIsNull(CODE))
+                .willReturn(Optional.of(invitationCode));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
+        given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
+                .willReturn(3L);
+        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L))
+                .willReturn(false);
+        given(teamMemberRepository.findByTeamIdAndUserId(7L, 1L)).willReturn(Optional.of(existing));
+
+        teamMemberService.join(1L, REQUEST);
+
+        assertThat(existing.getMembershipStatus()).isEqualTo(MembershipStatus.ACTIVE);
+        assertThat(existing.getDisplayName()).isEqualTo("hoon");
+        assertThat(existing.getDeletedAt()).isNull();
+        then(teamMemberRepository).should(never()).save(any(TeamMember.class));
+    }
 }

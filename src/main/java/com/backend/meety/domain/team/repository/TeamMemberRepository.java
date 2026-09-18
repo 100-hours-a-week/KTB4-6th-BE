@@ -41,7 +41,9 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
 
     long countByTeamIdAndMembershipStatus(Long teamId, MembershipStatus membershipStatus);
 
-    boolean existsByTeamIdAndDisplayName(Long teamId, String displayName);
+    boolean existsByTeamIdAndDisplayNameAndUserIdNot(Long teamId, String displayName, Long userId);
+
+    Optional<TeamMember> findByTeamIdAndUserId(Long teamId, Long userId);
 
     @Query("""
             select tm
@@ -61,8 +63,6 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
     );
 
     List<TeamMember> findAllByTeamIdAndUserIdIn(Long teamId, List<Long> userIds);
-
-    Optional<TeamMember> findByTeamIdAndUserId(Long teamId, Long userId);
 
     boolean existsByUserIdAndMembershipStatusAndDeletedAtGreaterThanEqual(
             Long userId,

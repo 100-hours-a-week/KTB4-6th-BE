@@ -66,10 +66,6 @@ public class TeamMember extends BaseEntity {
         return new TeamMember(user, team, displayName, TeamMemberRole.MEMBER);
     }
 
-    public void releaseKick() {
-        this.membershipStatus = MembershipStatus.LEFT;
-    }
-
     public boolean isLeader() {
         return role == TeamMemberRole.LEADER;
     }
@@ -82,5 +78,16 @@ public class TeamMember extends BaseEntity {
     public void kick(LocalDateTime kickedAt) {
         this.membershipStatus = MembershipStatus.KICKED;
         markDeleted(kickedAt);
+    }
+
+    public void releaseKick() {
+        this.membershipStatus = MembershipStatus.LEFT;
+    }
+
+    public void rejoin(String displayName) {
+        this.displayName = displayName;
+        this.role = TeamMemberRole.MEMBER;
+        this.membershipStatus = MembershipStatus.ACTIVE;
+        restoreDeleted();
     }
 }
