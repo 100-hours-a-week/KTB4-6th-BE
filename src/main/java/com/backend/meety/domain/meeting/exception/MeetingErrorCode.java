@@ -13,6 +13,8 @@ public enum MeetingErrorCode implements BaseCode {
     TEAM_MEMBERSHIP_REQUIRED(HttpStatus.FORBIDDEN, "TEAM_MEMBERSHIP_REQUIRED", "활성 팀원만 회의를 생성할 수 있습니다."),
     DAILY_MEETING_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "DAILY_MEETING_LIMIT_EXCEEDED", "팀은 하루에 회의를 5개만 생성할 수 있습니다."),
     MEETING_NOT_FOUND(HttpStatus.NOT_FOUND, "MEETING_NOT_FOUND", "회의를 찾을 수 없습니다."),
+    MEETING_COMPLETED(HttpStatus.CONFLICT, "MEETING_COMPLETED", "이미 종료된 회의입니다."),
+    MEETING_PARTICIPANT_REQUIRED(HttpStatus.FORBIDDEN, "MEETING_PARTICIPANT_REQUIRED", "회의에 참여 중인 사용자만 녹음을 시작할 수 있습니다."),
     MEETING_ACCESS_DENIED(HttpStatus.FORBIDDEN, "MEETING_ACCESS_DENIED", "회의에 접근할 권한이 없습니다."),
     MEETING_UPDATE_FORBIDDEN(HttpStatus.FORBIDDEN, "MEETING_UPDATE_FORBIDDEN", "회의를 수정할 권한이 없습니다."),
     MEETING_DELETE_FORBIDDEN(HttpStatus.FORBIDDEN, "MEETING_DELETE_FORBIDDEN", "회의를 삭제할 권한이 없습니다."),

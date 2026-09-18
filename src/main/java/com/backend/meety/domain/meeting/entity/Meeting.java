@@ -113,6 +113,16 @@ public class Meeting extends BaseEntity {
         }
     }
 
+    public void start(LocalDateTime now) {
+        status = MeetingStatus.IN_PROGRESS;
+        startedAt = now;
+    }
+
+    public void complete(LocalDateTime now) {
+        status = MeetingStatus.COMPLETED;
+        endedAt = now;
+    }
+
     public void softDelete(LocalDateTime deletedAt) {
         markDeleted(deletedAt);
     }

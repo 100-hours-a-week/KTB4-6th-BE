@@ -1,6 +1,7 @@
 package com.backend.meety.domain.meeting.repository;
 
 import com.backend.meety.domain.meeting.entity.MeetingParticipant;
+import com.backend.meety.domain.meeting.entity.ParticipationStatus;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -10,6 +11,10 @@ import org.springframework.data.repository.query.Param;
 public interface MeetingParticipantRepository extends JpaRepository<MeetingParticipant, Long> {
 
     Optional<MeetingParticipant> findByMeetingIdAndTeamMemberId(Long meetingId, Long teamMemberId);
+
+    boolean existsByMeetingIdAndTeamMemberIdAndParticipationStatusAndDeletedAtIsNull(
+            Long meetingId, Long teamMemberId, ParticipationStatus participationStatus
+    );
 
     @Query("""
             select p
