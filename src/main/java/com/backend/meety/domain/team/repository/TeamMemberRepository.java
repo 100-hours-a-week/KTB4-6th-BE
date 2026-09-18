@@ -60,6 +60,10 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
             @Param("membershipStatus") MembershipStatus membershipStatus
     );
 
+    List<TeamMember> findAllByTeamIdAndUserIdIn(Long teamId, List<Long> userIds);
+
+    Optional<TeamMember> findByTeamIdAndUserId(Long teamId, Long userId);
+
     boolean existsByUserIdAndMembershipStatusAndDeletedAtGreaterThanEqual(
             Long userId,
             MembershipStatus membershipStatus,

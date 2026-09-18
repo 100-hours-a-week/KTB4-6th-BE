@@ -2,6 +2,7 @@ package com.backend.meety.domain.team.controller;
 
 import com.backend.meety.domain.team.dto.InvitationCodeResponse;
 import com.backend.meety.domain.team.dto.MyTeamResponse;
+import com.backend.meety.domain.team.dto.TeamBlockListResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
 import com.backend.meety.domain.team.dto.TeamDetailResponse;
@@ -77,6 +78,24 @@ public class TeamController {
             @PathVariable Long teamMemberId
     ) {
         teamMemberService.kick(userId, teamId, teamMemberId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/{teamId}/blocks")
+    public ResponseEntity<ApiResponse<TeamBlockListResponse>> getBlocks(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long teamId
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(teamMemberService.getBlocks(userId, teamId)));
+    }
+
+    @DeleteMapping("/{teamId}/blocks/{blockId}")
+    public ResponseEntity<Void> unblock(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long teamId,
+            @PathVariable Long blockId
+    ) {
+        teamMemberService.unblock(userId, teamId, blockId);
         return ResponseEntity.noContent().build();
     }
 

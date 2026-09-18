@@ -12,6 +12,7 @@ public enum TeamErrorCode implements BaseCode {
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."),
     TEAM_NOT_FOUND(HttpStatus.NOT_FOUND, "TEAM_NOT_FOUND", "팀을 찾을 수 없습니다."),
     TEAM_MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "TEAM_MEMBER_NOT_FOUND", "팀원을 찾을 수 없습니다."),
+    TEAM_BLOCK_NOT_FOUND(HttpStatus.NOT_FOUND, "TEAM_BLOCK_NOT_FOUND", "차단 정보를 찾을 수 없습니다."),
     INVITATION_CODE_NOT_FOUND(HttpStatus.NOT_FOUND, "INVITATION_CODE_NOT_FOUND", "유효하지 않은 초대 코드입니다."),
     TEAM_ACCESS_DENIED(HttpStatus.FORBIDDEN, "TEAM_ACCESS_DENIED", "팀에 접근할 권한이 없습니다."),
     TEAM_LEADER_REQUIRED(HttpStatus.FORBIDDEN, "TEAM_LEADER_REQUIRED", "팀장만 요청할 수 있습니다."),
@@ -36,7 +37,11 @@ public enum TeamErrorCode implements BaseCode {
             "TEAM_MEMBER_LOOKUP_FAILED", "팀원 목록을 조회하지 못했습니다."),
     TEAM_LEAVE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "TEAM_LEAVE_FAILED", "팀 나가기에 실패했습니다."),
     TEAM_MEMBER_KICK_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
-            "TEAM_MEMBER_KICK_FAILED", "팀원 강퇴에 실패했습니다.");
+            "TEAM_MEMBER_KICK_FAILED", "팀원 강퇴에 실패했습니다."),
+    TEAM_BLOCK_LIST_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
+            "TEAM_BLOCK_LIST_FAILED", "차단 목록을 조회하지 못했습니다."),
+    TEAM_BLOCK_RELEASE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR,
+            "TEAM_BLOCK_RELEASE_FAILED", "차단 해제에 실패했습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;

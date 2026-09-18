@@ -66,6 +66,10 @@ public class TeamMember extends BaseEntity {
         return new TeamMember(user, team, displayName, TeamMemberRole.MEMBER);
     }
 
+    public void releaseKick() {
+        this.membershipStatus = MembershipStatus.LEFT;
+    }
+
     public boolean isLeader() {
         return role == TeamMemberRole.LEADER;
     }
