@@ -1,5 +1,7 @@
 package com.backend.meety.global.exception;
 
+import com.backend.meety.domain.recording.dto.RecordingStatusUpdateRequest;
+import com.backend.meety.domain.recording.exception.RecordingErrorCode;
 import com.backend.meety.global.response.ApiResponse;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
@@ -27,6 +29,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidationException(MethodArgumentNotValidException e) {
+        if (e.getParameter().getParameterType() == RecordingStatusUpdateRequest.class) {
+            RecordingErrorCode errorCode = RecordingErrorCode.INVALID_RECORDING_STATUS;
+            return ResponseEntity.status(errorCode.getHttpStatus()).body(ApiResponse.error(errorCode));
+        }
         String message = e.getBindingResult().getFieldErrors().stream()
                 .findFirst()
                 .map(DefaultMessageSourceResolvable::getDefaultMessage)

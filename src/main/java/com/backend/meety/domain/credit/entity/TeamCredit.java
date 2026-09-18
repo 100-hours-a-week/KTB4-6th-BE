@@ -1,5 +1,7 @@
 package com.backend.meety.domain.credit.entity;
 
+import com.backend.meety.domain.credit.exception.CreditErrorCode;
+import com.backend.meety.domain.credit.exception.CreditException;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.global.entity.BaseEntity;
 import jakarta.persistence.Column;
@@ -31,4 +33,15 @@ public class TeamCredit extends BaseEntity {
 
     @Column(name = "balance", nullable = false)
     private Long balance;
+
+    public void validateCanUse(long amount) {
+        if (balance < amount) {
+            throw new CreditException(CreditErrorCode.INSUFFICIENT_CREDIT);
+        }
+    }
+
+    public void use(long amount) {
+        validateCanUse(amount);
+        balance -= amount;
+    }
 }
