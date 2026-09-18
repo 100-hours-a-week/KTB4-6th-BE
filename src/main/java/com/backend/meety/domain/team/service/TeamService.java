@@ -1,5 +1,10 @@
 package com.backend.meety.domain.team.service;
 
+import com.backend.meety.domain.credit.CreditPolicy;
+import com.backend.meety.domain.credit.entity.CreditLedger;
+import com.backend.meety.domain.credit.entity.TeamCredit;
+import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
+import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import com.backend.meety.domain.team.dto.InvitationCodeResponse;
 import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
@@ -40,6 +45,8 @@ public class TeamService {
     private final TeamMemberRepository teamMemberRepository;
     private final TeamInvitationCodeRepository teamInvitationCodeRepository;
     private final UserRepository userRepository;
+    private final TeamCreditRepository teamCreditRepository;
+    private final CreditLedgerRepository creditLedgerRepository;
     private final Clock clock;
 
     @Transactional
@@ -56,6 +63,7 @@ public class TeamService {
                     .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_CREATE_FAILED));
             TeamInvitationCode invitationCode = teamInvitationCodeRepository.save(
                     TeamInvitationCode.create(team, code));
+            grantInitialCredit(team);
             return TeamCreateResponse.of(team, leader, invitationCode);
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.TEAM_CREATE_FAILED);
@@ -115,6 +123,12 @@ public class TeamService {
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.TEAM_DELETE_FAILED);
         }
+    }
+
+    private void grantInitialCredit(Team team) {
+        TeamCredit credit = teamCreditRepository.save(TeamCredit.create(team, CreditPolicy.TEAM_CREATE_GRANT));
+        creditLedgerRepository.save(
+                CreditLedger.earnForTeamCreate(team, CreditPolicy.TEAM_CREATE_GRANT, credit.getBalance()));
     }
 
     private Team lockActiveTeam(Long teamId) {

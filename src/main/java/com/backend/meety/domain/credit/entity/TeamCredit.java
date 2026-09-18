@@ -1,5 +1,6 @@
 package com.backend.meety.domain.credit.entity;
 
+import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.exception.CreditErrorCode;
 import com.backend.meety.domain.credit.exception.CreditException;
 import com.backend.meety.domain.team.entity.Team;
@@ -33,6 +34,24 @@ public class TeamCredit extends BaseEntity {
 
     @Column(name = "balance", nullable = false)
     private Long balance;
+
+    private TeamCredit(Team team, long balance) {
+        this.team = team;
+        this.balance = balance;
+    }
+
+    public static TeamCredit create(Team team, long initialBalance) {
+        return new TeamCredit(team, Math.min(initialBalance, CreditPolicy.MAX_BALANCE));
+    }
+
+    /**
+     * 상한(300)을 초과하지 않도록 적립하고, 실제 적립된 양을 반환한다.
+     */
+    public long earn(long amount) {
+        long earned = Math.min(amount, CreditPolicy.MAX_BALANCE - balance);
+        balance += earned;
+        return earned;
+    }
 
     public void validateCanUse(long amount) {
         if (balance < amount) {

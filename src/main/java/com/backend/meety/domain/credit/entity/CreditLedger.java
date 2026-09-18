@@ -51,6 +51,18 @@ public class CreditLedger extends BaseEntity {
     @Column(name = "balance_after", nullable = false)
     private Long balanceAfter;
 
+    public static CreditLedger earnForTeamCreate(Team team, long amount, long balanceAfter) {
+        CreditLedger ledger = new CreditLedger();
+        ledger.team = team;
+        ledger.idempotencyKey = "team:create:" + team.getId();
+        ledger.sourceId = team.getId();
+        ledger.sourceType = CreditSourceType.TEAM_CREATE;
+        ledger.type = CreditTransactionType.EARN;
+        ledger.amount = amount;
+        ledger.balanceAfter = balanceAfter;
+        return ledger;
+    }
+
     public static CreditLedger useForRecording(Team team, Long recordingSessionId, long amount, long balanceAfter) {
         CreditLedger ledger = new CreditLedger();
         ledger.team = team;

@@ -11,6 +11,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
 import com.backend.meety.domain.team.dto.InvitationCodeResponse;
+import com.backend.meety.domain.credit.entity.CreditLedger;
+import com.backend.meety.domain.credit.entity.TeamCredit;
+import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
+import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
@@ -37,6 +41,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -61,12 +66,19 @@ class TeamServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private TeamCreditRepository teamCreditRepository;
+
+    @Mock
+    private CreditLedgerRepository creditLedgerRepository;
+
     private TeamService teamService;
 
     @BeforeEach
     void setUp() {
         teamService = new TeamService(teamRepository, teamMemberRepository,
-                teamInvitationCodeRepository, userRepository, FIXED_CLOCK);
+                teamInvitationCodeRepository, userRepository, teamCreditRepository,
+                creditLedgerRepository, FIXED_CLOCK);
     }
 
     @Test
@@ -82,6 +94,8 @@ class TeamServiceTest {
         given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.existsByCode(anyString())).willReturn(false);
+        given(teamCreditRepository.save(any(TeamCredit.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
 
         TeamCreateResponse response = teamService.create(1L, new TeamCreateRequest("Meety Team", "jay"));
 
@@ -147,6 +161,8 @@ class TeamServiceTest {
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.existsByCode(anyString()))
                 .willReturn(true, false);
+        given(teamCreditRepository.save(any(TeamCredit.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
 
         TeamCreateResponse response = teamService.create(1L, new TeamCreateRequest("Meety Team", "jay"));
 
@@ -447,5 +463,28 @@ class TeamServiceTest {
         assertThatThrownBy(() -> teamService.delete(1L, 7L))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("팀을 생성하면 초기 크레딧 50이 적립되고 원장에 기록된다")
+    void grantInitialCreditOnCreate() {
+        given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(User.create()));
+        given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(false);
+        given(teamRepository.save(any(Team.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(teamMemberRepository.save(any(TeamMember.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        given(teamInvitationCodeRepository.existsByCode(anyString())).willReturn(false);
+        given(teamCreditRepository.save(any(TeamCredit.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        teamService.create(1L, new TeamCreateRequest("Meety Team", "jay"));
+
+        ArgumentCaptor<TeamCredit> creditCaptor = ArgumentCaptor.forClass(TeamCredit.class);
+        then(teamCreditRepository).should().save(creditCaptor.capture());
+        assertThat(creditCaptor.getValue().getBalance()).isEqualTo(50L);
+        then(creditLedgerRepository).should().save(any(CreditLedger.class));
     }
 }
