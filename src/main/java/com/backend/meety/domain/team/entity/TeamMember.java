@@ -74,4 +74,20 @@ public class TeamMember extends BaseEntity {
         this.membershipStatus = MembershipStatus.LEFT;
         markDeleted(leftAt);
     }
+
+    public void kick(LocalDateTime kickedAt) {
+        this.membershipStatus = MembershipStatus.KICKED;
+        markDeleted(kickedAt);
+    }
+
+    public void releaseKick() {
+        this.membershipStatus = MembershipStatus.LEFT;
+    }
+
+    public void rejoin(String displayName) {
+        this.displayName = displayName;
+        this.role = TeamMemberRole.MEMBER;
+        this.membershipStatus = MembershipStatus.ACTIVE;
+        restoreDeleted();
+    }
 }

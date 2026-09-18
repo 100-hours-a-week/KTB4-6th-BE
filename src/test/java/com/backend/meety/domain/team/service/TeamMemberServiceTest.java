@@ -10,9 +10,11 @@ import static org.mockito.Mockito.times;
 
 import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamJoinRequest;
+import com.backend.meety.domain.team.dto.TeamBlockListResponse;
 import com.backend.meety.domain.team.dto.TeamMemberListResponse;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
+import com.backend.meety.domain.team.entity.TeamBlock;
 import com.backend.meety.domain.team.entity.TeamInvitationCode;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.exception.TeamErrorCode;
@@ -89,7 +91,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsByTeamIdAndDisplayName(7L, "hoon")).willReturn(false);
+        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L)).willReturn(false);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
 
@@ -216,7 +218,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsByTeamIdAndDisplayName(7L, "hoon")).willReturn(true);
+        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L)).willReturn(true);
 
         assertThatThrownBy(() -> teamMemberService.join(1L, REQUEST))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -235,7 +237,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsByTeamIdAndDisplayName(7L, "hoon")).willReturn(false);
+        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L)).willReturn(false);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willThrow(new DataIntegrityViolationException("insert failed"));
 
@@ -347,5 +349,258 @@ class TeamMemberServiceTest {
         assertThatThrownBy(() -> teamMemberService.leave(1L, 7L))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("팀장이 팀원을 강퇴하면 KICKED 처리되고 차단 목록에 등록된다")
+    void kick() {
+        User leaderUser = user;
+        ReflectionTestUtils.setField(leaderUser, "id", 1L);
+        User targetUser = User.create();
+        ReflectionTestUtils.setField(targetUser, "id", 2L);
+        TeamMember leader = TeamMember.createLeader(leaderUser, team, "leader");
+        TeamMember target = TeamMember.createMember(targetUser, team, "hoon");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamMemberRepository.findById(10L)).willReturn(Optional.of(target));
+
+        teamMemberService.kick(1L, 7L, 10L);
+
+        assertThat(target.getMembershipStatus()).isEqualTo(MembershipStatus.KICKED);
+        assertThat(target.getDeletedAt()).isNotNull();
+        then(teamBlockRepository).should().save(any(com.backend.meety.domain.team.entity.TeamBlock.class));
+    }
+
+    @Test
+    @DisplayName("팀장이 아니면 강퇴할 수 없다")
+    void kickFailOnNonLeader() {
+        User memberUser = user;
+        ReflectionTestUtils.setField(memberUser, "id", 1L);
+        TeamMember member = TeamMember.createMember(memberUser, team, "hoon");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(member));
+
+        assertThatThrownBy(() -> teamMemberService.kick(1L, 7L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_LEADER_REQUIRED));
+        then(teamBlockRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 팀원은 강퇴할 수 없다")
+    void kickFailOnUnknownMember() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamMemberRepository.findById(10L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamMemberService.kick(1L, 7L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_MEMBER_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("다른 팀 소속 팀원은 강퇴할 수 없다")
+    void kickFailOnOtherTeamMember() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        Team otherTeam = Team.create("다른팀");
+        ReflectionTestUtils.setField(otherTeam, "id", 8L);
+        TeamMember target = TeamMember.createMember(User.create(), otherTeam, "hoon");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamMemberRepository.findById(10L)).willReturn(Optional.of(target));
+
+        assertThatThrownBy(() -> teamMemberService.kick(1L, 7L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_MEMBER_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("자기 자신은 강퇴할 수 없다")
+    void kickFailOnSelf() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamMemberRepository.findById(10L)).willReturn(Optional.of(leader));
+
+        assertThatThrownBy(() -> teamMemberService.kick(1L, 7L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.CANNOT_KICK_SELF));
+    }
+
+    @Test
+    @DisplayName("이미 나간 팀원은 강퇴할 수 없다")
+    void kickFailOnInactiveMember() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        User targetUser = User.create();
+        ReflectionTestUtils.setField(targetUser, "id", 2L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        TeamMember target = TeamMember.createMember(targetUser, team, "hoon");
+        target.leave(LocalDateTime.of(2026, 9, 17, 10, 0));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamMemberRepository.findById(10L)).willReturn(Optional.of(target));
+
+        assertThatThrownBy(() -> teamMemberService.kick(1L, 7L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_MEMBER_NOT_ACTIVE));
+        then(teamBlockRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("차단 등록에 실패하면 강퇴에 실패한다")
+    void kickFailOnDataAccessError() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        User targetUser = User.create();
+        ReflectionTestUtils.setField(targetUser, "id", 2L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        TeamMember target = TeamMember.createMember(targetUser, team, "hoon");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamMemberRepository.findById(10L)).willReturn(Optional.of(target));
+        given(teamBlockRepository.save(any(com.backend.meety.domain.team.entity.TeamBlock.class)))
+                .willThrow(new DataIntegrityViolationException("insert failed"));
+
+        assertThatThrownBy(() -> teamMemberService.kick(1L, 7L, 10L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_MEMBER_KICK_FAILED));
+    }
+
+    @Test
+    @DisplayName("팀장은 차단 목록을 최신 이력 이름과 함께 조회한다")
+    void getBlocks() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        User blockedUser = User.create();
+        ReflectionTestUtils.setField(blockedUser, "id", 2L);
+        TeamBlock block = TeamBlock.create(team, blockedUser);
+        ReflectionTestUtils.setField(block, "id", 50L);
+        TeamMember oldMembership = TeamMember.createMember(blockedUser, team, "옛이름");
+        ReflectionTestUtils.setField(oldMembership, "id", 5L);
+        TeamMember latestMembership = TeamMember.createMember(blockedUser, team, "새이름");
+        ReflectionTestUtils.setField(latestMembership, "id", 9L);
+        given(teamRepository.findByIdAndDeletedAtIsNull(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamBlockRepository.findAllByTeamIdAndDeletedAtIsNullOrderByIdAsc(7L))
+                .willReturn(List.of(block));
+        given(teamMemberRepository.findAllByTeamIdAndUserIdIn(7L, List.of(2L)))
+                .willReturn(List.of(oldMembership, latestMembership));
+
+        TeamBlockListResponse response = teamMemberService.getBlocks(1L, 7L);
+
+        assertThat(response.blocks()).hasSize(1);
+        assertThat(response.blocks().get(0).blockId()).isEqualTo(50L);
+        assertThat(response.blocks().get(0).userId()).isEqualTo(2L);
+        assertThat(response.blocks().get(0).displayName()).isEqualTo("새이름");
+    }
+
+    @Test
+    @DisplayName("팀장이 아니면 차단 목록을 조회할 수 없다")
+    void getBlocksFailOnNonLeader() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember member = TeamMember.createMember(user, team, "hoon");
+        given(teamRepository.findByIdAndDeletedAtIsNull(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(member));
+
+        assertThatThrownBy(() -> teamMemberService.getBlocks(1L, 7L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_LEADER_REQUIRED));
+    }
+
+    @Test
+    @DisplayName("팀장이 차단을 해제하면 차단 행이 논리 삭제되고 멤버십이 LEFT로 바뀐다")
+    void unblock() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        User blockedUser = User.create();
+        ReflectionTestUtils.setField(blockedUser, "id", 2L);
+        TeamBlock block = TeamBlock.create(team, blockedUser);
+        TeamMember kicked = TeamMember.createMember(blockedUser, team, "hoon");
+        kicked.kick(LocalDateTime.of(2026, 9, 17, 10, 0));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamBlockRepository.findById(50L)).willReturn(Optional.of(block));
+        given(teamMemberRepository.findByTeamIdAndUserId(7L, 2L)).willReturn(Optional.of(kicked));
+
+        teamMemberService.unblock(1L, 7L, 50L);
+
+        assertThat(block.getDeletedAt()).isNotNull();
+        assertThat(kicked.getMembershipStatus()).isEqualTo(MembershipStatus.LEFT);
+        assertThat(kicked.getDeletedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("이미 해제된 차단은 다시 해제할 수 없다")
+    void unblockFailOnAlreadyReleased() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        TeamBlock block = TeamBlock.create(team, User.create());
+        block.release(LocalDateTime.of(2026, 9, 17, 10, 0));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamBlockRepository.findById(50L)).willReturn(Optional.of(block));
+
+        assertThatThrownBy(() -> teamMemberService.unblock(1L, 7L, 50L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_BLOCK_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("다른 팀의 차단은 해제할 수 없다")
+    void unblockFailOnOtherTeamBlock() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember leader = TeamMember.createLeader(user, team, "leader");
+        Team otherTeam = Team.create("다른팀");
+        ReflectionTestUtils.setField(otherTeam, "id", 8L);
+        TeamBlock block = TeamBlock.create(otherTeam, User.create());
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+        given(teamBlockRepository.findById(50L)).willReturn(Optional.of(block));
+
+        assertThatThrownBy(() -> teamMemberService.unblock(1L, 7L, 50L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_BLOCK_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("차단 해제 후 재입장하면 기존 멤버십 행이 복구된다")
+    void rejoinRestoresExistingRow() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember existing = TeamMember.createMember(user, team, "옛이름");
+        existing.kick(LocalDateTime.of(2026, 9, 17, 10, 0));
+        given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
+        given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(false);
+        given(teamInvitationCodeRepository.findByCodeAndDeletedAtIsNull(CODE))
+                .willReturn(Optional.of(invitationCode));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
+        given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
+                .willReturn(3L);
+        given(teamMemberRepository.existsByTeamIdAndDisplayNameAndUserIdNot(7L, "hoon", 1L))
+                .willReturn(false);
+        given(teamMemberRepository.findByTeamIdAndUserId(7L, 1L)).willReturn(Optional.of(existing));
+
+        teamMemberService.join(1L, REQUEST);
+
+        assertThat(existing.getMembershipStatus()).isEqualTo(MembershipStatus.ACTIVE);
+        assertThat(existing.getDisplayName()).isEqualTo("hoon");
+        assertThat(existing.getDeletedAt()).isNull();
+        then(teamMemberRepository).should(never()).save(any(TeamMember.class));
     }
 }

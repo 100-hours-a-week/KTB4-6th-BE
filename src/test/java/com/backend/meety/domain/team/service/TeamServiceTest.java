@@ -30,6 +30,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -104,13 +105,14 @@ class TeamServiceTest {
     }
 
     @Test
-    @DisplayName("오늘 팀을 나간 사용자는 팀을 생성할 수 없다")
+    @DisplayName("오늘 팀을 떠난(나감·강퇴·팀삭제) 사용자는 팀을 생성할 수 없다")
     void failOnTeamLeftToday() {
         given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(User.create()));
         given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
                 .willReturn(false);
-        given(teamMemberRepository.existsByUserIdAndMembershipStatusAndDeletedAtGreaterThanEqual(
-                1L, MembershipStatus.LEFT, LocalDateTime.of(2026, 9, 17, 0, 0)))
+        given(teamMemberRepository.existsByUserIdAndMembershipStatusInAndDeletedAtGreaterThanEqual(
+                1L, List.of(MembershipStatus.LEFT, MembershipStatus.KICKED, MembershipStatus.TEAM_DELETED),
+                LocalDateTime.of(2026, 9, 17, 0, 0)))
                 .willReturn(true);
 
         assertThatThrownBy(() -> teamService.create(1L, new TeamCreateRequest("Meety Team", "jay")))

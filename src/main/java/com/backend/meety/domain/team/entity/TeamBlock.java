@@ -10,6 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -31,4 +32,21 @@ public class TeamBlock extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    private TeamBlock(Team team, User user) {
+        this.team = team;
+        this.user = user;
+    }
+
+    public static TeamBlock create(Team team, User user) {
+        return new TeamBlock(team, user);
+    }
+
+    public void release(LocalDateTime releasedAt) {
+        markDeleted(releasedAt);
+    }
+
+    public boolean isActive() {
+        return getDeletedAt() == null;
+    }
 }
