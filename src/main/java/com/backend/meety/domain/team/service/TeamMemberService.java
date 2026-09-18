@@ -49,7 +49,7 @@ public class TeamMemberService {
         User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new TeamException(TeamErrorCode.USER_NOT_FOUND));
         validateNoActiveTeam(userId);
-        String code = request.invitationCode().toUpperCase();
+        String code = request.invitationCode().toUpperCase(Locale.ROOT);
         Team team = resolveTeamByCode(code);
         validateCodeStillActive(code, team.getId());
         validateNotBlocked(team.getId(), userId);
