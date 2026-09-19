@@ -43,6 +43,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -53,6 +54,8 @@ class TeamServiceTest {
     private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
     private static final Clock FIXED_CLOCK =
             Clock.fixed(Instant.parse("2026-09-17T03:00:00Z"), KST_ZONE_ID);
+
+    private static final long SAVED_TEAM_ID = 7L;
 
     @Mock
     private TeamRepository teamRepository;
@@ -81,6 +84,15 @@ class TeamServiceTest {
                 creditLedgerRepository, FIXED_CLOCK);
     }
 
+    /**
+     * 실제 save는 IDENTITY 전략으로 식별자를 채워 반환한다. 멱등키가 식별자에서 유도되므로 테스트에서도 같게 맞춘다.
+     */
+    private static Team saveTeamWithId(InvocationOnMock invocation) {
+        Team team = invocation.getArgument(0);
+        ReflectionTestUtils.setField(team, "id", SAVED_TEAM_ID);
+        return team;
+    }
+
     @Test
     @DisplayName("팀을 생성하면 팀장 멤버십과 초대 코드가 함께 생성된다")
     void create() {
@@ -88,7 +100,7 @@ class TeamServiceTest {
         given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
         given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
                 .willReturn(false);
-        given(teamRepository.save(any(Team.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(teamRepository.save(any(Team.class))).willAnswer(TeamServiceTest::saveTeamWithId);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
@@ -154,7 +166,7 @@ class TeamServiceTest {
         given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
         given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
                 .willReturn(false);
-        given(teamRepository.save(any(Team.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(teamRepository.save(any(Team.class))).willAnswer(TeamServiceTest::saveTeamWithId);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
@@ -177,7 +189,7 @@ class TeamServiceTest {
         given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
         given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
                 .willReturn(false);
-        given(teamRepository.save(any(Team.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(teamRepository.save(any(Team.class))).willAnswer(TeamServiceTest::saveTeamWithId);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.existsByCode(anyString())).willReturn(true);
@@ -471,7 +483,7 @@ class TeamServiceTest {
         given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(User.create()));
         given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
                 .willReturn(false);
-        given(teamRepository.save(any(Team.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(teamRepository.save(any(Team.class))).willAnswer(TeamServiceTest::saveTeamWithId);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))

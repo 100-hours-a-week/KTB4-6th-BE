@@ -13,6 +13,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.util.Objects;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -51,27 +52,40 @@ public class CreditLedger extends BaseEntity {
     @Column(name = "balance_after", nullable = false)
     private Long balanceAfter;
 
-    public static CreditLedger earnForTeamCreate(Team team, long amount, long balanceAfter) {
+    /**
+     * 멱등키를 직접 지정해 원장 행을 만든다.
+     * 정기 적립처럼 원본 레코드가 없어 {행위}:{원본타입}:{원본ID} 형식으로 표현할 수 없는 거래에 사용한다.
+     */
+    private static CreditLedger create(Team team, String idempotencyKey, CreditTransactionType type,
+            CreditSourceType sourceType, Long sourceId, long amount, long balanceAfter) {
         CreditLedger ledger = new CreditLedger();
         ledger.team = team;
-        ledger.idempotencyKey = "team:create:" + team.getId();
-        ledger.sourceId = team.getId();
-        ledger.sourceType = CreditSourceType.TEAM_CREATE;
-        ledger.type = CreditTransactionType.EARN;
-        ledger.amount = amount;
+        ledger.idempotencyKey = idempotencyKey;
+        ledger.sourceId = sourceId;
+        ledger.sourceType = sourceType;
+        ledger.type = type;
+        ledger.amount = type == CreditTransactionType.USE ? -Math.abs(amount) : Math.abs(amount);
         ledger.balanceAfter = balanceAfter;
         return ledger;
     }
 
+    /**
+     * 원본 레코드가 있는 거래의 원장 행을 만든다. 멱등키는 {행위}:{원본타입}:{원본ID}로 유도한다.
+     */
+    private static CreditLedger create(Team team, CreditTransactionType type, CreditSourceType sourceType,
+            Long sourceId, long amount, long balanceAfter) {
+        Objects.requireNonNull(sourceId, "원본 식별자 없이는 멱등키를 유도할 수 없습니다.");
+        return create(team, type + ":" + sourceType + ":" + sourceId,
+                type, sourceType, sourceId, amount, balanceAfter);
+    }
+
+    public static CreditLedger earnForTeamCreate(Team team, long amount, long balanceAfter) {
+        return create(team, CreditTransactionType.EARN, CreditSourceType.TEAM_CREATE,
+                team.getId(), amount, balanceAfter);
+    }
+
     public static CreditLedger useForRecording(Team team, Long recordingSessionId, long amount, long balanceAfter) {
-        CreditLedger ledger = new CreditLedger();
-        ledger.team = team;
-        ledger.idempotencyKey = "recording:start:" + recordingSessionId;
-        ledger.sourceId = recordingSessionId;
-        ledger.sourceType = CreditSourceType.RECORDING;
-        ledger.type = CreditTransactionType.USE;
-        ledger.amount = amount;
-        ledger.balanceAfter = balanceAfter;
-        return ledger;
+        return create(team, CreditTransactionType.USE, CreditSourceType.RECORDING,
+                recordingSessionId, amount, balanceAfter);
     }
 }
