@@ -13,4 +13,6 @@ public interface TeamCreditRepository extends JpaRepository<TeamCredit, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select c from TeamCredit c where c.team.id = :teamId and c.deletedAt is null")
     Optional<TeamCredit> findByTeamIdForUpdate(@Param("teamId") Long teamId);
+
+    Optional<TeamCredit> findByTeamIdAndDeletedAtIsNull(Long teamId);
 }

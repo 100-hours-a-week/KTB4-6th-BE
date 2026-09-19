@@ -11,6 +11,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
 import com.backend.meety.domain.team.dto.InvitationCodeResponse;
+import com.backend.meety.domain.credit.entity.CreditLedger;
+import com.backend.meety.domain.credit.entity.TeamCredit;
+import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
+import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
@@ -37,7 +41,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -48,6 +54,8 @@ class TeamServiceTest {
     private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
     private static final Clock FIXED_CLOCK =
             Clock.fixed(Instant.parse("2026-09-17T03:00:00Z"), KST_ZONE_ID);
+
+    private static final long SAVED_TEAM_ID = 7L;
 
     @Mock
     private TeamRepository teamRepository;
@@ -61,12 +69,28 @@ class TeamServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private TeamCreditRepository teamCreditRepository;
+
+    @Mock
+    private CreditLedgerRepository creditLedgerRepository;
+
     private TeamService teamService;
 
     @BeforeEach
     void setUp() {
         teamService = new TeamService(teamRepository, teamMemberRepository,
-                teamInvitationCodeRepository, userRepository, FIXED_CLOCK);
+                teamInvitationCodeRepository, userRepository, teamCreditRepository,
+                creditLedgerRepository, FIXED_CLOCK);
+    }
+
+    /**
+     * 실제 save는 IDENTITY 전략으로 식별자를 채워 반환한다. 멱등키가 식별자에서 유도되므로 테스트에서도 같게 맞춘다.
+     */
+    private static Team saveTeamWithId(InvocationOnMock invocation) {
+        Team team = invocation.getArgument(0);
+        ReflectionTestUtils.setField(team, "id", SAVED_TEAM_ID);
+        return team;
     }
 
     @Test
@@ -76,12 +100,14 @@ class TeamServiceTest {
         given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
         given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
                 .willReturn(false);
-        given(teamRepository.save(any(Team.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(teamRepository.save(any(Team.class))).willAnswer(TeamServiceTest::saveTeamWithId);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.existsByCode(anyString())).willReturn(false);
+        given(teamCreditRepository.save(any(TeamCredit.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
 
         TeamCreateResponse response = teamService.create(1L, new TeamCreateRequest("Meety Team", "jay"));
 
@@ -140,13 +166,15 @@ class TeamServiceTest {
         given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
         given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
                 .willReturn(false);
-        given(teamRepository.save(any(Team.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(teamRepository.save(any(Team.class))).willAnswer(TeamServiceTest::saveTeamWithId);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.existsByCode(anyString()))
                 .willReturn(true, false);
+        given(teamCreditRepository.save(any(TeamCredit.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
 
         TeamCreateResponse response = teamService.create(1L, new TeamCreateRequest("Meety Team", "jay"));
 
@@ -161,7 +189,7 @@ class TeamServiceTest {
         given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
         given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
                 .willReturn(false);
-        given(teamRepository.save(any(Team.class))).willAnswer(invocation -> invocation.getArgument(0));
+        given(teamRepository.save(any(Team.class))).willAnswer(TeamServiceTest::saveTeamWithId);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.existsByCode(anyString())).willReturn(true);
@@ -447,5 +475,28 @@ class TeamServiceTest {
         assertThatThrownBy(() -> teamService.delete(1L, 7L))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("팀을 생성하면 초기 크레딧 50이 적립되고 원장에 기록된다")
+    void grantInitialCreditOnCreate() {
+        given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(User.create()));
+        given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(false);
+        given(teamRepository.save(any(Team.class))).willAnswer(TeamServiceTest::saveTeamWithId);
+        given(teamMemberRepository.save(any(TeamMember.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        given(teamInvitationCodeRepository.existsByCode(anyString())).willReturn(false);
+        given(teamCreditRepository.save(any(TeamCredit.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+
+        teamService.create(1L, new TeamCreateRequest("Meety Team", "jay"));
+
+        ArgumentCaptor<TeamCredit> creditCaptor = ArgumentCaptor.forClass(TeamCredit.class);
+        then(teamCreditRepository).should().save(creditCaptor.capture());
+        assertThat(creditCaptor.getValue().getBalance()).isEqualTo(50L);
+        then(creditLedgerRepository).should().save(any(CreditLedger.class));
     }
 }

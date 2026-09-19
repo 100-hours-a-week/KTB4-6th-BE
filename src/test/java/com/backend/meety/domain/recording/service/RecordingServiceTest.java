@@ -102,12 +102,12 @@ class RecordingServiceTest {
 
         ArgumentCaptor<CreditLedger> ledger = ArgumentCaptor.forClass(CreditLedger.class);
         verify(ledgers).save(ledger.capture());
-        assertThat(ledger.getValue().getAmount()).isEqualTo(20L);
+        assertThat(ledger.getValue().getAmount()).isEqualTo(-20L);
         assertThat(ledger.getValue().getBalanceAfter()).isZero();
         assertThat(ledger.getValue().getType()).isEqualTo(CreditTransactionType.USE);
         assertThat(ledger.getValue().getSourceType()).isEqualTo(CreditSourceType.RECORDING);
         assertThat(ledger.getValue().getSourceId()).isEqualTo(700L);
-        assertThat(ledger.getValue().getIdempotencyKey()).isEqualTo("recording:start:700");
+        assertThat(ledger.getValue().getIdempotencyKey()).isEqualTo("USE:RECORDING:700");
         InOrder order = inOrder(meetings, credits, recordings, ledgers);
         order.verify(meetings).findByIdForUpdateAndDeletedAtIsNull(100L);
         order.verify(credits).findByTeamIdForUpdate(2L);

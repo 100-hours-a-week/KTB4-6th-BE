@@ -6,6 +6,7 @@ build/
 !**/src/test/**/build/
 CLAUDE.md
 AGENTS.md
+.claude/
 .codex
 .env
 
