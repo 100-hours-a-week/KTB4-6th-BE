@@ -15,8 +15,8 @@ public final class CreditPolicy {
     /** 팀 생성 시 지급되는 초기 크레딧. */
     public static final long TEAM_CREATE_GRANT = 50L;
 
-    /** 매일 00:00(KST) 자동 적립량. */
-    public static final long DAILY_GRANT = 50L;
+    /** 매주 월요일 00:00(KST) 자동 적립량. */
+    public static final long WEEKLY_GRANT = 50L;
 
     /** 녹음 시작 시 차감량. */
     public static final long RECORDING_COST = 20L;
