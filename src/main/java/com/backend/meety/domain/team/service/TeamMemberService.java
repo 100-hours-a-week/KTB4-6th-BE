@@ -54,7 +54,7 @@ public class TeamMemberService {
         validateCodeStillActive(code, team.getId());
         validateNotBlocked(team.getId(), userId);
         validateCapacity(team.getId());
-        validateDisplayNameAvailable(team.getId(), userId, request.displayName());
+        validateDisplayNameAvailable(team.getId(), request.displayName());
         try {
             teamMemberRepository.findByTeamIdAndUserId(team.getId(), userId)
                     .ifPresentOrElse(
@@ -268,8 +268,8 @@ public class TeamMemberService {
         }
     }
 
-    private void validateDisplayNameAvailable(Long teamId, Long userId, String displayName) {
-        if (teamMemberRepository.existsDisplayNameUsedByOthers(teamId, displayName, userId)) {
+    private void validateDisplayNameAvailable(Long teamId, String displayName) {
+        if (teamMemberRepository.existsActiveDisplayName(teamId, displayName, MembershipStatus.ACTIVE)) {
             throw new TeamException(TeamErrorCode.DISPLAY_NAME_DUPLICATED);
         }
     }
