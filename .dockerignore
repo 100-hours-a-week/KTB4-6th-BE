@@ -1,0 +1,25 @@
+# 버전 관리 관련 (빌드에 불필요, 특히 .git은 히스토리까지 포함되어 용량 큼)
+.git
+.github
+.gitignore
+.gitattributes
+
+# 로컬 개발 도구 설정 (빌드와 무관)
+.codex
+
+# 환경변수 (실제 값은 ECS Task Definition 등에서 주입, 이미지에 포함시키지 않음)
+.env
+.env.*
+
+# 로컬 오케스트레이션 전용 (컨테이너 내부에서는 쓰이지 않음)
+docker-compose.yml
+
+# 문서
+README.md
+
+# Windows 전용 스크립트 (Linux 베이스 이미지에서 불필요)
+gradlew.bat
+
+# Gradle 빌드 산출물/캐시 (매번 새로 생성되므로 컨텍스트에 포함할 이유 없음)
+build/
+.gradle/
