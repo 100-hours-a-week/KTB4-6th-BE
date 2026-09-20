@@ -20,7 +20,6 @@ import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -73,9 +72,8 @@ public class HomeService {
                 today.atStartOfDay(),
                 today.plusDays(1).atStartOfDay()
         );
-        LocalDateTime now = LocalDateTime.now(clock.withZone(KST_ZONE_ID));
         List<HomeTodayMeetingResponse> todayMeetingResponses = todayMeetings.stream()
-                .map(meeting -> HomeTodayMeetingResponse.from(meeting, now))
+                .map(HomeTodayMeetingResponse::from)
                 .toList();
 
         return HomeResponse.of(teamResponse, meetingSummary, meetingMetrics, todayMeetingResponses);

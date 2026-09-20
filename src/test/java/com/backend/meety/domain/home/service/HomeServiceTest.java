@@ -128,7 +128,7 @@ class HomeServiceTest {
         assertThat(response.todayMeetings()).extracting("status")
                 .containsExactly(
                         HomeMeetingDisplayStatus.WAITING,
-                        HomeMeetingDisplayStatus.SCHEDULED,
+                        HomeMeetingDisplayStatus.WAITING,
                         HomeMeetingDisplayStatus.IN_PROGRESS,
                         HomeMeetingDisplayStatus.COMPLETED
                 );

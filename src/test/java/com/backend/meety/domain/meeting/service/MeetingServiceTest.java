@@ -142,7 +142,7 @@ class MeetingServiceTest {
         assertThat(response.title()).isEqualTo(request.title());
         assertThat(response.purpose()).isEqualTo(request.purpose());
         assertThat(response.note()).isEqualTo(request.note());
-        assertThat(response.scheduledAt()).isEqualTo(request.scheduledAt());
+        assertThat(response.scheduledAt()).isEqualTo(LocalDateTime.now(FIXED_CLOCK));
 
         ArgumentCaptor<Meeting> meetingCaptor = ArgumentCaptor.forClass(Meeting.class);
         InOrder inOrder = inOrder(teamRepository, teamMemberRepository, meetingRepository);
@@ -164,6 +164,7 @@ class MeetingServiceTest {
         assertThat(savedMeeting.getTeam()).isSameAs(team);
         assertThat(savedMeeting.getCreatedByTeamMember()).isSameAs(teamMember);
         assertThat(savedMeeting.getStatus()).isEqualTo(MeetingStatus.WAITING);
+        assertThat(savedMeeting.getScheduledAt()).isEqualTo(LocalDateTime.now(FIXED_CLOCK));
     }
 
     @Test
@@ -1168,7 +1169,6 @@ class MeetingServiceTest {
                 "주간 스프린트 회의",
                 "진행 상황과 이슈 공유",
                 note,
-                LocalDateTime.of(2026, 9, 15, 15, 0),
                 targetDurationMinutes
         );
     }

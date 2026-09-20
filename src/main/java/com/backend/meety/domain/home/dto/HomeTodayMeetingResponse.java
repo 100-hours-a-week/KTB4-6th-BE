@@ -13,21 +13,18 @@ public record HomeTodayMeetingResponse(
         LocalDateTime endedAt
 ) {
 
-    public static HomeTodayMeetingResponse from(Meeting meeting, LocalDateTime now) {
+    public static HomeTodayMeetingResponse from(Meeting meeting) {
         return new HomeTodayMeetingResponse(
                 meeting.getId(),
                 meeting.getTitle(),
-                toDisplayStatus(meeting, now),
+                toDisplayStatus(meeting),
                 meeting.getScheduledAt(),
                 meeting.getStartedAt(),
                 meeting.getEndedAt()
         );
     }
 
-    private static HomeMeetingDisplayStatus toDisplayStatus(Meeting meeting, LocalDateTime now) {
-        if (meeting.getStatus() == MeetingStatus.WAITING && now.isBefore(meeting.getScheduledAt())) {
-            return HomeMeetingDisplayStatus.SCHEDULED;
-        }
+    private static HomeMeetingDisplayStatus toDisplayStatus(Meeting meeting) {
         if (meeting.getStatus() == MeetingStatus.WAITING) {
             return HomeMeetingDisplayStatus.WAITING;
         }
