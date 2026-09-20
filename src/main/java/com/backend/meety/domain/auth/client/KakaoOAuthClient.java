@@ -92,7 +92,8 @@ public class KakaoOAuthClient implements OAuthProviderClient {
             if (OAuth2ErrorCodes.INVALID_GRANT.equals(e.getError().getErrorCode())) {
                 throw new AuthException(AuthErrorCode.INVALID_AUTHORIZATION_CODE);
             }
-            log.warn("카카오 토큰 교환에 실패했습니다. errorCode={}", e.getError().getErrorCode());
+            log.warn("카카오 토큰 교환에 실패했습니다. errorCode={}, description={}",
+                    e.getError().getErrorCode(), e.getError().getDescription());
             throw new AuthException(AuthErrorCode.KAKAO_AUTH_FAILED);
         } catch (RestClientException e) {
             log.error("카카오 토큰 교환 중 통신 오류가 발생했습니다.", e);
