@@ -3,7 +3,7 @@ spring:
     name: meety
   profiles:
     active:
-      - local
+      - prod
   security:
     oauth2:
       client:
