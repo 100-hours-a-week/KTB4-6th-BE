@@ -70,7 +70,7 @@ public class MeetingService {
                 request.title(),
                 request.purpose(),
                 request.note(),
-                request.scheduledAt(),
+                LocalDateTime.now(clock.withZone(KST_ZONE_ID)),
                 request.targetDurationMinutes()
         );
 

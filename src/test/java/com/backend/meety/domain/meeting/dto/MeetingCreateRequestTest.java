@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
-import java.time.LocalDateTime;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -37,7 +36,6 @@ class MeetingCreateRequestTest {
                 "",
                 "a".repeat(101),
                 "a".repeat(201),
-                null,
                 null
         );
 
@@ -45,7 +43,7 @@ class MeetingCreateRequestTest {
 
         assertThat(violations)
                 .extracting(violation -> violation.getPropertyPath().toString())
-                .contains("title", "purpose", "note", "scheduledAt", "targetDurationMinutes");
+                .contains("title", "purpose", "note", "targetDurationMinutes");
     }
 
     private MeetingCreateRequest createRequest(Integer targetDurationMinutes) {
@@ -53,7 +51,6 @@ class MeetingCreateRequestTest {
                 "주간 스프린트 회의",
                 "진행 상황과 이슈 공유",
                 "API 명세 검토",
-                LocalDateTime.of(2026, 9, 15, 15, 0),
                 targetDurationMinutes
         );
     }
