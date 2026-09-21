@@ -10,7 +10,6 @@ import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
-import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
 @RequiredArgsConstructor
@@ -32,12 +31,7 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
                 response.setStatusCode(HttpStatus.CONFLICT);
                 return false;
             }
-            String audioFormat = UriComponentsBuilder.fromUri(request.getURI())
-                    .build()
-                    .getQueryParams()
-                    .getFirst("audioFormat");
-            AudioWebSocketContext context = accessService.validate(userId, recordingSessionId, audioFormat);
-            attributes.put(CONTEXT_ATTRIBUTE, context);
+            attributes.put(CONTEXT_ATTRIBUTE, accessService.validate(userId, recordingSessionId));
             return true;
         } catch (RuntimeException e) {
             response.setStatusCode(HttpStatus.FORBIDDEN);

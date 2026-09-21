@@ -18,23 +18,12 @@ public class AudioWebSocketRegistry {
         return Optional.ofNullable(sessions.get(recordingSessionId));
     }
 
-    public void remove(Long recordingSessionId, WebSocketSession session) {
-        sessions.remove(recordingSessionId, session);
-    }
-
     public boolean exists(Long recordingSessionId) {
         return sessions.containsKey(recordingSessionId);
     }
 
-    public void close(Long recordingSessionId) {
-        WebSocketSession session = sessions.remove(recordingSessionId);
-        if (session == null) {
-            return;
-        }
-        try {
-            session.close();
-        } catch (Exception ignored) {
-        }
+    public void remove(Long recordingSessionId, WebSocketSession session) {
+        sessions.remove(recordingSessionId, session);
     }
 
     public int count() {

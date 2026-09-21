@@ -16,8 +16,6 @@ import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.recording.dto.RecordingSessionResponse;
 import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.recording.entity.RecordingSessionStatus;
-import com.backend.meety.domain.recording.event.RecordingLifecycleEvent;
-import com.backend.meety.domain.recording.event.RecordingLifecycleEventType;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
 import com.backend.meety.domain.recording.exception.RecordingException;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
@@ -29,7 +27,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,7 +47,6 @@ public class RecordingService {
     private final TeamCreditRepository creditRepository;
     private final CreditLedgerRepository ledgerRepository;
     private final Clock clock;
-    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public RecordingSessionResponse start(Long userId, Long meetingId) {
@@ -79,13 +75,7 @@ public class RecordingService {
         ledgerRepository.save(CreditLedger.useForRecording(
                 meeting.getTeam(), session.getId(), RECORDING_CREDIT_COST, credit.getBalance()));
         meeting.start(now);
-        RecordingSessionResponse response = RecordingSessionResponse.from(session);
-        eventPublisher.publishEvent(new RecordingLifecycleEvent(
-                RecordingLifecycleEventType.STARTED,
-                response.meetingId(),
-                response.recordingSessionId()
-        ));
-        return response;
+        return RecordingSessionResponse.from(session);
     }
 
     @Transactional(readOnly = true)
@@ -124,35 +114,7 @@ public class RecordingService {
             }
             default -> throw new RecordingException(RecordingErrorCode.INVALID_RECORDING_STATUS);
         }
-        RecordingSessionResponse response = RecordingSessionResponse.from(session);
-        eventPublisher.publishEvent(new RecordingLifecycleEvent(
-                toLifecycleType(status),
-                response.meetingId(),
-                response.recordingSessionId()
-        ));
-        return response;
-    }
-
-    @Transactional
-    public void completeByTimeout(Long sessionId) {
-        Long meetingId = recordingRepository.findMeetingIdByIdAndDeletedAtIsNull(sessionId)
-                .orElseThrow(() -> new RecordingException(RecordingErrorCode.RECORDING_SESSION_NOT_FOUND));
-        Meeting meeting = lockMeeting(meetingId);
-        RecordingSession session = recordingRepository.findByIdForUpdateAndDeletedAtIsNull(sessionId)
-                .orElseThrow(() -> new RecordingException(RecordingErrorCode.RECORDING_SESSION_NOT_FOUND));
-        if (meeting.getStatus() != MeetingStatus.IN_PROGRESS
-                || (session.getStatus() != RecordingSessionStatus.RECORDING
-                && session.getStatus() != RecordingSessionStatus.PAUSED)) {
-            return;
-        }
-        LocalDateTime now = LocalDateTime.now(clock);
-        session.complete(now);
-        meeting.complete(now);
-        eventPublisher.publishEvent(new RecordingLifecycleEvent(
-                RecordingLifecycleEventType.COMPLETED,
-                meeting.getId(),
-                session.getId()
-        ));
+        return RecordingSessionResponse.from(session);
     }
 
     private Meeting lockMeeting(Long meetingId) {
@@ -183,14 +145,5 @@ public class RecordingService {
                 && status != RecordingSessionStatus.COMPLETED) {
             throw new RecordingException(RecordingErrorCode.INVALID_RECORDING_STATUS);
         }
-    }
-
-    private RecordingLifecycleEventType toLifecycleType(RecordingSessionStatus status) {
-        return switch (status) {
-            case RECORDING -> RecordingLifecycleEventType.RESUMED;
-            case PAUSED -> RecordingLifecycleEventType.PAUSED;
-            case COMPLETED -> RecordingLifecycleEventType.COMPLETED;
-            default -> throw new RecordingException(RecordingErrorCode.INVALID_RECORDING_STATUS);
-        };
     }
 }

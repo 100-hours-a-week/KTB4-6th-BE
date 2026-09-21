@@ -26,7 +26,7 @@ public class WebSocketCookieAuthentication {
         return authenticate(servletRequest.getServletRequest());
     }
 
-    public Long authenticate(HttpServletRequest request) {
+    private Long authenticate(HttpServletRequest request) {
         String token = resolveToken(request);
         if (token == null) {
             throw new AuthException(AuthErrorCode.AUTHENTICATION_REQUIRED);
