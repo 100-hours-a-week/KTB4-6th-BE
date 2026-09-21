@@ -122,14 +122,31 @@ class MeetingSseServiceTest {
     }
 
     @Test
-    void cleanupCallbacksRemoveEmitterWithoutChangingParticipant() {
+    void cleanupCallbacksRemoveEmitter() {
+        TestSseEmitter completion = emitterFactory.next();
+        service.connect(USER_ID, MEETING_ID);
+        completion.completion.run();
+        assertThat(registry.find(MEETING_ID, USER_ID)).isEmpty();
+
+        TestSseEmitter timeout = emitterFactory.next();
+        service.connect(USER_ID, MEETING_ID);
+        timeout.timeout.run();
+        assertThat(registry.find(MEETING_ID, USER_ID)).isEmpty();
+
+        TestSseEmitter error = emitterFactory.next();
+        service.connect(USER_ID, MEETING_ID);
+        error.error.accept(new IOException("network"));
+        assertThat(registry.find(MEETING_ID, USER_ID)).isEmpty();
+    }
+
+    @Test
+    void cleanupDoesNotChangeParticipantState() {
         TestSseEmitter emitter = emitterFactory.next();
         MeetingParticipant participant = MeetingParticipant.create(meeting, teamMember);
 
         service.connect(USER_ID, MEETING_ID);
-        emitter.timeout.run();
+        emitter.completion.run();
 
-        assertThat(registry.find(MEETING_ID, USER_ID)).isEmpty();
         assertThat(participant.getParticipationStatus()).isEqualTo(ParticipationStatus.JOINED);
         assertThat(participant.getDeletedAt()).isNull();
         verify(meetingParticipantRepository, never()).save(any());
