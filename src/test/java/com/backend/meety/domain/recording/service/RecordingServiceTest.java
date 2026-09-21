@@ -28,6 +28,7 @@ import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import com.backend.meety.domain.meeting.entity.ParticipationStatus;
+import com.backend.meety.domain.meeting.event.MeetingCompletedEvent;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
@@ -267,6 +268,7 @@ class RecordingServiceTest {
         assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.COMPLETED);
         assertThat(meeting.getEndedAt()).isEqualTo(response.endedAt());
         ArgumentCaptor<RecordingCompletedEvent> event = ArgumentCaptor.forClass(RecordingCompletedEvent.class);
+        verify(eventPublisher).publishEvent(any(MeetingCompletedEvent.class));
         verify(eventPublisher).publishEvent(event.capture());
         assertThat(event.getValue().recordingSessionId()).isEqualTo(700L);
         verifyNoInteractions(credits, ledgers);

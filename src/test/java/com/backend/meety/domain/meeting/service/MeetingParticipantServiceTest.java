@@ -13,6 +13,7 @@ import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingParticipant;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import com.backend.meety.domain.meeting.entity.ParticipationStatus;
+import com.backend.meety.domain.meeting.event.MeetingParticipantLeftEvent;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class MeetingParticipantServiceTest {
@@ -48,6 +50,7 @@ class MeetingParticipantServiceTest {
     private MeetingRepository meetingRepository;
     private TeamMemberRepository teamMemberRepository;
     private MeetingParticipantRepository meetingParticipantRepository;
+    private ApplicationEventPublisher eventPublisher;
     private MeetingParticipantService meetingParticipantService;
 
     @BeforeEach
@@ -55,11 +58,13 @@ class MeetingParticipantServiceTest {
         meetingRepository = org.mockito.Mockito.mock(MeetingRepository.class);
         teamMemberRepository = org.mockito.Mockito.mock(TeamMemberRepository.class);
         meetingParticipantRepository = org.mockito.Mockito.mock(MeetingParticipantRepository.class);
+        eventPublisher = org.mockito.Mockito.mock(ApplicationEventPublisher.class);
         meetingParticipantService = new MeetingParticipantService(
                 meetingRepository,
                 teamMemberRepository,
                 meetingParticipantRepository,
-                FIXED_CLOCK
+                FIXED_CLOCK,
+                eventPublisher
         );
     }
 
@@ -304,12 +309,17 @@ class MeetingParticipantServiceTest {
 
         assertThat(participant.getParticipationStatus()).isEqualTo(ParticipationStatus.LEFT);
         assertThat(participant.getDeletedAt()).isEqualTo(LocalDateTime.of(2026, 9, 15, 12, 0));
+        ArgumentCaptor<MeetingParticipantLeftEvent> event =
+                ArgumentCaptor.forClass(MeetingParticipantLeftEvent.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue().meetingId()).isEqualTo(MEETING_ID);
+        assertThat(event.getValue().userId()).isEqualTo(USER_ID);
         verify(meetingParticipantRepository, never()).delete(any());
     }
 
     @Test
-    @DisplayName("IN_PROGRESS 회의에서 나갈 수 있다")
-    void leaveInProgressMeeting() {
+    @DisplayName("IN_PROGRESS 회의에서는 나갈 수 없다")
+    void leaveInProgressMeetingFails() {
         Meeting meeting = meeting(MeetingStatus.IN_PROGRESS);
         TeamMember teamMember = teamMember("홍길동");
         MeetingParticipant participant = participant(meeting, teamMember, ParticipationStatus.JOINED, null);
@@ -317,10 +327,15 @@ class MeetingParticipantServiceTest {
         when(meetingParticipantRepository.findByMeetingIdAndTeamMemberId(MEETING_ID, TEAM_MEMBER_ID))
                 .thenReturn(Optional.of(participant));
 
-        meetingParticipantService.leaveMeeting(USER_ID, MEETING_ID);
+        assertThatThrownBy(() -> meetingParticipantService.leaveMeeting(USER_ID, MEETING_ID))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_PARTICIPATION_NOT_ALLOWED);
 
-        assertThat(participant.getParticipationStatus()).isEqualTo(ParticipationStatus.LEFT);
-        assertThat(participant.getDeletedAt()).isEqualTo(LocalDateTime.of(2026, 9, 15, 12, 0));
+        assertThat(participant.getParticipationStatus()).isEqualTo(ParticipationStatus.JOINED);
+        assertThat(participant.getDeletedAt()).isNull();
+        verify(meetingParticipantRepository, never()).findByMeetingIdAndTeamMemberId(any(), any());
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test

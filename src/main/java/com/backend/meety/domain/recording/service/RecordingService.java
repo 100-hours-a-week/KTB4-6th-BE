@@ -11,6 +11,7 @@ import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import com.backend.meety.domain.meeting.entity.ParticipationStatus;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
+import com.backend.meety.domain.meeting.event.MeetingCompletedEvent;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.recording.dto.RecordingSessionResponse;
@@ -114,6 +115,7 @@ public class RecordingService {
             case COMPLETED -> {
                 session.complete(now);
                 meeting.complete(now);
+                eventPublisher.publishEvent(new MeetingCompletedEvent(meeting.getId()));
                 eventPublisher.publishEvent(new RecordingCompletedEvent(session.getId()));
             }
             default -> throw new RecordingException(RecordingErrorCode.INVALID_RECORDING_STATUS);
