@@ -47,11 +47,11 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
             + "from TeamMember tm "
             + "where tm.team.id = :teamId "
             + "and tm.displayName = :displayName "
-            + "and tm.membershipStatus = :membershipStatus")
-    boolean existsActiveDisplayName(
+            + "and tm.user.id <> :userId")
+    boolean existsDisplayNameUsedByOthers(
             @Param("teamId") Long teamId,
-            @Param("displayName") String displayName,
-            @Param("membershipStatus") MembershipStatus membershipStatus
+            @Param("userId") Long userId,
+            @Param("displayName") String displayName
     );
 
     Optional<TeamMember> findByTeamIdAndUserId(Long teamId, Long userId);
