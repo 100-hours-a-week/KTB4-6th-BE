@@ -50,6 +50,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.springframework.context.ApplicationEventPublisher;
 
 class RecordingServiceTest {
 
@@ -61,8 +62,9 @@ class RecordingServiceTest {
     private final RecordingSessionRepository recordings = mock(RecordingSessionRepository.class);
     private final TeamCreditRepository credits = mock(TeamCreditRepository.class);
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
+    private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
     private final RecordingService service = new RecordingService(
-            meetings, members, participants, recordings, credits, ledgers, CLOCK);
+            meetings, members, participants, recordings, credits, ledgers, CLOCK, eventPublisher);
     private Team team;
     private TeamMember member;
     private Meeting meeting;

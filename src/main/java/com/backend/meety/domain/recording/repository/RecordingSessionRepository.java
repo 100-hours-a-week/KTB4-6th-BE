@@ -18,6 +18,16 @@ public interface RecordingSessionRepository extends JpaRepository<RecordingSessi
             Long meetingId, Collection<RecordingSessionStatus> statuses
     );
 
+    @Query("""
+            select r
+            from RecordingSession r
+            join fetch r.meeting
+            join fetch r.startedByTeamMember
+            where r.id = :sessionId
+              and r.deletedAt is null
+            """)
+    Optional<RecordingSession> findByIdAndDeletedAtIsNull(@Param("sessionId") Long sessionId);
+
     @Query("select r.meeting.id from RecordingSession r where r.id = :sessionId and r.deletedAt is null")
     Optional<Long> findMeetingIdByIdAndDeletedAtIsNull(@Param("sessionId") Long sessionId);
 

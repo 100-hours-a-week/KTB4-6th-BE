@@ -27,3 +27,7 @@ jwt:
 
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
+ai:
+  websocket:
+    url: ${AI_WEBSOCKET_URL:ws://localhost:8000/v1/live-meeting}
