@@ -7,6 +7,7 @@ import com.backend.meety.domain.meeting.dto.MeetingCalendarItemResponse;
 import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
 import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
 import com.backend.meety.domain.meeting.dto.MeetingGroupResponse;
+import com.backend.meety.domain.meeting.dto.MeetingInProgressResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListItemResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
@@ -22,6 +23,8 @@ import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.entity.TeamMemberRole;
+import com.backend.meety.domain.team.exception.TeamErrorCode;
+import com.backend.meety.domain.team.exception.TeamException;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.team.repository.TeamRepository;
 import com.backend.meety.global.exception.BusinessException;
@@ -204,6 +207,17 @@ public class MeetingService {
         return new MeetingCalendarResponse(year, month, toCalendarDates(meetings));
     }
 
+    @Transactional(readOnly = true)
+    public MeetingInProgressResponse hasInProgressMeeting(Long userId, Long teamId) {
+        validateActiveTeamExists(teamId);
+        validateActiveTeamAccess(userId, teamId);
+        boolean hasInProgressMeeting = meetingRepository.existsByTeamIdAndStatusAndDeletedAtIsNull(
+                teamId,
+                MeetingStatus.IN_PROGRESS
+        );
+        return MeetingInProgressResponse.from(hasInProgressMeeting);
+    }
+
     private void validateMeetingAccess(Long userId, Long teamId) {
         validateTeamMembership(userId, teamId, MeetingErrorCode.MEETING_ACCESS_DENIED);
     }
@@ -262,6 +276,22 @@ public class MeetingService {
     private void validateTeamExists(Long teamId) {
         if (!teamRepository.existsById(teamId)) {
             throw new MeetingException(MeetingErrorCode.TEAM_NOT_FOUND);
+        }
+    }
+
+    private void validateActiveTeamExists(Long teamId) {
+        if (teamRepository.findByIdAndDeletedAtIsNull(teamId).isEmpty()) {
+            throw new TeamException(TeamErrorCode.TEAM_NOT_FOUND);
+        }
+    }
+
+    private void validateActiveTeamAccess(Long userId, Long teamId) {
+        if (!teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                teamId,
+                userId,
+                MembershipStatus.ACTIVE
+        )) {
+            throw new TeamException(TeamErrorCode.TEAM_ACCESS_DENIED);
         }
     }
 
