@@ -34,6 +34,7 @@ import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.recording.dto.RecordingSessionResponse;
 import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.recording.entity.RecordingSessionStatus;
+import com.backend.meety.domain.recording.event.RecordingCompletedEvent;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.team.entity.MembershipStatus;
@@ -48,6 +49,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.springframework.context.ApplicationEventPublisher;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
@@ -61,8 +63,9 @@ class RecordingServiceTest {
     private final RecordingSessionRepository recordings = mock(RecordingSessionRepository.class);
     private final TeamCreditRepository credits = mock(TeamCreditRepository.class);
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
+    private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
     private final RecordingService service = new RecordingService(
-            meetings, members, participants, recordings, credits, ledgers, CLOCK);
+            meetings, members, participants, recordings, credits, ledgers, CLOCK, eventPublisher);
     private Team team;
     private TeamMember member;
     private Meeting meeting;
@@ -263,6 +266,9 @@ class RecordingServiceTest {
         assertThat(response.endedAt()).isEqualTo(NOW);
         assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.COMPLETED);
         assertThat(meeting.getEndedAt()).isEqualTo(response.endedAt());
+        ArgumentCaptor<RecordingCompletedEvent> event = ArgumentCaptor.forClass(RecordingCompletedEvent.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue().recordingSessionId()).isEqualTo(700L);
         verifyNoInteractions(credits, ledgers);
     }
 

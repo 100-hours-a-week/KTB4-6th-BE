@@ -48,6 +48,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.dao.DataAccessException;
@@ -108,8 +109,9 @@ class RecordingMySqlIntegrationTest {
         @Bean
         RecordingService recordingService(MeetingRepository meetings, TeamMemberRepository members,
                 MeetingParticipantRepository participants, RecordingSessionRepository recordings,
-                TeamCreditRepository credits, CreditLedgerRepository ledgers) {
-            return new RecordingService(meetings, members, participants, recordings, credits, ledgers, CLOCK);
+                TeamCreditRepository credits, CreditLedgerRepository ledgers, ApplicationEventPublisher publisher) {
+            return new RecordingService(meetings, members, participants, recordings, credits, ledgers, CLOCK,
+                    publisher);
         }
 
         @Bean
