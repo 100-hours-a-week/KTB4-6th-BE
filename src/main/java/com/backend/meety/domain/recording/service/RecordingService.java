@@ -16,6 +16,7 @@ import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.recording.dto.RecordingSessionResponse;
 import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.recording.entity.RecordingSessionStatus;
+import com.backend.meety.domain.recording.event.RecordingCompletedEvent;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
 import com.backend.meety.domain.recording.exception.RecordingException;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
@@ -27,6 +28,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,6 +49,7 @@ public class RecordingService {
     private final TeamCreditRepository creditRepository;
     private final CreditLedgerRepository ledgerRepository;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public RecordingSessionResponse start(Long userId, Long meetingId) {
@@ -111,6 +114,7 @@ public class RecordingService {
             case COMPLETED -> {
                 session.complete(now);
                 meeting.complete(now);
+                eventPublisher.publishEvent(new RecordingCompletedEvent(session.getId()));
             }
             default -> throw new RecordingException(RecordingErrorCode.INVALID_RECORDING_STATUS);
         }
