@@ -14,6 +14,7 @@ import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
+import com.backend.meety.domain.meeting.event.MeetingDeletedEvent;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
@@ -37,6 +38,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,6 +55,7 @@ public class MeetingService {
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public MeetingCreateResponse createMeeting(Long userId, Long teamId, MeetingCreateRequest request) {
@@ -150,6 +153,7 @@ public class MeetingService {
         validateMeetingDeleteAllowed(meeting);
 
         meeting.softDelete(LocalDateTime.now(clock));
+        eventPublisher.publishEvent(new MeetingDeletedEvent(meeting.getId()));
     }
 
     @Transactional(readOnly = true)
