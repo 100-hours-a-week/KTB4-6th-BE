@@ -9,6 +9,7 @@ import com.backend.meety.domain.meeting.dto.MeetingParticipantListResponse;
 import com.backend.meety.domain.meeting.dto.MeetingParticipantResponse;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateResponse;
+import com.backend.meety.domain.meeting.realtime.MeetingSseService;
 import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
 import com.backend.meety.global.response.ApiResponse;
@@ -20,6 +21,7 @@ import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -32,6 +34,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Validated
 @RestController
@@ -41,6 +44,7 @@ public class MeetingController {
 
     private final MeetingService meetingService;
     private final MeetingParticipantService meetingParticipantService;
+    private final MeetingSseService meetingSseService;
 
     @PostMapping("/teams/{teamId}/meetings")
     public ResponseEntity<ApiResponse<MeetingCreateResponse>> createMeeting(
@@ -123,6 +127,14 @@ public class MeetingController {
             @PathVariable Long meetingId
     ) {
         return ResponseEntity.ok(ApiResponse.success(meetingParticipantService.getParticipants(userId, meetingId)));
+    }
+
+    @GetMapping(value = "/meetings/{meetingId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter connectEvents(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long meetingId
+    ) {
+        return meetingSseService.connect(userId, meetingId);
     }
 
     @DeleteMapping("/meetings/{meetingId}/participants/me")

@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.backend.meety.domain.credit.exception.CreditErrorCode;
 import com.backend.meety.domain.credit.exception.CreditException;
 import com.backend.meety.domain.meeting.controller.MeetingController;
+import com.backend.meety.domain.meeting.realtime.MeetingSseService;
 import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
 import com.backend.meety.domain.recording.dto.RecordingSessionResponse;
@@ -44,7 +45,10 @@ class RecordingControllerTest {
     void setUp() {
         service = mock(RecordingService.class);
         mvc = MockMvcBuilders.standaloneSetup(new RecordingController(service),
-                        new MeetingController(mock(MeetingService.class), mock(MeetingParticipantService.class)))
+                        new MeetingController(
+                                mock(MeetingService.class),
+                                mock(MeetingParticipantService.class),
+                                mock(MeetingSseService.class)))
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
