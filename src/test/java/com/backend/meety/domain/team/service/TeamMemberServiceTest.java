@@ -91,7 +91,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsActiveDisplayName(7L, "hoon", MembershipStatus.ACTIVE)).willReturn(false);
+        given(teamMemberRepository.existsDisplayNameUsedByOthers(7L, 1L, "hoon")).willReturn(false);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
 
@@ -218,7 +218,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsActiveDisplayName(7L, "hoon", MembershipStatus.ACTIVE)).willReturn(true);
+        given(teamMemberRepository.existsDisplayNameUsedByOthers(7L, 1L, "hoon")).willReturn(true);
 
         assertThatThrownBy(() -> teamMemberService.join(1L, REQUEST))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -237,7 +237,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsActiveDisplayName(7L, "hoon", MembershipStatus.ACTIVE)).willReturn(false);
+        given(teamMemberRepository.existsDisplayNameUsedByOthers(7L, 1L, "hoon")).willReturn(false);
         given(teamMemberRepository.save(any(TeamMember.class)))
                 .willThrow(new DataIntegrityViolationException("insert failed"));
 
@@ -578,6 +578,31 @@ class TeamMemberServiceTest {
     }
 
     @Test
+    @DisplayName("재입장자가 쓰던 이름은 본인 행을 제외하고 검사하므로 그대로 쓸 수 있다")
+    void rejoinKeepsOwnDisplayName() {
+        ReflectionTestUtils.setField(user, "id", 1L);
+        TeamMember existing = TeamMember.createMember(user, team, "hoon");
+        existing.leave(LocalDateTime.of(2026, 9, 17, 10, 0));
+        given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
+        given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(false);
+        given(teamInvitationCodeRepository.findByCodeAndDeletedAtIsNull(CODE))
+                .willReturn(Optional.of(invitationCode));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
+        given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
+                .willReturn(3L);
+        given(teamMemberRepository.existsDisplayNameUsedByOthers(7L, 1L, "hoon")).willReturn(false);
+        given(teamMemberRepository.findByTeamIdAndUserId(7L, 1L)).willReturn(Optional.of(existing));
+
+        teamMemberService.join(1L, REQUEST);
+
+        assertThat(existing.getMembershipStatus()).isEqualTo(MembershipStatus.ACTIVE);
+        assertThat(existing.getDisplayName()).isEqualTo("hoon");
+        then(teamMemberRepository).should().existsDisplayNameUsedByOthers(7L, 1L, "hoon");
+    }
+
+    @Test
     @DisplayName("차단 해제 후 재입장하면 기존 멤버십 행이 복구된다")
     void rejoinRestoresExistingRow() {
         ReflectionTestUtils.setField(user, "id", 1L);
@@ -592,7 +617,7 @@ class TeamMemberServiceTest {
         given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
         given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
                 .willReturn(3L);
-        given(teamMemberRepository.existsActiveDisplayName(7L, "hoon", MembershipStatus.ACTIVE))
+        given(teamMemberRepository.existsDisplayNameUsedByOthers(7L, 1L, "hoon"))
                 .willReturn(false);
         given(teamMemberRepository.findByTeamIdAndUserId(7L, 1L)).willReturn(Optional.of(existing));
 
