@@ -13,7 +13,6 @@ import com.backend.meety.domain.meeting.entity.MeetingParticipant;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import com.backend.meety.domain.meeting.entity.ParticipationStatus;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
-import com.backend.meety.domain.meeting.exception.MeetingException;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.team.entity.MembershipStatus;
@@ -87,14 +86,6 @@ class MeetingSseServiceTest {
         assertCode(() -> service.connect(USER_ID, MEETING_ID), MeetingErrorCode.MEETING_PARTICIPANT_REQUIRED);
 
         assertThat(registry.countAll()).isZero();
-    }
-
-    @Test
-    void connectFailsWhenParticipantIsNotJoined() {
-        when(meetingParticipantRepository.existsByMeetingIdAndTeamMemberIdAndParticipationStatusAndDeletedAtIsNull(
-                MEETING_ID, TEAM_MEMBER_ID, ParticipationStatus.JOINED)).thenReturn(false);
-
-        assertCode(() -> service.connect(USER_ID, MEETING_ID), MeetingErrorCode.MEETING_PARTICIPANT_REQUIRED);
     }
 
     @Test

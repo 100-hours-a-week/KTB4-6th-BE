@@ -5,6 +5,7 @@ import com.backend.meety.domain.meeting.dto.MeetingParticipantResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingParticipant;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
+import com.backend.meety.domain.meeting.event.MeetingParticipantLeftEvent;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
@@ -16,6 +17,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +29,7 @@ public class MeetingParticipantService {
     private final TeamMemberRepository teamMemberRepository;
     private final MeetingParticipantRepository meetingParticipantRepository;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public MeetingParticipantResponse joinMeeting(Long userId, Long meetingId) {
@@ -63,7 +66,7 @@ public class MeetingParticipantService {
     public void leaveMeeting(Long userId, Long meetingId) {
         Meeting meeting = findMeeting(meetingId);
         TeamMember teamMember = findActiveTeamMember(userId, meeting);
-        validateParticipantChangeAllowed(meeting);
+        validateLeaveAllowed(meeting);
 
         MeetingParticipant participant = meetingParticipantRepository
                 .findByMeetingIdAndTeamMemberId(meetingId, teamMember.getId())
@@ -80,6 +83,7 @@ public class MeetingParticipantService {
         }
 
         participant.leave(LocalDateTime.now(clock));
+        eventPublisher.publishEvent(new MeetingParticipantLeftEvent(meetingId, userId));
     }
 
     private MeetingParticipant joinExistingParticipant(MeetingParticipant participant) {
@@ -113,6 +117,12 @@ public class MeetingParticipantService {
 
     private void validateParticipantChangeAllowed(Meeting meeting) {
         if (meeting.getStatus() != MeetingStatus.WAITING && meeting.getStatus() != MeetingStatus.IN_PROGRESS) {
+            throw new MeetingException(MeetingErrorCode.MEETING_PARTICIPATION_NOT_ALLOWED);
+        }
+    }
+
+    private void validateLeaveAllowed(Meeting meeting) {
+        if (meeting.getStatus() != MeetingStatus.WAITING) {
             throw new MeetingException(MeetingErrorCode.MEETING_PARTICIPATION_NOT_ALLOWED);
         }
     }
