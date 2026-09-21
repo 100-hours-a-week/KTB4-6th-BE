@@ -164,6 +164,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: gha-be-deploy-${{ github.run_id }}
+          role-skip-session-tagging: true
 
       - name: SSM 배포 명령 전송
         id: send
