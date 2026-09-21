@@ -2,7 +2,10 @@ package com.backend.meety.domain.meeting.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 class MeetingSseRegistryTest {
@@ -106,6 +109,87 @@ class MeetingSseRegistryTest {
     }
 
     @Test
+    void sendAndCompleteAllSendsEventThenCompletesAndRemovesMeeting() {
+        MeetingSseRegistry registry = new MeetingSseRegistry();
+        TestSseEmitter user10 = new TestSseEmitter();
+        TestSseEmitter user20 = new TestSseEmitter();
+        TestSseEmitter user30 = new TestSseEmitter();
+        MeetingSseDeletedEvent event = MeetingSseDeletedEvent.deleted(100L);
+        registry.register(100L, 10L, user10);
+        registry.register(100L, 20L, user20);
+        registry.register(100L, 30L, user30);
+
+        registry.sendAndCompleteAll(100L, "MEETING_DELETED", event);
+
+        assertThat(user10.sentData)
+                .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
+                .contains(event)
+                .anyMatch(data -> data instanceof String value && value.startsWith("event:MEETING_DELETED\n"));
+        assertThat(user20.sentData)
+                .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
+                .contains(event);
+        assertThat(user30.sentData)
+                .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
+                .contains(event);
+        assertThat(user10.completed).isTrue();
+        assertThat(user20.completed).isTrue();
+        assertThat(user30.completed).isTrue();
+        assertThat(user10.sentBeforeComplete).isTrue();
+        assertThat(user20.sentBeforeComplete).isTrue();
+        assertThat(user30.sentBeforeComplete).isTrue();
+        assertThat(registry.count(100L)).isZero();
+    }
+
+    @Test
+    void sendAndCompleteAllContinuesWhenOneEmitterSendFails() {
+        MeetingSseRegistry registry = new MeetingSseRegistry();
+        TestSseEmitter user10 = new TestSseEmitter();
+        TestSseEmitter user20 = new TestSseEmitter();
+        TestSseEmitter user30 = new TestSseEmitter();
+        user20.sendFailure = new IOException("send failed");
+        MeetingSseDeletedEvent event = MeetingSseDeletedEvent.deleted(100L);
+        registry.register(100L, 10L, user10);
+        registry.register(100L, 20L, user20);
+        registry.register(100L, 30L, user30);
+
+        registry.sendAndCompleteAll(100L, "MEETING_DELETED", event);
+
+        assertThat(user10.sentData)
+                .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
+                .contains(event);
+        assertThat(user20.sendAttempted).isTrue();
+        assertThat(user30.sentData)
+                .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
+                .contains(event);
+        assertThat(user10.completed).isTrue();
+        assertThat(user20.completed).isTrue();
+        assertThat(user30.completed).isTrue();
+        assertThat(registry.count(100L)).isZero();
+        assertThat(registry.countAll()).isZero();
+    }
+
+    @Test
+    void sendAndCompleteAllMissingMeetingIsNoop() {
+        MeetingSseRegistry registry = new MeetingSseRegistry();
+
+        registry.sendAndCompleteAll(100L, "MEETING_DELETED", MeetingSseDeletedEvent.deleted(100L));
+
+        assertThat(registry.countAll()).isZero();
+    }
+
+    @Test
+    void callbackRemoveAfterSendAndCompleteAllIsSafe() {
+        MeetingSseRegistry registry = new MeetingSseRegistry();
+        TestSseEmitter emitter = new TestSseEmitter();
+        registry.register(100L, 10L, emitter);
+
+        registry.sendAndCompleteAll(100L, "MEETING_DELETED", MeetingSseDeletedEvent.deleted(100L));
+        registry.remove(100L, 10L, emitter);
+
+        assertThat(registry.countAll()).isZero();
+    }
+
+    @Test
     void callbackRemoveAfterExplicitCompleteIsSafe() {
         MeetingSseRegistry registry = new MeetingSseRegistry();
         TestSseEmitter emitter = new TestSseEmitter();
@@ -122,6 +206,20 @@ class MeetingSseRegistryTest {
         private boolean completed;
         private boolean completeAttempted;
         private boolean failComplete;
+        private boolean sendAttempted;
+        private boolean sentBeforeComplete;
+        private IOException sendFailure;
+        private Set<ResponseBodyEmitter.DataWithMediaType> sentData;
+
+        @Override
+        public void send(SseEventBuilder builder) throws IOException {
+            sendAttempted = true;
+            sentBeforeComplete = !completeAttempted;
+            if (sendFailure != null) {
+                throw sendFailure;
+            }
+            sentData = builder.build();
+        }
 
         @Override
         public void complete() {

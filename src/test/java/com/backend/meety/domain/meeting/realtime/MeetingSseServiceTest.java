@@ -109,6 +109,15 @@ class MeetingSseServiceTest {
     }
 
     @Test
+    void connectFailsWhenMeetingWasDeleted() {
+        when(meetingRepository.findByIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.empty());
+
+        assertCode(() -> service.connect(USER_ID, MEETING_ID), MeetingErrorCode.MEETING_NOT_FOUND);
+
+        assertThat(registry.countAll()).isZero();
+    }
+
+    @Test
     void duplicateConnectCompletesPreviousEmitterAndKeepsCurrentEmitter() {
         TestSseEmitter previous = emitterFactory.next();
         service.connect(USER_ID, MEETING_ID);

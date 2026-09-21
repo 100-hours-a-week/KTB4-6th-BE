@@ -18,6 +18,7 @@ import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
+import com.backend.meety.domain.meeting.event.MeetingDeletedEvent;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
@@ -44,6 +45,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -61,6 +63,7 @@ class MeetingServiceTest {
     private MeetingRepository meetingRepository;
     private TeamRepository teamRepository;
     private TeamMemberRepository teamMemberRepository;
+    private ApplicationEventPublisher eventPublisher;
     private MeetingService meetingService;
 
     @BeforeEach
@@ -68,7 +71,14 @@ class MeetingServiceTest {
         meetingRepository = mock(MeetingRepository.class);
         teamRepository = mock(TeamRepository.class);
         teamMemberRepository = mock(TeamMemberRepository.class);
-        meetingService = new MeetingService(meetingRepository, teamRepository, teamMemberRepository, FIXED_CLOCK);
+        eventPublisher = mock(ApplicationEventPublisher.class);
+        meetingService = new MeetingService(
+                meetingRepository,
+                teamRepository,
+                teamMemberRepository,
+                FIXED_CLOCK,
+                eventPublisher
+        );
     }
 
     @Test
@@ -1169,6 +1179,7 @@ class MeetingServiceTest {
 
         assertThat(meeting.getDeletedAt()).isEqualTo(LocalDateTime.of(2026, 9, 15, 12, 0));
         verify(meetingRepository, never()).delete(any());
+        verify(eventPublisher).publishEvent(new MeetingDeletedEvent(100L));
     }
 
     @Test
@@ -1181,6 +1192,7 @@ class MeetingServiceTest {
         meetingService.deleteMeeting(USER_ID, 100L);
 
         assertThat(meeting.getDeletedAt()).isEqualTo(LocalDateTime.of(2026, 9, 15, 12, 0));
+        verify(eventPublisher).publishEvent(new MeetingDeletedEvent(100L));
     }
 
     @Test
@@ -1195,6 +1207,7 @@ class MeetingServiceTest {
                 .isEqualTo(MeetingErrorCode.MEETING_DELETE_FORBIDDEN);
 
         assertThat(meeting.getDeletedAt()).isNull();
+        verify(eventPublisher, never()).publishEvent(any(MeetingDeletedEvent.class));
     }
 
     @Test
@@ -1239,6 +1252,7 @@ class MeetingServiceTest {
                 .isEqualTo(MeetingErrorCode.MEETING_IN_PROGRESS);
 
         assertThat(meeting.getDeletedAt()).isNull();
+        verify(eventPublisher, never()).publishEvent(any(MeetingDeletedEvent.class));
     }
 
     @Test
@@ -1250,6 +1264,7 @@ class MeetingServiceTest {
                 .isInstanceOf(MeetingException.class)
                 .extracting("errorCode")
                 .isEqualTo(MeetingErrorCode.MEETING_NOT_FOUND);
+        verify(eventPublisher, never()).publishEvent(any(MeetingDeletedEvent.class));
     }
 
     private MeetingCreateResponse createMeetingWithTodayCount(long todayCount, MeetingCreateRequest request) {

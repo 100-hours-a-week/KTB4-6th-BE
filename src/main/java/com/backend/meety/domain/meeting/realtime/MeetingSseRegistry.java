@@ -1,8 +1,10 @@
 package com.backend.meety.domain.meeting.realtime;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -59,6 +61,16 @@ public class MeetingSseRegistry {
         meetingEmitters.clear();
     }
 
+    public void sendAndCompleteAll(Long meetingId, String eventName, Object data) {
+        ConcurrentHashMap<Long, SseEmitter> meetingEmitters = emitters.get(meetingId);
+        if (meetingEmitters == null) {
+            return;
+        }
+        List<Map.Entry<Long, SseEmitter>> targets = new ArrayList<>(meetingEmitters.entrySet());
+        targets.forEach(entry -> sendAndCompleteEmitter(meetingId, entry.getKey(), entry.getValue(), eventName, data));
+        emitters.remove(meetingId, meetingEmitters);
+    }
+
     public Collection<SseEmitter> findAll(Long meetingId) {
         return Optional.ofNullable(emitters.get(meetingId))
                 .<Collection<SseEmitter>>map(meetingEmitters -> new ArrayList<>(meetingEmitters.values()))
@@ -85,6 +97,29 @@ public class MeetingSseRegistry {
             emitter.complete();
         } catch (RuntimeException e) {
             log.warn("SSE 연결 종료에 실패했습니다. meetingId={}, userId={}", meetingId, userId, e);
+        }
+    }
+
+    private void sendAndCompleteEmitter(
+            Long meetingId,
+            Long userId,
+            SseEmitter emitter,
+            String eventName,
+            Object data
+    ) {
+        if (emitter == null) {
+            return;
+        }
+        try {
+            emitter.send(SseEmitter.event()
+                    .name(eventName)
+                    .data(data));
+        } catch (IOException | RuntimeException e) {
+            log.warn("SSE 이벤트 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
+                    meetingId, userId, eventName, e);
+        } finally {
+            completeEmitter(meetingId, userId, emitter);
+            remove(meetingId, userId, emitter);
         }
     }
 }
