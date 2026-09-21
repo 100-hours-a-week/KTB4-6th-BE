@@ -1,6 +1,7 @@
 package com.backend.meety.domain.meeting.repository;
 
 import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -136,4 +137,6 @@ public interface MeetingRepository extends JpaRepository<Meeting, Long>, Meeting
             @Param("start") LocalDateTime start,
             @Param("endExclusive") LocalDateTime endExclusive
     );
+
+    boolean existsByTeamIdAndStatusAndDeletedAtIsNull(Long teamId, MeetingStatus status);
 }

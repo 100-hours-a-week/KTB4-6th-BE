@@ -4,6 +4,7 @@ import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
 import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
 import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
+import com.backend.meety.domain.meeting.dto.MeetingInProgressResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
 import com.backend.meety.domain.meeting.dto.MeetingParticipantListResponse;
 import com.backend.meety.domain.meeting.dto.MeetingParticipantResponse;
@@ -75,6 +76,15 @@ public class MeetingController {
             @RequestParam(required = false) String cursor
     ) {
         MeetingListResponse response = meetingService.getMeetings(userId, teamId, keyword, from, to, cursor);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @GetMapping("/teams/{teamId}/meetings/in-progress")
+    public ResponseEntity<ApiResponse<MeetingInProgressResponse>> hasInProgressMeeting(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long teamId
+    ) {
+        MeetingInProgressResponse response = meetingService.hasInProgressMeeting(userId, teamId);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

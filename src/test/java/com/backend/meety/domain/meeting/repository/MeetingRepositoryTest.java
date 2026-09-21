@@ -2,6 +2,7 @@ package com.backend.meety.domain.meeting.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import java.time.LocalDateTime;
 import jakarta.persistence.LockModeType;
 import org.junit.jupiter.api.DisplayName;
@@ -115,5 +116,13 @@ class MeetingRepositoryTest {
         assertThat(query.value()).contains("end asc");
         assertThat(query.value()).contains("m.id asc");
         assertThat(query.value()).doesNotContain("join fetch");
+    }
+
+    @Test
+    @DisplayName("진행 중 회의 존재 여부 조회는 팀, 상태, soft delete 조건을 메서드명에 포함한다")
+    void existsByTeamIdAndStatusAndDeletedAtIsNullSignature() throws NoSuchMethodException {
+        assertThat(MeetingRepository.class
+                .getMethod("existsByTeamIdAndStatusAndDeletedAtIsNull", Long.class, MeetingStatus.class)
+                .getReturnType()).isEqualTo(boolean.class);
     }
 }

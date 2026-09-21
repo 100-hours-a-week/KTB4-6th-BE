@@ -27,6 +27,8 @@ import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.entity.TeamMemberRole;
+import com.backend.meety.domain.team.exception.TeamErrorCode;
+import com.backend.meety.domain.team.exception.TeamException;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.team.repository.TeamRepository;
 import java.time.Clock;
@@ -815,6 +817,119 @@ class MeetingServiceTest {
     }
 
     @Test
+    @DisplayName("팀에 진행 중 회의가 있으면 true를 반환한다")
+    void hasInProgressMeeting() {
+        setUpInProgressLookupPermission();
+        when(meetingRepository.existsByTeamIdAndStatusAndDeletedAtIsNull(
+                TEAM_ID,
+                MeetingStatus.IN_PROGRESS
+        )).thenReturn(true);
+
+        var response = meetingService.hasInProgressMeeting(USER_ID, TEAM_ID);
+
+        assertThat(response.hasInProgressMeeting()).isTrue();
+        InOrder inOrder = inOrder(teamRepository, teamMemberRepository, meetingRepository);
+        inOrder.verify(teamRepository).findByIdAndDeletedAtIsNull(TEAM_ID);
+        inOrder.verify(teamMemberRepository).existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        );
+        inOrder.verify(meetingRepository).existsByTeamIdAndStatusAndDeletedAtIsNull(
+                TEAM_ID,
+                MeetingStatus.IN_PROGRESS
+        );
+    }
+
+    @Test
+    @DisplayName("팀에 진행 중 회의가 없으면 false를 반환한다")
+    void hasInProgressMeetingWithoutMeeting() {
+        setUpInProgressLookupPermission();
+        when(meetingRepository.existsByTeamIdAndStatusAndDeletedAtIsNull(
+                TEAM_ID,
+                MeetingStatus.IN_PROGRESS
+        )).thenReturn(false);
+
+        var response = meetingService.hasInProgressMeeting(USER_ID, TEAM_ID);
+
+        assertThat(response.hasInProgressMeeting()).isFalse();
+    }
+
+    @Test
+    @DisplayName("WAITING 또는 COMPLETED 회의만 있으면 진행 중 회의 없음으로 판단한다")
+    void hasInProgressMeetingWithWaitingOrCompletedOnly() {
+        setUpInProgressLookupPermission();
+        when(meetingRepository.existsByTeamIdAndStatusAndDeletedAtIsNull(
+                TEAM_ID,
+                MeetingStatus.IN_PROGRESS
+        )).thenReturn(false);
+
+        var response = meetingService.hasInProgressMeeting(USER_ID, TEAM_ID);
+
+        assertThat(response.hasInProgressMeeting()).isFalse();
+    }
+
+    @Test
+    @DisplayName("soft delete된 IN_PROGRESS 회의는 진행 중 회의 없음으로 판단한다")
+    void hasInProgressMeetingIgnoresSoftDeletedMeeting() {
+        setUpInProgressLookupPermission();
+        when(meetingRepository.existsByTeamIdAndStatusAndDeletedAtIsNull(
+                TEAM_ID,
+                MeetingStatus.IN_PROGRESS
+        )).thenReturn(false);
+
+        var response = meetingService.hasInProgressMeeting(USER_ID, TEAM_ID);
+
+        assertThat(response.hasInProgressMeeting()).isFalse();
+    }
+
+    @Test
+    @DisplayName("다른 팀에만 IN_PROGRESS 회의가 있으면 진행 중 회의 없음으로 판단한다")
+    void hasInProgressMeetingIgnoresOtherTeamMeeting() {
+        setUpInProgressLookupPermission();
+        when(meetingRepository.existsByTeamIdAndStatusAndDeletedAtIsNull(
+                TEAM_ID,
+                MeetingStatus.IN_PROGRESS
+        )).thenReturn(false);
+
+        var response = meetingService.hasInProgressMeeting(USER_ID, TEAM_ID);
+
+        assertThat(response.hasInProgressMeeting()).isFalse();
+    }
+
+    @Test
+    @DisplayName("ACTIVE 팀원이 아니면 진행 중 회의 존재 여부 조회에 실패한다")
+    void hasInProgressMeetingWithoutActiveTeamMember() {
+        when(teamRepository.findByIdAndDeletedAtIsNull(TEAM_ID)).thenReturn(Optional.of(mock(Team.class)));
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(false);
+
+        assertThatThrownBy(() -> meetingService.hasInProgressMeeting(USER_ID, TEAM_ID))
+                .isInstanceOf(TeamException.class)
+                .extracting("errorCode")
+                .isEqualTo(TeamErrorCode.TEAM_ACCESS_DENIED);
+
+        verify(meetingRepository, never()).existsByTeamIdAndStatusAndDeletedAtIsNull(any(), any());
+    }
+
+    @Test
+    @DisplayName("팀이 없으면 진행 중 회의 존재 여부 조회에 실패한다")
+    void hasInProgressMeetingWithNotFoundTeam() {
+        when(teamRepository.findByIdAndDeletedAtIsNull(TEAM_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> meetingService.hasInProgressMeeting(USER_ID, TEAM_ID))
+                .isInstanceOf(TeamException.class)
+                .extracting("errorCode")
+                .isEqualTo(TeamErrorCode.TEAM_NOT_FOUND);
+
+        verify(teamMemberRepository, never()).existsByTeamIdAndUserIdAndMembershipStatus(any(), any(), any());
+        verify(meetingRepository, never()).existsByTeamIdAndStatusAndDeletedAtIsNull(any(), any());
+    }
+
+    @Test
     @DisplayName("LEADER는 WAITING 회의 정보를 수정할 수 있다")
     void updateWaitingMeetingByLeader() {
         Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 20, 10, 0), null);
@@ -1175,6 +1290,15 @@ class MeetingServiceTest {
 
     private void setUpListPermission() {
         when(teamRepository.existsById(TEAM_ID)).thenReturn(true);
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(true);
+    }
+
+    private void setUpInProgressLookupPermission() {
+        when(teamRepository.findByIdAndDeletedAtIsNull(TEAM_ID)).thenReturn(Optional.of(mock(Team.class)));
         when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
                 TEAM_ID,
                 USER_ID,
