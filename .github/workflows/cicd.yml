@@ -1,11 +1,11 @@
 # .github/workflows/ci-main-release.yml
-# (deploy/** 브랜치 push → 테스트/빌드 → 이미지 push → OIDC로 AWS 인증 → SSM으로 EC2 배포)
+# (dev merge → 테스트/빌드 → 이미지 push → OIDC로 AWS 인증 → SSM으로 EC2 배포)
 
-name: BE CI/CD (임시)
+name: BE CI/CD
 
 on:
   push:
-    branches: ['deploy/**']   # deploy/1, deploy/2 ... 형식의 배포 브랜치
+    branches: ['dev']
 
 # 기본 권한은 최소화하고, 필요한 job에서만 개별 상향
 permissions:
