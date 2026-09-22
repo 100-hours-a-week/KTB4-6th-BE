@@ -30,3 +30,7 @@ cors:
 
 ai:
   websocket-url: ${AI_WEBSOCKET_URL:ws://localhost:8000/v1/live-meeting}
+
+logging:
+  level:
+    com.backend.meety.domain.recording.realtime: DEBUG

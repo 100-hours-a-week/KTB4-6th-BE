@@ -52,6 +52,22 @@ public class AiLiveMeetingConnectionService {
         }
     }
 
+    /**
+     * AI 연결이 READY일 때만 오디오를 전달한다. 전달하지 못한 청크는 버리고 브라우저 연결은 유지한다.
+     */
+    public boolean forwardAudio(Long recordingSessionId, byte[] audio) {
+        AiLiveMeetingConnection connection = registry.find(recordingSessionId).orElse(null);
+        if (connection == null) {
+            return false;
+        }
+        try {
+            return connection.forwardAudio(objectMapper, audio);
+        } catch (Exception e) {
+            log.warn("AI WebSocket 오디오 전달에 실패했습니다. recordingSessionId={}", recordingSessionId, e);
+            return false;
+        }
+    }
+
     public void stop(Long recordingSessionId) {
         registry.find(recordingSessionId).ifPresentOrElse(this::stop,
                 () -> log.info("종료할 AI WebSocket connection이 없습니다. recordingSessionId={}", recordingSessionId));
