@@ -14,11 +14,13 @@ import tools.jackson.databind.ObjectMapper;
 public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
 
     private static final String SESSION_READY = "session.ready";
+    private static final String SESSION_ENDED = "session.ended";
     private static final String ERROR = "error";
     private static final String READY = "READY";
+    private static final String ENDED = "ENDED";
 
     private final AiLiveMeetingConnection connection;
-    private final AiLiveMeetingConnectionRegistry registry;
+    private final AiLiveMeetingConnectionService connectionService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -28,6 +30,10 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
             String type = root.path("type").asText();
             if (SESSION_READY.equals(type)) {
                 handleSessionReady(root);
+                return;
+            }
+            if (SESSION_ENDED.equals(type)) {
+                handleSessionEnded(root);
                 return;
             }
             if (ERROR.equals(type)) {
@@ -51,6 +57,10 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+        if (connection.state() == AiLiveMeetingConnectionState.STOP_SENT) {
+            log.warn("AI WebSocket이 session.ended 없이 종료되었습니다. recordingSessionId={}, closeStatus={}",
+                    connection.recordingSessionId(), status);
+        }
         cleanup();
     }
 
@@ -75,6 +85,21 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
         connection.markReady();
     }
 
+    private void handleSessionEnded(JsonNode root) {
+        if (!matchesSessionStop(root)) {
+            log.warn("AI session.ended 이벤트가 현재 connection과 일치하지 않습니다. recordingSessionId={}",
+                    connection.recordingSessionId());
+            return;
+        }
+        if (!ENDED.equals(root.path("payload").path("status").asText())) {
+            log.warn("AI session.ended status가 ENDED가 아닙니다. recordingSessionId={}, status={}",
+                    connection.recordingSessionId(), root.path("payload").path("status").asText());
+            return;
+        }
+        connection.markEnded();
+        cleanup();
+    }
+
     private boolean matchesSessionStart(JsonNode root) {
         return SESSION_READY.equals(root.path("type").asText())
                 && String.valueOf(connection.recordingSessionId()).equals(root.path("recordingSessionId").asText())
@@ -82,17 +107,15 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                 && connection.sessionStartRequestId().equals(root.path("requestId").asText());
     }
 
+    private boolean matchesSessionStop(JsonNode root) {
+        return SESSION_ENDED.equals(root.path("type").asText())
+                && String.valueOf(connection.recordingSessionId()).equals(root.path("recordingSessionId").asText())
+                && String.valueOf(connection.meetingId()).equals(root.path("meetingId").asText())
+                && connection.sessionStopRequestId() != null
+                && connection.sessionStopRequestId().equals(root.path("requestId").asText());
+    }
+
     private void cleanup() {
-        connection.close();
-        WebSocketSession session = connection.webSocketSession();
-        if (session != null && session.isOpen()) {
-            try {
-                session.close();
-            } catch (Exception e) {
-                log.warn("AI WebSocket cleanup 중 close에 실패했습니다. recordingSessionId={}",
-                        connection.recordingSessionId(), e);
-            }
-        }
-        registry.remove(connection.recordingSessionId(), connection);
+        connectionService.cleanup(connection);
     }
 }

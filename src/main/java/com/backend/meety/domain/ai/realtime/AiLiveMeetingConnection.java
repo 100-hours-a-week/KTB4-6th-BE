@@ -1,5 +1,6 @@
 package com.backend.meety.domain.ai.realtime;
 
+import java.util.concurrent.ScheduledFuture;
 import org.springframework.web.socket.WebSocketSession;
 
 public class AiLiveMeetingConnection {
@@ -10,6 +11,8 @@ public class AiLiveMeetingConnection {
     private final String sessionStartRequestId;
     private volatile WebSocketSession webSocketSession;
     private volatile AiLiveMeetingConnectionState state;
+    private volatile String sessionStopRequestId;
+    private volatile ScheduledFuture<?> stopTimeoutFuture;
 
     public AiLiveMeetingConnection(Long recordingSessionId, Long meetingId,
                                    AudioFormat audioFormat, String sessionStartRequestId) {
@@ -40,7 +43,7 @@ public class AiLiveMeetingConnection {
         return webSocketSession;
     }
 
-    public AiLiveMeetingConnectionState state() {
+    public synchronized AiLiveMeetingConnectionState state() {
         return state;
     }
 
@@ -48,15 +51,49 @@ public class AiLiveMeetingConnection {
         this.webSocketSession = webSocketSession;
     }
 
-    public void markStartSent() {
+    public synchronized void markStartSent() {
         this.state = AiLiveMeetingConnectionState.START_SENT;
     }
 
-    public void markReady() {
+    public synchronized void markReady() {
         this.state = AiLiveMeetingConnectionState.READY;
     }
 
-    public void close() {
+    public synchronized boolean markStopSent(String requestId) {
+        if (state != AiLiveMeetingConnectionState.READY) {
+            return false;
+        }
+        this.sessionStopRequestId = requestId;
+        this.state = AiLiveMeetingConnectionState.STOP_SENT;
+        return true;
+    }
+
+    public String sessionStopRequestId() {
+        return sessionStopRequestId;
+    }
+
+    public synchronized void markEnded() {
+        if (state == AiLiveMeetingConnectionState.STOP_SENT) {
+            this.state = AiLiveMeetingConnectionState.ENDED;
+        }
+    }
+
+    public void setStopTimeoutFuture(ScheduledFuture<?> stopTimeoutFuture) {
+        this.stopTimeoutFuture = stopTimeoutFuture;
+    }
+
+    public void cancelStopTimeout() {
+        ScheduledFuture<?> future = stopTimeoutFuture;
+        if (future != null) {
+            future.cancel(false);
+        }
+    }
+
+    public synchronized boolean isClosed() {
+        return state == AiLiveMeetingConnectionState.CLOSED;
+    }
+
+    public synchronized void close() {
         this.state = AiLiveMeetingConnectionState.CLOSED;
     }
 }

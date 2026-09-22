@@ -5,5 +5,7 @@ public enum AiLiveMeetingConnectionState {
     CONNECTING,
     START_SENT,
     READY,
+    STOP_SENT,
+    ENDED,
     CLOSED
 }
