@@ -9,9 +9,6 @@ spring:
       client:
         registration:
           kakao:
-            client-id: ${KAKAO_CLIENT_ID}
-            client-secret: ${KAKAO_CLIENT_SECRET}
-            redirect-uri: ${KAKAO_REDIRECT_URI}
             authorization-grant-type: authorization_code
             client-authentication-method: client_secret_post
             client-name: Kakao
@@ -23,16 +20,11 @@ spring:
             user-name-attribute: id
 
 kakao:
-  admin-key: ${KAKAO_ADMIN_KEY}
   unlink-uri: https://kapi.kakao.com/v1/user/unlink
 
 jwt:
-  secret: ${JWT_SECRET}
   access-token-validity: 30m
   refresh-token-validity: 14d
-
-ai:
-  websocket-url: ${AI_WEBSOCKET_URL}
 
 management:
   endpoints:
