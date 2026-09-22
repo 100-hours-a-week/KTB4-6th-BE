@@ -25,7 +25,7 @@ class TeamCreditTest {
     @Test
     @DisplayName("상한을 넘는 적립은 최대 한도까지만 반영된다")
     void earnUpToMaxBalance() {
-        TeamCredit credit = TeamCredit.create(TEAM, 280L);
+        TeamCredit credit = TeamCredit.create(TEAM, CreditPolicy.MAX_BALANCE - 20L);
 
         long earned = credit.earn(50L);
 
@@ -47,7 +47,7 @@ class TeamCreditTest {
     @Test
     @DisplayName("상한을 넘는 초기 잔액으로는 생성할 수 없다")
     void createCappedAtMaxBalance() {
-        TeamCredit credit = TeamCredit.create(TEAM, 500L);
+        TeamCredit credit = TeamCredit.create(TEAM, CreditPolicy.MAX_BALANCE + 200L);
 
         assertThat(credit.getBalance()).isEqualTo(CreditPolicy.MAX_BALANCE);
     }

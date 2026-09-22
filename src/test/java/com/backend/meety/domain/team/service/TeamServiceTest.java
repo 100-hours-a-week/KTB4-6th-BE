@@ -11,6 +11,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
 import com.backend.meety.domain.team.dto.InvitationCodeResponse;
+import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.TeamCredit;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
@@ -478,7 +479,7 @@ class TeamServiceTest {
     }
 
     @Test
-    @DisplayName("팀을 생성하면 초기 크레딧 50이 적립되고 원장에 기록된다")
+    @DisplayName("팀을 생성하면 초기 크레딧이 적립되고 원장에 기록된다")
     void grantInitialCreditOnCreate() {
         given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(User.create()));
         given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
@@ -496,7 +497,7 @@ class TeamServiceTest {
 
         ArgumentCaptor<TeamCredit> creditCaptor = ArgumentCaptor.forClass(TeamCredit.class);
         then(teamCreditRepository).should().save(creditCaptor.capture());
-        assertThat(creditCaptor.getValue().getBalance()).isEqualTo(50L);
+        assertThat(creditCaptor.getValue().getBalance()).isEqualTo(CreditPolicy.TEAM_CREATE_GRANT);
         then(creditLedgerRepository).should().save(any(CreditLedger.class));
     }
 }
