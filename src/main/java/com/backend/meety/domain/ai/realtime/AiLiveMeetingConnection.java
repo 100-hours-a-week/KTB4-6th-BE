@@ -1,9 +1,17 @@
 package com.backend.meety.domain.ai.realtime;
 
+import java.io.IOException;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicLong;
+import org.springframework.web.socket.BinaryMessage;
+import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import tools.jackson.databind.ObjectMapper;
 
 public class AiLiveMeetingConnection {
+
+    private final Object sendLock = new Object();
+    private final AtomicLong audioSequence = new AtomicLong();
 
     private final Long recordingSessionId;
     private final Long meetingId;
@@ -49,6 +57,25 @@ public class AiLiveMeetingConnection {
 
     public void attach(WebSocketSession webSocketSession) {
         this.webSocketSession = webSocketSession;
+    }
+
+    /**
+     * audio.meta와 바이너리 프레임을 한 쌍으로 전송한다. READY가 아니면 전송하지 않고 false를 반환한다.
+     */
+    public boolean forwardAudio(ObjectMapper objectMapper, byte[] audio) throws IOException {
+        synchronized (sendLock) {
+            if (state() != AiLiveMeetingConnectionState.READY) {
+                return false;
+            }
+            WebSocketSession session = webSocketSession;
+            if (session == null || !session.isOpen()) {
+                return false;
+            }
+            AiAudioMetaMessage meta = AiAudioMetaMessage.of(audioSequence.getAndIncrement());
+            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(meta)));
+            session.sendMessage(new BinaryMessage(audio));
+            return true;
+        }
     }
 
     public synchronized void markStartSent() {

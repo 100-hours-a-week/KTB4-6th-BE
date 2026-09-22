@@ -44,19 +44,25 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
             session.close(CloseStatus.NOT_ACCEPTABLE.withReason("audio chunk size not allowed"));
             return;
         }
-        // TODO: 수신한 청크를 AI WebSocket으로 전달하는 작업은 별도 이슈에서 진행한다.
+        byte[] audio = new byte[chunkBytes];
+        message.getPayload().get(audio);
+        boolean forwarded = aiConnectionService.forwardAudio(context.recordingSessionId(), audio);
+
         AudioChunkStats stats = stats(session);
-        stats.record(chunkBytes);
-        log.debug("오디오 청크를 수신했습니다. recordingSessionId={}, bytes={}, chunkCount={}, totalBytes={}",
-                context.recordingSessionId(), chunkBytes, stats.chunkCount(), stats.totalBytes());
+        stats.record(chunkBytes, forwarded);
+        log.debug("오디오 청크를 수신했습니다. recordingSessionId={}, bytes={}, forwarded={}, "
+                        + "chunkCount={}, forwardedCount={}, totalBytes={}",
+                context.recordingSessionId(), chunkBytes, forwarded,
+                stats.chunkCount(), stats.forwardedCount(), stats.totalBytes());
     }
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         AudioWebSocketContext context = context(session);
         AudioChunkStats stats = stats(session);
-        log.info("Audio WebSocket 연결이 종료되었습니다. recordingSessionId={}, chunkCount={}, totalBytes={}",
-                context.recordingSessionId(), stats.chunkCount(), stats.totalBytes());
+        log.info("Audio WebSocket 연결이 종료되었습니다. recordingSessionId={}, chunkCount={}, "
+                        + "forwardedCount={}, totalBytes={}",
+                context.recordingSessionId(), stats.chunkCount(), stats.forwardedCount(), stats.totalBytes());
         registry.remove(context.recordingSessionId(), session);
     }
 

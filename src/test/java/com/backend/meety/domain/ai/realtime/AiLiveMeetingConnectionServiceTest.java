@@ -6,15 +6,18 @@ import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import java.net.URI;
+import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketHandler;
@@ -369,6 +372,61 @@ class AiLiveMeetingConnectionServiceTest {
         return connection;
     }
 
+    @Test
+    @DisplayName("READY 상태에서 오디오를 전달하면 audio.meta와 바이너리가 순서대로 전송된다")
+    void forwardAudioSendsMetaThenBinaryWhenReady() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+
+        boolean forwarded = service.forwardAudio(88L, new byte[]{1, 2, 3});
+
+        assertThat(forwarded).isTrue();
+        JsonNode meta = objectMapper.readTree(client.session.sentMessages.getLast());
+        assertThat(meta.path("type").asText()).isEqualTo("audio.meta");
+        assertThat(meta.path("payload").path("sequence").asLong()).isZero();
+        assertThat(client.session.sentBinaries).hasSize(1);
+        assertThat(client.session.sentBinaries.getFirst()).containsExactly(1, 2, 3);
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.READY);
+    }
+
+    @Test
+    @DisplayName("오디오를 연속으로 전달하면 sequence가 0부터 순서대로 증가한다")
+    void forwardAudioIncrementsSequence() throws Exception {
+        readyConnection();
+
+        service.forwardAudio(88L, new byte[]{1});
+        service.forwardAudio(88L, new byte[]{2});
+        service.forwardAudio(88L, new byte[]{3});
+
+        List<Long> sequences = new ArrayList<>();
+        for (String message : client.session.sentMessages) {
+            JsonNode root = objectMapper.readTree(message);
+            if ("audio.meta".equals(root.path("type").asText())) {
+                sequences.add(root.path("payload").path("sequence").asLong());
+            }
+        }
+        assertThat(sequences).containsExactly(0L, 1L, 2L);
+        assertThat(client.session.sentBinaries).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("session.ready를 받기 전에 온 오디오는 전달하지 않는다")
+    void forwardAudioRejectedBeforeReady() throws Exception {
+        service.start(context(AudioFormat.WEBM_OPUS));
+
+        boolean forwarded = service.forwardAudio(88L, new byte[]{1, 2, 3});
+
+        assertThat(forwarded).isFalse();
+        assertThat(client.session.sentBinaries).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AI 연결이 없으면 오디오를 전달하지 않는다")
+    void forwardAudioRejectedWhenConnectionMissing() {
+        boolean forwarded = service.forwardAudio(88L, new byte[]{1, 2, 3});
+
+        assertThat(forwarded).isFalse();
+    }
+
     private AudioWebSocketContext context(AudioFormat audioFormat) {
         return new AudioWebSocketContext(7L, 42L, 88L, audioFormat);
     }
@@ -437,6 +495,7 @@ class AiLiveMeetingConnectionServiceTest {
 
         private final WebSocketSession delegate = mock(WebSocketSession.class);
         private final List<String> sentMessages = new ArrayList<>();
+        private final List<byte[]> sentBinaries = new ArrayList<>();
         private final List<CloseStatus> closeStatuses = new ArrayList<>();
         private boolean open = true;
 
@@ -446,6 +505,13 @@ class AiLiveMeetingConnectionServiceTest {
 
         @Override
         public void sendMessage(WebSocketMessage<?> message) {
+            if (message instanceof BinaryMessage binaryMessage) {
+                ByteBuffer payload = binaryMessage.getPayload();
+                byte[] audio = new byte[payload.remaining()];
+                payload.get(audio);
+                sentBinaries.add(audio);
+                return;
+            }
             sentMessages.add((String) message.getPayload());
         }
 
