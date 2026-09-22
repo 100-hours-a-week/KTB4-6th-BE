@@ -31,6 +31,9 @@ jwt:
   access-token-validity: 30m
   refresh-token-validity: 14d
 
+ai:
+  websocket-url: ${AI_WEBSOCKET_URL}
+
 management:
   endpoints:
     web:

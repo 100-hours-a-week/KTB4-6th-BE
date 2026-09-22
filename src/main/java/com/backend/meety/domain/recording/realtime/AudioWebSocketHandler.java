@@ -1,5 +1,6 @@
 package com.backend.meety.domain.recording.realtime;
 
+import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -14,12 +15,18 @@ import org.springframework.web.socket.handler.BinaryWebSocketHandler;
 public class AudioWebSocketHandler extends BinaryWebSocketHandler {
 
     private final AudioWebSocketRegistry registry;
+    private final AiLiveMeetingConnectionService aiConnectionService;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         AudioWebSocketContext context = context(session);
         if (!registry.register(context.recordingSessionId(), session)) {
             session.close(CloseStatus.POLICY_VIOLATION.withReason("audio websocket already connected"));
+            return;
+        }
+        if (!aiConnectionService.start(context)) {
+            registry.remove(context.recordingSessionId(), session);
+            session.close(CloseStatus.SERVER_ERROR.withReason("ai websocket connection failed"));
         }
     }
 
