@@ -10,13 +10,16 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+@Slf4j
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
@@ -36,6 +39,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private String resolveToken(HttpServletRequest request) {
         Cookie[] cookies = request.getCookies();
         if (cookies == null) {
+            log.debug("요청에 쿠키가 없습니다. uri={}", request.getRequestURI());
             return null;
         }
         for (Cookie cookie : cookies) {
@@ -43,6 +47,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 return cookie.getValue();
             }
         }
+        log.info("accessToken 쿠키가 없습니다. uri={}, cookieNames={}",
+                request.getRequestURI(), Arrays.stream(cookies).map(Cookie::getName).toList());
         return null;
     }
 
