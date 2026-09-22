@@ -1,10 +1,12 @@
 package com.backend.meety.domain.ai.realtime;
 
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
+import java.time.Duration;
 import java.net.URI;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import tools.jackson.databind.ObjectMapper;
@@ -14,10 +16,13 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class AiLiveMeetingConnectionService {
 
+    private static final Duration STOP_TIMEOUT = Duration.ofSeconds(30);
+
     private final AiLiveMeetingConnectionRegistry registry;
     private final AiLiveMeetingWebSocketClient webSocketClient;
     private final AiLiveMeetingProperties properties;
     private final AiRequestIdGenerator requestIdGenerator;
+    private final AiStopTimeoutScheduler stopTimeoutScheduler;
     private final ObjectMapper objectMapper;
 
     public boolean start(AudioWebSocketContext context) {
@@ -33,7 +38,7 @@ public class AiLiveMeetingConnectionService {
         }
         try {
             WebSocketSession aiSession = webSocketClient.connect(
-                    new AiLiveMeetingInboundHandler(connection, registry, objectMapper),
+                    new AiLiveMeetingInboundHandler(connection, this, objectMapper),
                     aiWebSocketUri()
             );
             connection.attach(aiSession);
@@ -47,6 +52,11 @@ public class AiLiveMeetingConnectionService {
         }
     }
 
+    public void stop(Long recordingSessionId) {
+        registry.find(recordingSessionId).ifPresentOrElse(this::stop,
+                () -> log.info("종료할 AI WebSocket connection이 없습니다. recordingSessionId={}", recordingSessionId));
+    }
+
     private URI aiWebSocketUri() {
         return properties.websocketUrl();
     }
@@ -57,12 +67,50 @@ public class AiLiveMeetingConnectionService {
         connection.markStartSent();
     }
 
-    private void cleanup(AiLiveMeetingConnection connection) {
+    private void stop(AiLiveMeetingConnection connection) {
+        String requestId = requestIdGenerator.sessionStopRequestId();
+        if (!connection.markStopSent(requestId)) {
+            log.info("AI WebSocket session.stop을 전송하지 않습니다. recordingSessionId={}, state={}",
+                    connection.recordingSessionId(), connection.state());
+            if (connection.state() == AiLiveMeetingConnectionState.CONNECTING
+                    || connection.state() == AiLiveMeetingConnectionState.START_SENT) {
+                cleanup(connection);
+            }
+            return;
+        }
+        connection.setStopTimeoutFuture(stopTimeoutScheduler.schedule(
+                () -> handleStopTimeout(connection),
+                STOP_TIMEOUT
+        ));
+        try {
+            WebSocketSession aiSession = connection.webSocketSession();
+            if (aiSession == null || !aiSession.isOpen()) {
+                throw new IllegalStateException("AI WebSocket session is not open");
+            }
+            aiSession.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiSessionStopMessage.of(connection))));
+        } catch (Exception e) {
+            log.warn("AI WebSocket session.stop 전송에 실패했습니다. recordingSessionId={}",
+                    connection.recordingSessionId(), e);
+            cleanup(connection);
+        }
+    }
+
+    private void handleStopTimeout(AiLiveMeetingConnection connection) {
+        if (connection.state() != AiLiveMeetingConnectionState.STOP_SENT) {
+            return;
+        }
+        log.warn("AI WebSocket session.ended 대기 시간이 초과되었습니다. recordingSessionId={}",
+                connection.recordingSessionId());
+        cleanup(connection);
+    }
+
+    void cleanup(AiLiveMeetingConnection connection) {
+        connection.cancelStopTimeout();
         connection.close();
         WebSocketSession aiSession = connection.webSocketSession();
         if (aiSession != null && aiSession.isOpen()) {
             try {
-                aiSession.close();
+                aiSession.close(CloseStatus.NORMAL);
             } catch (Exception e) {
                 log.warn("AI WebSocket cleanup 중 close에 실패했습니다. recordingSessionId={}",
                         connection.recordingSessionId(), e);

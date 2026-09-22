@@ -9,4 +9,8 @@ public class AiRequestIdGenerator {
     public String sessionStartRequestId() {
         return "start-" + UUID.randomUUID();
     }
+
+    public String sessionStopRequestId() {
+        return "stop-" + UUID.randomUUID();
+    }
 }
