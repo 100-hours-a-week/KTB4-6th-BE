@@ -45,7 +45,7 @@ public class TeamCredit extends BaseEntity {
     }
 
     /**
-     * 상한(300)을 초과하지 않도록 적립하고, 실제 적립된 양을 반환한다.
+     * 상한을 초과하지 않도록 적립하고, 실제 적립된 양을 반환한다.
      */
     public long earn(long amount) {
         long earned = Math.min(amount, CreditPolicy.MAX_BALANCE - balance);

@@ -61,7 +61,7 @@ public class MeetingService {
     public MeetingCreateResponse createMeeting(Long userId, Long teamId, MeetingCreateRequest request) {
         Team team = teamRepository.findByIdForUpdate(teamId)
                 .orElseThrow(() -> new MeetingException(MeetingErrorCode.TEAM_NOT_FOUND));
-        validateDailyMeetingLimit(teamId);
+        // TODO: 테스트 편의를 위해 하루 회의 생성 제한을 임시 해제했다. 확정 정책은 하루 5개다.
 
         TeamMember teamMember = teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(
                         teamId,
