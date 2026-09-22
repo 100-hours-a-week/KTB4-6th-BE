@@ -1,7 +1,9 @@
 package com.backend.meety.domain.recording.realtime;
 
+import com.backend.meety.domain.ai.realtime.AudioFormat;
 import com.backend.meety.global.security.WebSocketCookieAuthentication;
 import java.net.URI;
+import java.util.Arrays;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -25,14 +27,18 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                    WebSocketHandler wsHandler, Map<String, Object> attributes) {
         try {
-            Long userId = authentication.authenticate(request);
             Long recordingSessionId = extractRecordingSessionId(request.getURI());
+            AudioFormat audioFormat = extractAudioFormat(request.getURI());
+            Long userId = authentication.authenticate(request);
             if (registry.exists(recordingSessionId)) {
                 response.setStatusCode(HttpStatus.CONFLICT);
                 return false;
             }
-            attributes.put(CONTEXT_ATTRIBUTE, accessService.validate(userId, recordingSessionId));
+            attributes.put(CONTEXT_ATTRIBUTE, accessService.validate(userId, recordingSessionId, audioFormat));
             return true;
+        } catch (IllegalArgumentException e) {
+            response.setStatusCode(HttpStatus.BAD_REQUEST);
+            return false;
         } catch (RuntimeException e) {
             response.setStatusCode(HttpStatus.FORBIDDEN);
             return false;
@@ -50,5 +56,19 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
             throw new IllegalArgumentException("recordingSessionId is missing");
         }
         return Long.valueOf(values[4]);
+    }
+
+    private AudioFormat extractAudioFormat(URI uri) {
+        if (uri.getQuery() == null || uri.getQuery().isBlank()) {
+            throw new IllegalArgumentException("audioFormat is missing");
+        }
+        return Arrays.stream(uri.getQuery().split("&"))
+                .map(value -> value.split("=", 2))
+                .filter(values -> values.length == 2)
+                .filter(values -> "audioFormat".equals(values[0]))
+                .map(values -> AudioFormat.from(values[1])
+                        .orElseThrow(() -> new IllegalArgumentException("unsupported audioFormat")))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("audioFormat is missing"));
     }
 }

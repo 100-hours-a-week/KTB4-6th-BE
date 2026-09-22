@@ -5,6 +5,7 @@ import com.backend.meety.domain.recording.entity.RecordingSessionStatus;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
 import com.backend.meety.domain.recording.exception.RecordingException;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
+import com.backend.meety.domain.ai.realtime.AudioFormat;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
@@ -20,7 +21,7 @@ public class AudioWebSocketAccessService {
     private final TeamMemberRepository teamMemberRepository;
 
     @Transactional(readOnly = true)
-    public AudioWebSocketContext validate(Long userId, Long recordingSessionId) {
+    public AudioWebSocketContext validate(Long userId, Long recordingSessionId, AudioFormat audioFormat) {
         RecordingSession session = recordingSessionRepository.findByIdAndDeletedAtIsNull(recordingSessionId)
                 .orElseThrow(() -> new RecordingException(RecordingErrorCode.RECORDING_SESSION_NOT_FOUND));
         if (session.getStatus() != RecordingSessionStatus.RECORDING
@@ -33,6 +34,6 @@ public class AudioWebSocketAccessService {
         if (!session.getStartedByTeamMember().getId().equals(member.getId())) {
             throw new RecordingException(RecordingErrorCode.RECORDING_OWNER_REQUIRED);
         }
-        return new AudioWebSocketContext(userId, session.getMeeting().getId(), recordingSessionId);
+        return new AudioWebSocketContext(userId, session.getMeeting().getId(), recordingSessionId, audioFormat);
     }
 }
