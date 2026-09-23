@@ -1,10 +1,12 @@
 package com.backend.meety.domain.ai.realtime;
 
+import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import java.time.Duration;
 import java.net.URI;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -24,6 +26,12 @@ public class AiLiveMeetingConnectionService {
     private final AiRequestIdGenerator requestIdGenerator;
     private final AiStopTimeoutScheduler stopTimeoutScheduler;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
+
+    void markReady(AiLiveMeetingConnection connection) {
+        connection.markReady();
+        eventPublisher.publishEvent(new AiLiveMeetingReadyEvent(connection.recordingSessionId()));
+    }
 
     public boolean start(AudioWebSocketContext context) {
         AiLiveMeetingConnection connection = new AiLiveMeetingConnection(

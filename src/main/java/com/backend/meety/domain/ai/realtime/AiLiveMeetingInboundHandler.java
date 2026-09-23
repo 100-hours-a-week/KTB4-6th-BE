@@ -82,7 +82,7 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                     connection.recordingSessionId(), root.path("payload").path("status").asText());
             return;
         }
-        connection.markReady();
+        connectionService.markReady(connection);
     }
 
     private void handleSessionEnded(JsonNode root) {
