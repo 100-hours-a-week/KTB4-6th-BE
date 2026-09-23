@@ -1,7 +1,10 @@
 package com.backend.meety.domain.ai.realtime;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.TextMessage;
@@ -12,6 +15,7 @@ public class AiLiveMeetingConnection {
 
     private final Object sendLock = new Object();
     private final AtomicLong audioSequence = new AtomicLong();
+    private final CountDownLatch readyLatch = new CountDownLatch(1);
 
     private final Long recordingSessionId;
     private final Long meetingId;
@@ -84,6 +88,12 @@ public class AiLiveMeetingConnection {
 
     public synchronized void markReady() {
         this.state = AiLiveMeetingConnectionState.READY;
+        readyLatch.countDown();
+    }
+
+    public boolean awaitReady(Duration timeout) throws InterruptedException {
+        return readyLatch.await(timeout.toMillis(), TimeUnit.MILLISECONDS)
+                && state() == AiLiveMeetingConnectionState.READY;
     }
 
     public synchronized boolean markStopSent(String requestId) {
@@ -122,5 +132,6 @@ public class AiLiveMeetingConnection {
 
     public synchronized void close() {
         this.state = AiLiveMeetingConnectionState.CLOSED;
+        readyLatch.countDown();
     }
 }

@@ -19,6 +19,7 @@ import tools.jackson.databind.ObjectMapper;
 public class AiLiveMeetingConnectionService {
 
     private static final Duration STOP_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration READY_TIMEOUT = Duration.ofSeconds(5);
 
     private final AiLiveMeetingConnectionRegistry registry;
     private final AiLiveMeetingWebSocketClient webSocketClient;
@@ -33,7 +34,30 @@ public class AiLiveMeetingConnectionService {
         eventPublisher.publishEvent(new AiLiveMeetingReadyEvent(connection.recordingSessionId()));
     }
 
-    public boolean start(AudioWebSocketContext context) {
+    public boolean startAndAwaitReady(AudioWebSocketContext context) {
+        if (!start(context)) {
+            return false;
+        }
+        AiLiveMeetingConnection connection = registry.find(context.recordingSessionId()).orElse(null);
+        if (connection == null) {
+            return false;
+        }
+        try {
+            if (connection.awaitReady(READY_TIMEOUT)) {
+                return true;
+            }
+            log.warn("AI WebSocket session.ready 대기 시간이 초과되었습니다. recordingSessionId={}",
+                    context.recordingSessionId());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("AI WebSocket session.ready 대기가 중단되었습니다. recordingSessionId={}",
+                    context.recordingSessionId(), e);
+        }
+        cleanup(connection);
+        return false;
+    }
+
+    boolean start(AudioWebSocketContext context) {
         AiLiveMeetingConnection connection = new AiLiveMeetingConnection(
                 context.recordingSessionId(),
                 context.meetingId(),

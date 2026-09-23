@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -30,6 +31,7 @@ import tools.jackson.databind.ObjectMapper;
 class AiLiveMeetingConnectionServiceTest {
 
     private final List<Object> readyEvents = new ArrayList<>();
+    private final AtomicBoolean readyResult = new AtomicBoolean();
     private final AiLiveMeetingConnectionRegistry registry = new AiLiveMeetingConnectionRegistry();
     private final TestAiWebSocketClient client = new TestAiWebSocketClient();
     private final TestAiStopTimeoutScheduler timeoutScheduler = new TestAiStopTimeoutScheduler();
@@ -458,6 +460,43 @@ class AiLiveMeetingConnectionServiceTest {
                 """);
 
         assertThat(readyEvents).isEmpty();
+    }
+
+    @Test
+    @DisplayName("session.ready를 받으면 핸드셰이크 대기가 성공으로 끝난다")
+    void startAndAwaitReadySucceedsWhenSessionReadyArrives() throws Exception {
+        Thread waiting = new Thread(() -> readyResult.set(service.startAndAwaitReady(context(AudioFormat.WEBM_OPUS))));
+        waiting.start();
+        awaitConnectionRegistered();
+
+        client.receive("""
+                {
+                  "type": "session.ready",
+                  "requestId": "start-test",
+                  "meetingId": "42",
+                  "recordingSessionId": "88",
+                  "payload": { "status": "READY" }
+                }
+                """);
+        waiting.join(3_000);
+
+        assertThat(readyResult.get()).isTrue();
+        assertThat(registry.find(88L)).isPresent();
+    }
+
+    @Test
+    @DisplayName("AI 연결에 실패하면 핸드셰이크 대기도 실패한다")
+    void startAndAwaitReadyFailsWhenConnectionFails() {
+        client.failure = new RuntimeException("connect failed");
+
+        assertThat(service.startAndAwaitReady(context(AudioFormat.WEBM_OPUS))).isFalse();
+        assertThat(registry.find(88L)).isEmpty();
+    }
+
+    private void awaitConnectionRegistered() throws InterruptedException {
+        for (int i = 0; i < 100 && registry.find(88L).isEmpty(); i++) {
+            Thread.sleep(10);
+        }
     }
 
     private AudioWebSocketContext context(AudioFormat audioFormat) {

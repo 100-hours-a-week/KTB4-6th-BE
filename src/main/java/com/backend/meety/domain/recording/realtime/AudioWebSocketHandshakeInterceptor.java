@@ -1,5 +1,6 @@
 package com.backend.meety.domain.recording.realtime;
 
+import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionService;
 import com.backend.meety.domain.ai.realtime.AudioFormat;
 import com.backend.meety.global.security.WebSocketCookieAuthentication;
 import java.net.URI;
@@ -24,6 +25,7 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
     private final WebSocketCookieAuthentication authentication;
     private final AudioWebSocketAccessService accessService;
     private final AudioWebSocketRegistry registry;
+    private final AiLiveMeetingConnectionService aiConnectionService;
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
@@ -36,7 +38,12 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
                 response.setStatusCode(HttpStatus.CONFLICT);
                 return false;
             }
-            attributes.put(CONTEXT_ATTRIBUTE, accessService.validate(userId, recordingSessionId, audioFormat));
+            AudioWebSocketContext context = accessService.validate(userId, recordingSessionId, audioFormat);
+            if (!aiConnectionService.startAndAwaitReady(context)) {
+                response.setStatusCode(HttpStatus.SERVICE_UNAVAILABLE);
+                return false;
+            }
+            attributes.put(CONTEXT_ATTRIBUTE, context);
             return true;
         } catch (IllegalArgumentException e) {
             response.setStatusCode(HttpStatus.BAD_REQUEST);
@@ -51,6 +58,14 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
     @Override
     public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                WebSocketHandler wsHandler, Exception exception) {
+        if (exception == null) {
+            return;
+        }
+        try {
+            aiConnectionService.stop(extractRecordingSessionId(request.getURI()));
+        } catch (RuntimeException e) {
+            log.warn("핸드셰이크 실패 후 AI 연결 정리에 실패했습니다. uri={}", request.getURI().getPath(), e);
+        }
     }
 
     private Long extractRecordingSessionId(URI uri) {
