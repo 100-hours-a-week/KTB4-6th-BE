@@ -27,27 +27,26 @@ class AudioWebSocketHandlerTest {
     private final AudioWebSocketHandler handler = new AudioWebSocketHandler(registry, aiConnectionService);
 
     @Test
-    void startsAiConnectionAfterFeAudioWebSocketRegistered() throws Exception {
-        AudioWebSocketContext context = context();
-        WebSocketSession session = session(context);
-        when(aiConnectionService.start(context)).thenReturn(true);
+    @DisplayName("연결이 성립하면 세션을 레지스트리에 등록한다")
+    void registersSessionOnConnectionEstablished() throws Exception {
+        WebSocketSession session = session(context());
 
         handler.afterConnectionEstablished(session);
 
-        verify(aiConnectionService).start(context);
-        org.assertj.core.api.Assertions.assertThat(registry.find(88L)).contains(session);
+        assertThat(registry.find(88L)).contains(session);
+        verify(session, never()).close(any(CloseStatus.class));
     }
 
     @Test
-    void removesFeRegistryAndClosesSessionWhenAiConnectionFails() throws Exception {
-        AudioWebSocketContext context = context();
-        WebSocketSession session = session(context);
-        when(aiConnectionService.start(context)).thenReturn(false);
+    @DisplayName("이미 연결된 녹음 세션이면 AI 연결을 정리하고 세션을 닫는다")
+    void closesDuplicateSessionAndStopsAiConnection() throws Exception {
+        registry.register(88L, mock(WebSocketSession.class));
+        WebSocketSession session = session(context());
 
         handler.afterConnectionEstablished(session);
 
-        org.assertj.core.api.Assertions.assertThat(registry.find(88L)).isEmpty();
-        verify(session).close(CloseStatus.SERVER_ERROR.withReason("ai websocket connection failed"));
+        verify(aiConnectionService).stop(88L);
+        verify(session).close(CloseStatus.POLICY_VIOLATION.withReason("audio websocket already connected"));
     }
 
     @Test

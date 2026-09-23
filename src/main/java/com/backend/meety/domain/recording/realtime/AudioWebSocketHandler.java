@@ -25,12 +25,8 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
         AudioWebSocketContext context = context(session);
         session.getAttributes().put(STATS_ATTRIBUTE, new AudioChunkStats());
         if (!registry.register(context.recordingSessionId(), session)) {
+            aiConnectionService.stop(context.recordingSessionId());
             session.close(CloseStatus.POLICY_VIOLATION.withReason("audio websocket already connected"));
-            return;
-        }
-        if (!aiConnectionService.start(context)) {
-            registry.remove(context.recordingSessionId(), session);
-            session.close(CloseStatus.SERVER_ERROR.withReason("ai websocket connection failed"));
         }
     }
 

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionService;
 import com.backend.meety.global.security.WebSocketCookieAuthentication;
 import java.net.URI;
 import java.util.HashMap;
@@ -18,8 +19,9 @@ class AudioWebSocketHandshakeInterceptorTest {
     private final WebSocketCookieAuthentication authentication = mock(WebSocketCookieAuthentication.class);
     private final AudioWebSocketAccessService accessService = mock(AudioWebSocketAccessService.class);
     private final AudioWebSocketRegistry registry = new AudioWebSocketRegistry();
+    private final AiLiveMeetingConnectionService aiConnectionService = mock(AiLiveMeetingConnectionService.class);
     private final AudioWebSocketHandshakeInterceptor interceptor =
-            new AudioWebSocketHandshakeInterceptor(authentication, accessService, registry);
+            new AudioWebSocketHandshakeInterceptor(authentication, accessService, registry, aiConnectionService);
 
     @Test
     void unsupportedAudioFormatRejectsHandshakeBeforeAiSessionStartCanRun() {
@@ -34,7 +36,7 @@ class AudioWebSocketHandshakeInterceptorTest {
 
         assertThat(result).isFalse();
         assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST);
-        verifyNoInteractions(authentication, accessService);
+        verifyNoInteractions(authentication, accessService, aiConnectionService);
     }
 
     private ServerHttpRequest request(String uri) {
