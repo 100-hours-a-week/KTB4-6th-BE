@@ -291,10 +291,18 @@ class AiLiveMeetingConnectionServiceTest {
         client.receive("""
                 {
                   "type": "transcript.committed",
-                  "requestId": "transcript-1",
+                  "eventId": "evt_last",
                   "meetingId": "42",
                   "recordingSessionId": "88",
-                  "payload": {"text": "last transcript"}
+                  "payload": {
+                    "sourceSegmentKey": "88:99",
+                    "sequenceNumber": "99",
+                    "startMs": 176200,
+                    "endMs": 179800,
+                    "text": "last transcript",
+                    "provider": "gemini-3.5-transcribe",
+                    "speakerId": "01"
+                  }
                 }
                 """);
 
@@ -309,7 +317,7 @@ class AiLiveMeetingConnectionServiceTest {
 
         client.receive("""
                 {
-                  "type": "transcript.segment.final",
+                  "type": "transcript.committed",
                   "eventId": "evt_01J",
                   "meetingId": "42",
                   "recordingSessionId": "88",
@@ -326,7 +334,7 @@ class AiLiveMeetingConnectionServiceTest {
                 """);
 
         verify(transcriptService).saveFinalSegment(new AiTranscriptSegmentMessage(
-                "transcript.segment.final",
+                AiTranscriptSegmentMessage.TYPE,
                 "evt_01J",
                 42L,
                 88L,
@@ -351,7 +359,7 @@ class AiLiveMeetingConnectionServiceTest {
 
         client.receive("""
                 {
-                  "type": "transcript.segment.final",
+                  "type": "transcript.committed",
                   "eventId": "evt_02J",
                   "meetingId": "42",
                   "recordingSessionId": "88",
@@ -366,7 +374,7 @@ class AiLiveMeetingConnectionServiceTest {
                 """);
 
         verify(transcriptService).saveFinalSegment(new AiTranscriptSegmentMessage(
-                "transcript.segment.final",
+                AiTranscriptSegmentMessage.TYPE,
                 "evt_02J",
                 42L,
                 88L,

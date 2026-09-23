@@ -10,7 +10,7 @@ public record AiTranscriptSegmentMessage(
         AiTranscriptSegmentPayload payload
 ) {
 
-    public static final String TYPE = "transcript.segment.final";
+    public static final String TYPE = "transcript.committed";
 
     public static AiTranscriptSegmentMessage from(JsonNode root) {
         if (!TYPE.equals(root.path("type").asText())) {

@@ -99,7 +99,7 @@ class TranscriptServiceTest {
 
     private AiTranscriptSegmentMessage message(String sourceSegmentKey) {
         return new AiTranscriptSegmentMessage(
-                "transcript.segment.final",
+                AiTranscriptSegmentMessage.TYPE,
                 "evt_01J",
                 100L,
                 700L,
