@@ -83,6 +83,9 @@ public class AiLiveMeetingConnection {
     }
 
     public synchronized void markStartSent() {
+        if (state != AiLiveMeetingConnectionState.CONNECTING) {
+            return;
+        }
         this.state = AiLiveMeetingConnectionState.START_SENT;
     }
 
