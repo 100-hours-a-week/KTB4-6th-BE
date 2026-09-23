@@ -17,6 +17,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.recording.dto.AudioFileResponse;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlResponse;
 import com.backend.meety.domain.recording.entity.AudioFile;
 import com.backend.meety.domain.recording.entity.AudioFilePolicy;
@@ -38,12 +39,14 @@ import java.net.URI;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 class AudioFileServiceTest {
 
-    private static final String UPLOAD_URL = "https://bucket.s3.ap-northeast-2.amazonaws.com/recordings/upload";
+    private static final String UPLOAD_URL = "https://bucket.s3.us-east-2.amazonaws.com/recordings/upload";
+    private static final String STORAGE_KEY = "recordings/100/700/abc.mp4";
 
     private final RecordingSessionRepository recordings = mock(RecordingSessionRepository.class);
     private final AudioFileRepository audioFiles = mock(AudioFileRepository.class);
@@ -158,6 +161,96 @@ class AudioFileServiceTest {
         when(storage.createUploadUrl(any(), any(), any())).thenThrow(new RuntimeException("presign failed"));
 
         assertCode(() -> service.createUploadUrl(1L, 700L, "audio/mp4"), AudioFileErrorCode.AUDIO_UPLOAD_URL_CREATE_FAILED);
+    }
+
+    @Nested
+    @DisplayName("업로드 완료 처리")
+    class CompleteUpload {
+
+        private AudioFile audioFile;
+
+        @BeforeEach
+        void setUpAudioFile() {
+            audioFile = withId(AudioFile.create(recordingSession, STORAGE_KEY, "audio/mp4"), 800L);
+            when(audioFiles.findByIdForUpdateAndDeletedAtIsNull(800L)).thenReturn(Optional.of(audioFile));
+            when(storage.findObjectSize(STORAGE_KEY)).thenReturn(Optional.of(135_000_000L));
+        }
+
+        @Test
+        @DisplayName("S3에 저장된 크기로 AVAILABLE 전이한다")
+        void marksAvailableWithS3Size() {
+            AudioFileResponse response = service.completeUpload(1L, 800L, 135_000_000L, 2_700_000L);
+
+            assertThat(response.status()).isEqualTo(AudioFileStatus.AVAILABLE);
+            assertThat(response.fileSizeBytes()).isEqualTo(135_000_000L);
+            assertThat(response.durationMs()).isEqualTo(2_700_000L);
+            assertThat(response.storedAt()).isEqualTo(NOW);
+            assertThat(response.expiresAt()).isEqualTo(NOW.plus(AudioFilePolicy.RETENTION));
+        }
+
+        @Test
+        @DisplayName("FE가 보낸 크기가 아니라 S3 크기를 저장한다")
+        void ignoresClientReportedSize() {
+            when(storage.findObjectSize(STORAGE_KEY)).thenReturn(Optional.of(999L));
+
+            assertThat(service.completeUpload(1L, 800L, 135_000_000L, 2_700_000L).fileSizeBytes())
+                    .isEqualTo(999L);
+        }
+
+        @Test
+        @DisplayName("FE가 보낸 크기와 S3 크기가 달라도 S3 크기로 저장하고 진행한다")
+        void keepsGoingWhenReportedSizeMismatches() {
+            when(storage.findObjectSize(STORAGE_KEY)).thenReturn(Optional.of(500L));
+
+            AudioFileResponse response = service.completeUpload(1L, 800L, 999_999L, 2_700_000L);
+
+            assertThat(response.status()).isEqualTo(AudioFileStatus.AVAILABLE);
+            assertThat(response.fileSizeBytes()).isEqualTo(500L);
+        }
+
+        @Test
+        @DisplayName("음성 파일이 없으면 404다")
+        void rejectsMissingAudioFile() {
+            when(audioFiles.findByIdForUpdateAndDeletedAtIsNull(800L)).thenReturn(Optional.empty());
+
+            assertCode(() -> service.completeUpload(1L, 800L, 1L, 1L), AudioFileErrorCode.AUDIO_FILE_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("녹음 시작자가 아니면 403이다")
+        void rejectsNonStarter() {
+            TeamMember other = withId(TeamMember.createLeader(withId(User.create(), 9L), team, "다른 팀원"), 11L);
+            when(members.findByTeamIdAndUserIdAndMembershipStatus(2L, 9L, MembershipStatus.ACTIVE))
+                    .thenReturn(Optional.of(other));
+
+            assertCode(() -> service.completeUpload(9L, 800L, 1L, 1L), AudioFileErrorCode.AUDIO_FILE_ACCESS_DENIED);
+        }
+
+        @Test
+        @DisplayName("이미 AVAILABLE이면 409다")
+        void rejectsAlreadyCompleted() {
+            audioFile.markAvailable(1L, 1L, NOW, NOW);
+
+            assertCode(() -> service.completeUpload(1L, 800L, 1L, 1L), AudioFileErrorCode.AUDIO_FILE_NOT_UPLOADING);
+        }
+
+        @Test
+        @DisplayName("S3에 객체가 없으면 409다")
+        void rejectsMissingObject() {
+            when(storage.findObjectSize(STORAGE_KEY)).thenReturn(Optional.empty());
+
+            assertCode(() -> service.completeUpload(1L, 800L, 1L, 1L), AudioFileErrorCode.AUDIO_OBJECT_NOT_FOUND);
+            assertThat(audioFile.getStatus()).isEqualTo(AudioFileStatus.UPLOADING);
+        }
+
+
+        @Test
+        @DisplayName("S3 조회가 실패하면 500으로 변환한다")
+        void translatesHeadObjectFailure() {
+            when(storage.findObjectSize(STORAGE_KEY)).thenThrow(new RuntimeException("head failed"));
+
+            assertCode(() -> service.completeUpload(1L, 800L, 1L, 1L), AudioFileErrorCode.AUDIO_FILE_UPDATE_FAILED);
+        }
     }
 
     private void assertCode(Runnable action, BaseCode expected) {
