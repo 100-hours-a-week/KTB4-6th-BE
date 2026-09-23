@@ -98,9 +98,9 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                 || !connection.recordingSessionId().equals(message.recordingSessionId())) {
             throw new IllegalArgumentException("transcript event does not match current connection");
         }
-        log.debug("AI transcript 수신. meetingId={}, recordingSessionId={}, sourceSegmentKey={}, sequenceNumber={}",
+        log.debug("AI transcript 수신. meetingId={}, recordingSessionId={}, sourceSegmentKey={}, sequenceNumber={}, textLength={}",
                 message.meetingId(), message.recordingSessionId(), message.payload().sourceSegmentKey(),
-                message.payload().sequenceNumber());
+                message.payload().sequenceNumber(), message.payload().text().length());
         if (connection.state() == AiLiveMeetingConnectionState.STOP_SENT) {
             log.debug("STOP_SENT 상태에서 AI transcript를 처리합니다. recordingSessionId={}, sourceSegmentKey={}",
                     connection.recordingSessionId(), message.payload().sourceSegmentKey());
