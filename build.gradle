@@ -18,6 +18,7 @@ repositories {
 }
 
 dependencies {
+	implementation 'software.amazon.awssdk:s3:2.35.11'
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-security'

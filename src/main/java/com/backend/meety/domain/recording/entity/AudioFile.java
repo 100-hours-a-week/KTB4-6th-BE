@@ -52,4 +52,13 @@ public class AudioFile extends BaseEntity {
 
     @Column(name = "expires_at")
     private LocalDateTime expiresAt;
+
+    public static AudioFile create(RecordingSession recordingSession, String storageKey, String contentType) {
+        AudioFile audioFile = new AudioFile();
+        audioFile.recordingSession = recordingSession;
+        audioFile.storageKey = storageKey;
+        audioFile.contentType = contentType;
+        audioFile.status = AudioFileStatus.UPLOADING;
+        return audioFile;
+    }
 }
