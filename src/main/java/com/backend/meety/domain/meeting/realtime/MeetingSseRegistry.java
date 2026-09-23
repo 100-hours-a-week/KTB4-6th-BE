@@ -71,6 +71,16 @@ public class MeetingSseRegistry {
         emitters.remove(meetingId, meetingEmitters);
     }
 
+    public int broadcast(Long meetingId, String eventName, Object data) {
+        ConcurrentHashMap<Long, SseEmitter> meetingEmitters = emitters.get(meetingId);
+        if (meetingEmitters == null) {
+            return 0;
+        }
+        List<Map.Entry<Long, SseEmitter>> targets = new ArrayList<>(meetingEmitters.entrySet());
+        targets.forEach(entry -> broadcastEmitter(meetingId, entry.getKey(), entry.getValue(), eventName, data));
+        return targets.size();
+    }
+
     public Collection<SseEmitter> findAll(Long meetingId) {
         return Optional.ofNullable(emitters.get(meetingId))
                 .<Collection<SseEmitter>>map(meetingEmitters -> new ArrayList<>(meetingEmitters.values()))
@@ -118,6 +128,28 @@ public class MeetingSseRegistry {
             log.warn("SSE 이벤트 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
                     meetingId, userId, eventName, e);
         } finally {
+            completeEmitter(meetingId, userId, emitter);
+            remove(meetingId, userId, emitter);
+        }
+    }
+
+    private void broadcastEmitter(
+            Long meetingId,
+            Long userId,
+            SseEmitter emitter,
+            String eventName,
+            Object data
+    ) {
+        if (emitter == null) {
+            return;
+        }
+        try {
+            emitter.send(SseEmitter.event()
+                    .name(eventName)
+                    .data(data));
+        } catch (IOException | RuntimeException e) {
+            log.warn("SSE broadcast 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
+                    meetingId, userId, eventName, e);
             completeEmitter(meetingId, userId, emitter);
             remove(meetingId, userId, emitter);
         }

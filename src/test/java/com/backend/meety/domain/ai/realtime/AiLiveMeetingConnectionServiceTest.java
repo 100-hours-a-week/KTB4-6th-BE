@@ -1,11 +1,13 @@
 package com.backend.meety.domain.ai.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
+import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.time.Duration;
@@ -36,6 +38,7 @@ class AiLiveMeetingConnectionServiceTest {
     private final TestAiWebSocketClient client = new TestAiWebSocketClient();
     private final TestAiStopTimeoutScheduler timeoutScheduler = new TestAiStopTimeoutScheduler();
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final TranscriptService transcriptService = mock(TranscriptService.class);
     private final AiLiveMeetingConnectionService service = new AiLiveMeetingConnectionService(
             registry,
             client,
@@ -43,7 +46,8 @@ class AiLiveMeetingConnectionServiceTest {
             new FixedAiRequestIdGenerator(),
             timeoutScheduler,
             objectMapper,
-            readyEvents::add
+            readyEvents::add,
+            transcriptService
     );
 
     @Test
@@ -297,6 +301,79 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.STOP_SENT);
         assertThat(registry.find(88L)).contains(connection);
         assertThat(client.session.open).isTrue();
+    }
+
+    @Test
+    void transcriptSegmentFinalIsSavedWhenReady() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+
+        client.receive("""
+                {
+                  "type": "transcript.segment.final",
+                  "eventId": "evt_01J",
+                  "meetingId": "42",
+                  "recordingSessionId": "88",
+                  "payload": {
+                    "sourceSegmentKey": "88:31",
+                    "sequenceNumber": "31",
+                    "startMs": 176200,
+                    "endMs": 179800,
+                    "text": "final text",
+                    "provider": "gemini-3.5-transcribe",
+                    "speakerId": "01"
+                  }
+                }
+                """);
+
+        verify(transcriptService).saveFinalSegment(new AiTranscriptSegmentMessage(
+                "transcript.segment.final",
+                "evt_01J",
+                42L,
+                88L,
+                new AiTranscriptSegmentPayload(
+                        "88:31",
+                        31L,
+                        176200L,
+                        179800L,
+                        "final text",
+                        "gemini-3.5-transcribe",
+                        "01"
+                )
+        ));
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.READY);
+        assertThat(registry.find(88L)).contains(connection);
+    }
+
+    @Test
+    void transcriptSegmentFinalIsSavedWhenStopSent() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        service.stop(88L);
+
+        client.receive("""
+                {
+                  "type": "transcript.segment.final",
+                  "eventId": "evt_02J",
+                  "meetingId": "42",
+                  "recordingSessionId": "88",
+                  "payload": {
+                    "sourceSegmentKey": "88:32",
+                    "sequenceNumber": "32",
+                    "startMs": 180000,
+                    "endMs": 181000,
+                    "text": "last final text"
+                  }
+                }
+                """);
+
+        verify(transcriptService).saveFinalSegment(new AiTranscriptSegmentMessage(
+                "transcript.segment.final",
+                "evt_02J",
+                42L,
+                88L,
+                new AiTranscriptSegmentPayload("88:32", 32L, 180000L, 181000L, "last final text", null, null)
+        ));
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.STOP_SENT);
+        assertThat(registry.find(88L)).contains(connection);
     }
 
     @Test

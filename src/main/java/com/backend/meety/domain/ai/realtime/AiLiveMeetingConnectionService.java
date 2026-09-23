@@ -2,6 +2,7 @@ package com.backend.meety.domain.ai.realtime;
 
 import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
+import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.time.Duration;
 import java.net.URI;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ public class AiLiveMeetingConnectionService {
     private final AiStopTimeoutScheduler stopTimeoutScheduler;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final TranscriptService transcriptService;
 
     void markReady(AiLiveMeetingConnection connection) {
         connection.markReady();
@@ -70,7 +72,7 @@ public class AiLiveMeetingConnectionService {
         }
         try {
             WebSocketSession aiSession = webSocketClient.connect(
-                    new AiLiveMeetingInboundHandler(connection, this, objectMapper),
+                    new AiLiveMeetingInboundHandler(connection, this, objectMapper, transcriptService),
                     aiWebSocketUri()
             );
             connection.attach(aiSession);

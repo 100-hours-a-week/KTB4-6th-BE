@@ -1,5 +1,6 @@
 package com.backend.meety.domain.ai.realtime;
 
+import com.backend.meety.domain.transcript.service.TranscriptService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.socket.CloseStatus;
@@ -16,12 +17,14 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
     private static final String SESSION_READY = "session.ready";
     private static final String SESSION_ENDED = "session.ended";
     private static final String ERROR = "error";
+    private static final String TRANSCRIPT_SEGMENT_FINAL = AiTranscriptSegmentMessage.TYPE;
     private static final String READY = "READY";
     private static final String ENDED = "ENDED";
 
     private final AiLiveMeetingConnection connection;
     private final AiLiveMeetingConnectionService connectionService;
     private final ObjectMapper objectMapper;
+    private final TranscriptService transcriptService;
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
@@ -43,6 +46,10 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                         root.path("payload").path("code").asText(),
                         root.path("payload").path("retryable").asText());
                 cleanup();
+                return;
+            }
+            if (TRANSCRIPT_SEGMENT_FINAL.equals(type)) {
+                handleTranscriptSegmentFinal(root);
                 return;
             }
             log.warn("처리하지 않는 AI WebSocket 이벤트입니다. recordingSessionId={}, type={}",
@@ -83,6 +90,22 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
             return;
         }
         connectionService.markReady(connection);
+    }
+
+    private void handleTranscriptSegmentFinal(JsonNode root) {
+        AiTranscriptSegmentMessage message = AiTranscriptSegmentMessage.from(root);
+        if (!connection.meetingId().equals(message.meetingId())
+                || !connection.recordingSessionId().equals(message.recordingSessionId())) {
+            throw new IllegalArgumentException("transcript event does not match current connection");
+        }
+        log.debug("AI transcript 수신. meetingId={}, recordingSessionId={}, sourceSegmentKey={}, sequenceNumber={}",
+                message.meetingId(), message.recordingSessionId(), message.payload().sourceSegmentKey(),
+                message.payload().sequenceNumber());
+        if (connection.state() == AiLiveMeetingConnectionState.STOP_SENT) {
+            log.debug("STOP_SENT 상태에서 AI transcript를 처리합니다. recordingSessionId={}, sourceSegmentKey={}",
+                    connection.recordingSessionId(), message.payload().sourceSegmentKey());
+        }
+        transcriptService.saveFinalSegment(message);
     }
 
     private void handleSessionEnded(JsonNode root) {
