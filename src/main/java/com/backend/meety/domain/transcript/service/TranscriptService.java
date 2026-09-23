@@ -29,7 +29,7 @@ public class TranscriptService {
 
     @Transactional
     public void saveFinalSegment(AiTranscriptSegmentMessage message) {
-        String sourceSegmentKey = message.payload().sourceSegmentKey();
+        String sourceSegmentKey = message.sourceSegmentKey();
         if (transcriptSegmentRepository.existsBySourceSegmentKey(sourceSegmentKey)) {
             log.debug("중복 transcript segment 저장을 건너뜁니다. meetingId={}, sourceSegmentKey={}",
                     message.meetingId(), sourceSegmentKey);
@@ -42,10 +42,10 @@ public class TranscriptService {
                 meeting,
                 sourceSegmentKey,
                 message.payload().sequenceNumber(),
-                message.payload().text(),
-                message.payload().startMs(),
-                message.payload().endMs(),
-                LocalDateTime.now(clock)
+                message.payload().content(),
+                message.payload().startedAtMs(),
+                message.payload().endedAtMs(),
+                message.payload().recognizedAt()
         );
 
         TranscriptSegment savedSegment;

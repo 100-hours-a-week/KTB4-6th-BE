@@ -11,6 +11,7 @@ import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Delayed;
@@ -291,17 +292,14 @@ class AiLiveMeetingConnectionServiceTest {
         client.receive("""
                 {
                   "type": "transcript.committed",
-                  "eventId": "evt_last",
                   "meetingId": "42",
                   "recordingSessionId": "88",
                   "payload": {
-                    "sourceSegmentKey": "88:99",
-                    "sequenceNumber": "99",
-                    "startMs": 176200,
-                    "endMs": 179800,
-                    "text": "last transcript",
-                    "provider": "gemini-3.5-transcribe",
-                    "speakerId": "01"
+                    "sequenceNumber": 99,
+                    "content": "last transcript",
+                    "startedAtMs": 176200,
+                    "endedAtMs": 179800,
+                    "recognizedAt": "2026-09-21T05:30:04.500Z"
                   }
                 }
                 """);
@@ -318,34 +316,28 @@ class AiLiveMeetingConnectionServiceTest {
         client.receive("""
                 {
                   "type": "transcript.committed",
-                  "eventId": "evt_01J",
                   "meetingId": "42",
                   "recordingSessionId": "88",
                   "payload": {
-                    "sourceSegmentKey": "88:31",
-                    "sequenceNumber": "31",
-                    "startMs": 176200,
-                    "endMs": 179800,
-                    "text": "final text",
-                    "provider": "gemini-3.5-transcribe",
-                    "speakerId": "01"
+                    "sequenceNumber": 31,
+                    "content": "final text",
+                    "startedAtMs": 176200,
+                    "endedAtMs": 179800,
+                    "recognizedAt": "2026-09-21T05:30:04.500Z"
                   }
                 }
                 """);
 
         verify(transcriptService).saveFinalSegment(new AiTranscriptSegmentMessage(
                 AiTranscriptSegmentMessage.TYPE,
-                "evt_01J",
                 42L,
                 88L,
                 new AiTranscriptSegmentPayload(
-                        "88:31",
                         31L,
+                        "final text",
                         176200L,
                         179800L,
-                        "final text",
-                        "gemini-3.5-transcribe",
-                        "01"
+                        LocalDateTime.of(2026, 9, 21, 5, 30, 4, 500_000_000)
                 )
         ));
         assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.READY);
@@ -360,25 +352,23 @@ class AiLiveMeetingConnectionServiceTest {
         client.receive("""
                 {
                   "type": "transcript.committed",
-                  "eventId": "evt_02J",
                   "meetingId": "42",
                   "recordingSessionId": "88",
                   "payload": {
-                    "sourceSegmentKey": "88:32",
-                    "sequenceNumber": "32",
-                    "startMs": 180000,
-                    "endMs": 181000,
-                    "text": "last final text"
+                    "sequenceNumber": 32,
+                    "content": "last final text",
+                    "startedAtMs": 180000,
+                    "recognizedAt": "2026-09-21T05:30:05.000Z"
                   }
                 }
                 """);
 
         verify(transcriptService).saveFinalSegment(new AiTranscriptSegmentMessage(
                 AiTranscriptSegmentMessage.TYPE,
-                "evt_02J",
                 42L,
                 88L,
-                new AiTranscriptSegmentPayload("88:32", 32L, 180000L, 181000L, "last final text", null, null)
+                new AiTranscriptSegmentPayload(32L, "last final text", 180000L, null,
+                        LocalDateTime.of(2026, 9, 21, 5, 30, 5))
         ));
         assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.STOP_SENT);
         assertThat(registry.find(88L)).contains(connection);
