@@ -178,6 +178,65 @@ class MeetingSseRegistryTest {
     }
 
     @Test
+    void broadcastSendsEventToAllMeetingEmittersAndKeepsConnections() {
+        MeetingSseRegistry registry = new MeetingSseRegistry();
+        TestSseEmitter user10 = new TestSseEmitter();
+        TestSseEmitter user20 = new TestSseEmitter();
+        TestSseEmitter otherMeetingUser = new TestSseEmitter();
+        Object event = "transcript";
+        registry.register(100L, 10L, user10);
+        registry.register(100L, 20L, user20);
+        registry.register(200L, 30L, otherMeetingUser);
+
+        int emitterCount = registry.broadcast(100L, "TRANSCRIPT_CREATED", event);
+
+        assertThat(emitterCount).isEqualTo(2);
+        assertThat(user10.sentData)
+                .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
+                .contains(event)
+                .anyMatch(data -> data instanceof String value && value.startsWith("event:TRANSCRIPT_CREATED\n"));
+        assertThat(user20.sentData)
+                .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
+                .contains(event);
+        assertThat(otherMeetingUser.sentData).isNull();
+        assertThat(user10.completed).isFalse();
+        assertThat(user20.completed).isFalse();
+        assertThat(registry.find(100L, 10L)).contains(user10);
+        assertThat(registry.find(100L, 20L)).contains(user20);
+        assertThat(registry.find(200L, 30L)).contains(otherMeetingUser);
+    }
+
+    @Test
+    void broadcastRemovesOnlyFailedEmitterAndContinues() {
+        MeetingSseRegistry registry = new MeetingSseRegistry();
+        TestSseEmitter user10 = new TestSseEmitter();
+        TestSseEmitter user20 = new TestSseEmitter();
+        TestSseEmitter user30 = new TestSseEmitter();
+        user20.sendFailure = new IOException("send failed");
+        Object event = "transcript";
+        registry.register(100L, 10L, user10);
+        registry.register(100L, 20L, user20);
+        registry.register(100L, 30L, user30);
+
+        int emitterCount = registry.broadcast(100L, "TRANSCRIPT_CREATED", event);
+
+        assertThat(emitterCount).isEqualTo(3);
+        assertThat(user10.sentData)
+                .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
+                .contains(event);
+        assertThat(user20.sendAttempted).isTrue();
+        assertThat(user20.completed).isTrue();
+        assertThat(user30.sentData)
+                .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
+                .contains(event);
+        assertThat(user10.completed).isFalse();
+        assertThat(user30.completed).isFalse();
+        assertThat(registry.find(100L, 10L)).contains(user10);
+        assertThat(registry.find(100L, 20L)).isEmpty();
+        assertThat(registry.find(100L, 30L)).contains(user30);
+    }
+
+    @Test
     void callbackRemoveAfterSendAndCompleteAllIsSafe() {
         MeetingSseRegistry registry = new MeetingSseRegistry();
         TestSseEmitter emitter = new TestSseEmitter();
