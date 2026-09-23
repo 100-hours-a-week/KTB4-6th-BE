@@ -18,6 +18,9 @@ import com.backend.meety.domain.recording.dto.RecordingSessionResponse;
 import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.recording.entity.RecordingSessionStatus;
 import com.backend.meety.domain.recording.event.RecordingCompletedEvent;
+import com.backend.meety.domain.recording.event.RecordingPausedEvent;
+import com.backend.meety.domain.recording.event.RecordingResumedEvent;
+import com.backend.meety.domain.recording.event.RecordingStartedEvent;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
 import com.backend.meety.domain.recording.exception.RecordingException;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
@@ -79,6 +82,7 @@ public class RecordingService {
         ledgerRepository.save(CreditLedger.useForRecording(
                 meeting.getTeam(), session.getId(), RECORDING_CREDIT_COST, credit.getBalance()));
         meeting.start(now);
+        eventPublisher.publishEvent(new RecordingStartedEvent(meeting.getId(), session.getId()));
         return RecordingSessionResponse.from(session);
     }
 
@@ -110,13 +114,19 @@ public class RecordingService {
 
         LocalDateTime now = LocalDateTime.now(clock);
         switch (status) {
-            case PAUSED -> session.pause(now);
-            case RECORDING -> session.resume(now);
+            case PAUSED -> {
+                session.pause(now);
+                eventPublisher.publishEvent(new RecordingPausedEvent(meeting.getId(), session.getId()));
+            }
+            case RECORDING -> {
+                session.resume(now);
+                eventPublisher.publishEvent(new RecordingResumedEvent(meeting.getId(), session.getId()));
+            }
             case COMPLETED -> {
                 session.complete(now);
                 meeting.complete(now);
+                eventPublisher.publishEvent(new RecordingCompletedEvent(meeting.getId(), session.getId()));
                 eventPublisher.publishEvent(new MeetingCompletedEvent(meeting.getId()));
-                eventPublisher.publishEvent(new RecordingCompletedEvent(session.getId()));
             }
             default -> throw new RecordingException(RecordingErrorCode.INVALID_RECORDING_STATUS);
         }

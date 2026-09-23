@@ -17,7 +17,7 @@ class AiLiveMeetingStopListenerTest {
 
     @Test
     void stopAiLiveMeetingAfterRecordingCompletedCommit() {
-        listener.stopAiLiveMeeting(new RecordingCompletedEvent(88L));
+        listener.stopAiLiveMeeting(new RecordingCompletedEvent(42L, 88L));
 
         verify(connectionService).stop(88L);
     }

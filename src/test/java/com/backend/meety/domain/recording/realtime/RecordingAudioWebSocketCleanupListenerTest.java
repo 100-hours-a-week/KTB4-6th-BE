@@ -27,7 +27,7 @@ class RecordingAudioWebSocketCleanupListenerTest {
         WebSocketSession session = mock(WebSocketSession.class);
         when(registry.find(700L)).thenReturn(Optional.of(session));
 
-        listener.closeAudioWebSocket(new RecordingCompletedEvent(700L));
+        listener.closeAudioWebSocket(new RecordingCompletedEvent(100L, 700L));
 
         verify(session).close(CloseStatus.NORMAL);
         verify(registry).remove(700L, session);
@@ -37,7 +37,7 @@ class RecordingAudioWebSocketCleanupListenerTest {
     void completedRecordingSucceedsWhenWebSocketDoesNotExist() {
         when(registry.find(700L)).thenReturn(Optional.empty());
 
-        listener.closeAudioWebSocket(new RecordingCompletedEvent(700L));
+        listener.closeAudioWebSocket(new RecordingCompletedEvent(100L, 700L));
 
         verify(registry).find(700L);
     }
@@ -48,7 +48,7 @@ class RecordingAudioWebSocketCleanupListenerTest {
         when(registry.find(700L)).thenReturn(Optional.of(session));
         doThrow(new IOException("close failed")).when(session).close(CloseStatus.NORMAL);
 
-        listener.closeAudioWebSocket(new RecordingCompletedEvent(700L));
+        listener.closeAudioWebSocket(new RecordingCompletedEvent(100L, 700L));
 
         verify(session).close(CloseStatus.NORMAL);
         verify(registry).remove(700L, session);

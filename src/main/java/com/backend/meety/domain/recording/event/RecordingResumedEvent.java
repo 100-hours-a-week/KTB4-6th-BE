@@ -1,6 +1,6 @@
 package com.backend.meety.domain.recording.event;
 
-public record RecordingCompletedEvent(
+public record RecordingResumedEvent(
         Long meetingId,
         Long recordingSessionId
 ) {
