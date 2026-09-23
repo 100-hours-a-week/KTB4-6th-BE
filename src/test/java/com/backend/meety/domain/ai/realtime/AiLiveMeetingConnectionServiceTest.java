@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -542,7 +543,7 @@ class AiLiveMeetingConnectionServiceTest {
     void startAndAwaitReadySucceedsWhenSessionReadyArrives() throws Exception {
         Thread waiting = new Thread(() -> readyResult.set(service.startAndAwaitReady(context(AudioFormat.WEBM_OPUS))));
         waiting.start();
-        awaitConnectionRegistered();
+        awaitSessionStartSent();
 
         client.receive("""
                 {
@@ -568,8 +569,8 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(registry.find(88L)).isEmpty();
     }
 
-    private void awaitConnectionRegistered() throws InterruptedException {
-        for (int i = 0; i < 100 && registry.find(88L).isEmpty(); i++) {
+    private void awaitSessionStartSent() throws InterruptedException {
+        for (int i = 0; i < 100 && client.session.sentMessages.isEmpty(); i++) {
             Thread.sleep(10);
         }
     }
@@ -641,7 +642,7 @@ class AiLiveMeetingConnectionServiceTest {
     private static class TestWebSocketSession implements WebSocketSession {
 
         private final WebSocketSession delegate = mock(WebSocketSession.class);
-        private final List<String> sentMessages = new ArrayList<>();
+        private final List<String> sentMessages = new CopyOnWriteArrayList<>();
         private final List<byte[]> sentBinaries = new ArrayList<>();
         private final List<CloseStatus> closeStatuses = new ArrayList<>();
         private boolean open = true;
