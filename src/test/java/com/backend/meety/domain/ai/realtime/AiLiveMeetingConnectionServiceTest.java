@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -28,6 +29,7 @@ import tools.jackson.databind.ObjectMapper;
 
 class AiLiveMeetingConnectionServiceTest {
 
+    private final List<Object> readyEvents = new ArrayList<>();
     private final AiLiveMeetingConnectionRegistry registry = new AiLiveMeetingConnectionRegistry();
     private final TestAiWebSocketClient client = new TestAiWebSocketClient();
     private final TestAiStopTimeoutScheduler timeoutScheduler = new TestAiStopTimeoutScheduler();
@@ -38,7 +40,8 @@ class AiLiveMeetingConnectionServiceTest {
             new AiLiveMeetingProperties(URI.create("ws://localhost:8000/v1/live-meeting")),
             new FixedAiRequestIdGenerator(),
             timeoutScheduler,
-            objectMapper
+            objectMapper,
+            readyEvents::add
     );
 
     @Test
@@ -425,6 +428,36 @@ class AiLiveMeetingConnectionServiceTest {
         boolean forwarded = service.forwardAudio(88L, new byte[]{1, 2, 3});
 
         assertThat(forwarded).isFalse();
+    }
+
+    @Test
+    @DisplayName("session.ready를 받으면 AI 준비 완료 이벤트를 발행한다")
+    void publishReadyEventWhenSessionReadyReceived() throws Exception {
+        readyConnection();
+
+        assertThat(readyEvents).hasSize(1);
+        assertThat(readyEvents.getFirst())
+                .isInstanceOf(AiLiveMeetingReadyEvent.class)
+                .extracting("recordingSessionId")
+                .isEqualTo(88L);
+    }
+
+    @Test
+    @DisplayName("session.ready가 현재 connection과 일치하지 않으면 이벤트를 발행하지 않는다")
+    void doesNotPublishReadyEventWhenSessionReadyMismatched() throws Exception {
+        service.start(context(AudioFormat.WEBM_OPUS));
+
+        client.receive("""
+                {
+                  "type": "session.ready",
+                  "requestId": "other-request",
+                  "meetingId": "42",
+                  "recordingSessionId": "88",
+                  "payload": { "status": "READY" }
+                }
+                """);
+
+        assertThat(readyEvents).isEmpty();
     }
 
     private AudioWebSocketContext context(AudioFormat audioFormat) {
