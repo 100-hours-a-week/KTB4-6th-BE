@@ -4,23 +4,25 @@ import tools.jackson.databind.JsonNode;
 
 public record AiTranscriptSegmentMessage(
         String type,
-        String eventId,
         Long meetingId,
         Long recordingSessionId,
         AiTranscriptSegmentPayload payload
 ) {
 
-    public static final String TYPE = "transcript.segment.final";
+    public static final String TYPE = "transcript.committed";
 
     public static AiTranscriptSegmentMessage from(JsonNode root) {
         if (!TYPE.equals(root.path("type").asText())) {
             throw new IllegalArgumentException("unsupported transcript event type");
         }
-        String eventId = requiredText(root, "eventId");
         Long meetingId = requiredLong(root, "meetingId");
         Long recordingSessionId = requiredLong(root, "recordingSessionId");
         AiTranscriptSegmentPayload payload = AiTranscriptSegmentPayload.from(root.path("payload"));
-        return new AiTranscriptSegmentMessage(TYPE, eventId, meetingId, recordingSessionId, payload);
+        return new AiTranscriptSegmentMessage(TYPE, meetingId, recordingSessionId, payload);
+    }
+
+    public String sourceSegmentKey() {
+        return recordingSessionId + ":" + payload.sequenceNumber();
     }
 
     private static String requiredText(JsonNode node, String fieldName) {

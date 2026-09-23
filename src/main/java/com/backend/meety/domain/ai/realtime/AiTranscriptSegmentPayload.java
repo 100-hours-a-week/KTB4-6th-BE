@@ -1,38 +1,46 @@
 package com.backend.meety.domain.ai.realtime;
 
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import tools.jackson.databind.JsonNode;
 
 public record AiTranscriptSegmentPayload(
-        String sourceSegmentKey,
         Long sequenceNumber,
-        Long startMs,
-        Long endMs,
-        String text,
-        String provider,
-        String speakerId
+        String content,
+        Long startedAtMs,
+        Long endedAtMs,
+        LocalDateTime recognizedAt
 ) {
 
     public static AiTranscriptSegmentPayload from(JsonNode payload) {
         if (payload == null || payload.isMissingNode() || payload.isNull()) {
             throw new IllegalArgumentException("payload is missing");
         }
-        String sourceSegmentKey = requiredText(payload, "sourceSegmentKey");
         Long sequenceNumber = requiredLong(payload, "sequenceNumber");
-        Long startMs = requiredLong(payload, "startMs");
-        Long endMs = requiredLong(payload, "endMs");
-        if (startMs < 0 || endMs < 0 || endMs < startMs) {
-            throw new IllegalArgumentException("startMs/endMs is invalid");
+        String content = requiredText(payload, "content");
+        Long startedAtMs = requiredLong(payload, "startedAtMs");
+        Long endedAtMs = optionalLong(payload, "endedAtMs");
+        if (startedAtMs < 0 || (endedAtMs != null && (endedAtMs < 0 || endedAtMs < startedAtMs))) {
+            throw new IllegalArgumentException("startedAtMs/endedAtMs is invalid");
         }
-        String text = requiredText(payload, "text");
         return new AiTranscriptSegmentPayload(
-                sourceSegmentKey,
                 sequenceNumber,
-                startMs,
-                endMs,
-                text,
-                optionalText(payload, "provider"),
-                optionalText(payload, "speakerId")
+                content,
+                startedAtMs,
+                endedAtMs,
+                requiredRecognizedAt(payload)
         );
+    }
+
+    private static LocalDateTime requiredRecognizedAt(JsonNode payload) {
+        String value = requiredText(payload, "recognizedAt");
+        try {
+            return OffsetDateTime.parse(value).withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("recognizedAt is invalid", e);
+        }
     }
 
     private static String requiredText(JsonNode node, String fieldName) {
@@ -55,11 +63,10 @@ public record AiTranscriptSegmentPayload(
         }
     }
 
-    private static String optionalText(JsonNode node, String fieldName) {
+    private static Long optionalLong(JsonNode node, String fieldName) {
         if (!node.has(fieldName) || node.path(fieldName).isNull()) {
             return null;
         }
-        String value = node.path(fieldName).asText();
-        return value == null || value.isBlank() ? null : value;
+        return requiredLong(node, fieldName);
     }
 }

@@ -28,6 +28,7 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
+        log.info("AI 메시지 수신: {}", message.getPayload());
         try {
             JsonNode root = objectMapper.readTree(message.getPayload());
             String type = root.path("type").asText();
@@ -98,12 +99,12 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                 || !connection.recordingSessionId().equals(message.recordingSessionId())) {
             throw new IllegalArgumentException("transcript event does not match current connection");
         }
-        log.debug("AI transcript 수신. meetingId={}, recordingSessionId={}, sourceSegmentKey={}, sequenceNumber={}, textLength={}",
-                message.meetingId(), message.recordingSessionId(), message.payload().sourceSegmentKey(),
-                message.payload().sequenceNumber(), message.payload().text().length());
+        log.debug("AI transcript 수신. meetingId={}, recordingSessionId={}, sourceSegmentKey={}, sequenceNumber={}, contentLength={}",
+                message.meetingId(), message.recordingSessionId(), message.sourceSegmentKey(),
+                message.payload().sequenceNumber(), message.payload().content().length());
         if (connection.state() == AiLiveMeetingConnectionState.STOP_SENT) {
             log.debug("STOP_SENT 상태에서 AI transcript를 처리합니다. recordingSessionId={}, sourceSegmentKey={}",
-                    connection.recordingSessionId(), message.payload().sourceSegmentKey());
+                    connection.recordingSessionId(), message.sourceSegmentKey());
         }
         transcriptService.saveFinalSegment(message);
     }

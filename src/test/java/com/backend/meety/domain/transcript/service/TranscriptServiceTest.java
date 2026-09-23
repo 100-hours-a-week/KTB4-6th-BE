@@ -23,6 +23,7 @@ import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
 import com.backend.meety.domain.transcript.event.TranscriptCreatedEvent;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
+import java.time.LocalDateTime;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,8 @@ class TranscriptServiceTest {
     private final MeetingRepository meetings = mock(MeetingRepository.class);
     private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
     private final TranscriptService service = new TranscriptService(transcriptSegments, meetings, CLOCK, eventPublisher);
+    private static final LocalDateTime RECOGNIZED_AT = LocalDateTime.of(2026, 9, 21, 5, 30, 4, 500_000_000);
+
     private Meeting meeting;
 
     @BeforeEach
@@ -51,18 +54,18 @@ class TranscriptServiceTest {
         when(transcriptSegments.saveAndFlush(any(TranscriptSegment.class)))
                 .thenAnswer(call -> withId(call.getArgument(0), 900L));
 
-        service.saveFinalSegment(message("100:31"));
+        service.saveFinalSegment(message());
 
         ArgumentCaptor<TranscriptSegment> segmentCaptor = ArgumentCaptor.forClass(TranscriptSegment.class);
         verify(transcriptSegments).saveAndFlush(segmentCaptor.capture());
         TranscriptSegment segment = segmentCaptor.getValue();
         assertThat(segment.getMeeting()).isEqualTo(meeting);
-        assertThat(segment.getSourceSegmentKey()).isEqualTo("100:31");
+        assertThat(segment.getSourceSegmentKey()).isEqualTo("700:31");
         assertThat(segment.getSequenceNumber()).isEqualTo(31L);
         assertThat(segment.getContent()).isEqualTo("final text");
         assertThat(segment.getStartedAtMs()).isEqualTo(12000L);
         assertThat(segment.getEndedAtMs()).isEqualTo(14500L);
-        assertThat(segment.getRecognizedAt()).isEqualTo(NOW);
+        assertThat(segment.getRecognizedAt()).isEqualTo(RECOGNIZED_AT);
         assertThat(segment.getTranscriptSpeaker()).isNull();
 
         verify(eventPublisher).publishEvent(new TranscriptCreatedEvent(
@@ -72,15 +75,15 @@ class TranscriptServiceTest {
                 "final text",
                 12000L,
                 14500L,
-                NOW
+                RECOGNIZED_AT
         ));
     }
 
     @Test
     void duplicateSourceSegmentKeySkipsSaveAndEvent() {
-        when(transcriptSegments.existsBySourceSegmentKey("100:31")).thenReturn(true);
+        when(transcriptSegments.existsBySourceSegmentKey("700:31")).thenReturn(true);
 
-        service.saveFinalSegment(message("100:31"));
+        service.saveFinalSegment(message());
 
         verify(transcriptSegments, never()).saveAndFlush(any());
         verifyNoInteractions(eventPublisher);
@@ -91,27 +94,18 @@ class TranscriptServiceTest {
         when(transcriptSegments.saveAndFlush(any(TranscriptSegment.class)))
                 .thenThrow(new DataIntegrityViolationException("duplicate"));
 
-        service.saveFinalSegment(message("100:31"));
+        service.saveFinalSegment(message());
 
         verify(transcriptSegments).saveAndFlush(any(TranscriptSegment.class));
         verifyNoInteractions(eventPublisher);
     }
 
-    private AiTranscriptSegmentMessage message(String sourceSegmentKey) {
+    private AiTranscriptSegmentMessage message() {
         return new AiTranscriptSegmentMessage(
-                "transcript.segment.final",
-                "evt_01J",
+                AiTranscriptSegmentMessage.TYPE,
                 100L,
                 700L,
-                new AiTranscriptSegmentPayload(
-                        sourceSegmentKey,
-                        31L,
-                        12000L,
-                        14500L,
-                        "final text",
-                        "gemini-3.5-transcribe",
-                        "01"
-                )
+                new AiTranscriptSegmentPayload(31L, "final text", 12000L, 14500L, RECOGNIZED_AT)
         );
     }
 }
