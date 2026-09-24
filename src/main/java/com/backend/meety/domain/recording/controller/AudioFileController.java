@@ -1,5 +1,7 @@
 package com.backend.meety.domain.recording.controller;
 
+import com.backend.meety.domain.recording.dto.AudioFileResponse;
+import com.backend.meety.domain.recording.dto.AudioFileUploadCompleteRequest;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlRequest;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlResponse;
 import com.backend.meety.domain.recording.service.AudioFileService;
@@ -9,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -31,5 +34,15 @@ public class AudioFileController {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(
                         audioFileService.createUploadUrl(userId, recordingSessionId, request.contentType())));
+    }
+
+    @PatchMapping("/audio-files/{audioFileId}")
+    public ResponseEntity<ApiResponse<AudioFileResponse>> completeUpload(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long audioFileId,
+            @Valid @RequestBody AudioFileUploadCompleteRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(audioFileService.completeUpload(
+                userId, audioFileId, request.fileSizeBytes(), request.durationMs())));
     }
 }

@@ -61,4 +61,16 @@ public class AudioFile extends BaseEntity {
         audioFile.status = AudioFileStatus.UPLOADING;
         return audioFile;
     }
+
+    public boolean isUploading() {
+        return status == AudioFileStatus.UPLOADING;
+    }
+
+    public void markAvailable(Long fileSizeBytes, Long durationMs, LocalDateTime storedAt, LocalDateTime expiresAt) {
+        this.fileSizeBytes = fileSizeBytes;
+        this.durationMs = durationMs;
+        this.storedAt = storedAt;
+        this.expiresAt = expiresAt;
+        this.status = AudioFileStatus.AVAILABLE;
+    }
 }

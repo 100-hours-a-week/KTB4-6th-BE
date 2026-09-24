@@ -5,12 +5,15 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.backend.meety.domain.recording.dto.AudioFileResponse;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlResponse;
 import com.backend.meety.domain.recording.entity.AudioFilePolicy;
+import com.backend.meety.domain.recording.entity.AudioFileStatus;
 import com.backend.meety.domain.recording.exception.AudioFileErrorCode;
 import com.backend.meety.domain.recording.exception.AudioFileException;
 import com.backend.meety.domain.recording.service.AudioFileService;
@@ -78,6 +81,51 @@ class AudioFileControllerTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(service);
+    }
+
+    @Test
+    @DisplayName("업로드 완료는 200과 AVAILABLE 상태를 반환한다")
+    void completeUploadReturnsOk() throws Exception {
+        when(service.completeUpload(1L, 800L, 135_000_000L, 2_700_000L)).thenReturn(new AudioFileResponse(
+                800L, AudioFileStatus.AVAILABLE, "audio/mp4", 135_000_000L, 2_700_000L,
+                NOW, NOW.plus(AudioFilePolicy.RETENTION)));
+
+        mvc.perform(patch("/api/v1/audio-files/800")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fileSizeBytes\":135000000,\"durationMs\":2700000}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.audioFileId").value(800))
+                .andExpect(jsonPath("$.data.status").value("AVAILABLE"))
+                .andExpect(jsonPath("$.data.fileSizeBytes").value(135000000))
+                .andExpect(jsonPath("$.data.storedAt").exists())
+                .andExpect(jsonPath("$.data.expiresAt").exists());
+
+        verify(service).completeUpload(1L, 800L, 135_000_000L, 2_700_000L);
+    }
+
+    @Test
+    @DisplayName("durationMs가 0 이하면 Service를 호출하지 않는다")
+    void nonPositiveDurationIsRejected() throws Exception {
+        mvc.perform(patch("/api/v1/audio-files/800")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fileSizeBytes\":100,\"durationMs\":0}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    @DisplayName("업로드되지 않은 객체면 409를 반환한다")
+    void missingObjectReturnsConflict() throws Exception {
+        when(service.completeUpload(1L, 800L, 100L, 100L))
+                .thenThrow(new AudioFileException(AudioFileErrorCode.AUDIO_OBJECT_NOT_FOUND));
+
+        mvc.perform(patch("/api/v1/audio-files/800")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fileSizeBytes\":100,\"durationMs\":100}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("AUDIO_OBJECT_NOT_FOUND"));
     }
 
     @Test

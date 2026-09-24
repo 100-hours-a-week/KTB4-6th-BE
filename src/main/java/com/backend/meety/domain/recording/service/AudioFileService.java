@@ -1,5 +1,6 @@
 package com.backend.meety.domain.recording.service;
 
+import com.backend.meety.domain.recording.dto.AudioFileResponse;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlResponse;
 import com.backend.meety.domain.recording.entity.AudioFile;
 import com.backend.meety.domain.recording.entity.AudioFilePolicy;
@@ -12,7 +13,6 @@ import com.backend.meety.domain.recording.repository.AudioFileRepository;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.recording.storage.AudioFileStorage;
 import com.backend.meety.domain.team.entity.MembershipStatus;
-import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.HikariPoolMXBean;
@@ -72,12 +72,15 @@ public class AudioFileService {
         segmentStartedAt = System.nanoTime();
         log.info("[AUDIO_UPLOAD_URL] starter validation start recordingSessionId={}, userId={}, teamId={}",
                 recordingSessionId, userId, session.getMeeting().getTeam().getId());
-        validateStarter(userId, session);
+        if (!isStarter(userId, session)) {
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_CREATE_FORBIDDEN);
+        }
         logElapsed("[AUDIO_UPLOAD_URL] starter validation completed recordingSessionId={}, userId={}, teamId={}, "
                         + "elapsedMs={}",
                 elapsedMs(segmentStartedAt), recordingSessionId, userId, session.getMeeting().getTeam().getId());
 
         // TODO: audio_files.recording_session_id에 UNIQUE가 없어 동시 요청 시 중복 발급이 가능하다. 스키마 변경 확정 후 제약을 추가한다.
+        // TODO: 업로드가 실패해 UPLOADING으로 남은 행도 중복으로 세어 재발급이 막힌다. 재발급 허용 정책 확정 후 조건을 조정한다.
         segmentStartedAt = System.nanoTime();
         log.info("[AUDIO_UPLOAD_URL] audio file existence check start recordingSessionId={}, userId={}",
                 recordingSessionId, userId);
@@ -113,13 +116,45 @@ public class AudioFileService {
         );
     }
 
-    private void validateStarter(Long userId, RecordingSession session) {
-        TeamMember member = teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(
-                        session.getMeeting().getTeam().getId(), userId, MembershipStatus.ACTIVE)
-                .orElseThrow(() -> new AudioFileException(AudioFileErrorCode.AUDIO_FILE_CREATE_FORBIDDEN));
-        if (!session.getStartedByTeamMember().getId().equals(member.getId())) {
-            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_CREATE_FORBIDDEN);
+    @Transactional
+    public AudioFileResponse completeUpload(
+            Long userId, Long audioFileId, Long reportedFileSizeBytes, Long durationMs) {
+        AudioFile audioFile = audioFileRepository.findByIdForUpdateAndDeletedAtIsNull(audioFileId)
+                .orElseThrow(() -> new AudioFileException(AudioFileErrorCode.AUDIO_FILE_NOT_FOUND));
+        if (!isStarter(userId, audioFile.getRecordingSession())) {
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_ACCESS_DENIED);
         }
+        if (!audioFile.isUploading()) {
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_NOT_UPLOADING);
+        }
+
+        long fileSizeBytes = storedObjectSize(audioFile);
+        if (!Long.valueOf(fileSizeBytes).equals(reportedFileSizeBytes)) {
+            log.warn("업로드 완료 요청의 파일 크기가 S3 저장 크기와 다릅니다. audioFileId={}, reported={}, stored={}",
+                    audioFileId, reportedFileSizeBytes, fileSizeBytes);
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        audioFile.markAvailable(fileSizeBytes, durationMs, now, now.plus(AudioFilePolicy.RETENTION));
+        return AudioFileResponse.from(audioFile);
+    }
+
+    private long storedObjectSize(AudioFile audioFile) {
+        try {
+            return audioFileStorage.findObjectSize(audioFile.getStorageKey())
+                    .orElseThrow(() -> new AudioFileException(AudioFileErrorCode.AUDIO_OBJECT_NOT_FOUND));
+        } catch (AudioFileException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("S3 객체 조회에 실패했습니다. audioFileId={}", audioFile.getId(), e);
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_UPDATE_FAILED);
+        }
+    }
+
+    private boolean isStarter(Long userId, RecordingSession session) {
+        return teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(
+                        session.getMeeting().getTeam().getId(), userId, MembershipStatus.ACTIVE)
+                .filter(member -> session.getStartedByTeamMember().getId().equals(member.getId()))
+                .isPresent();
     }
 
     private String storageKey(RecordingSession session) {
