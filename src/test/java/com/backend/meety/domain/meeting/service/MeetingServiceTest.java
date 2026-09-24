@@ -366,6 +366,54 @@ class MeetingServiceTest {
     }
 
     @Test
+    @DisplayName("활성 팀원은 회의 접근 권한 검증을 통과한다")
+    void validateMeetingAccessWithActiveTeamMember() {
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(true);
+
+        meetingService.validateMeetingAccess(USER_ID, TEAM_ID);
+
+        verify(teamMemberRepository).existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        );
+    }
+
+    @Test
+    @DisplayName("다른 팀 사용자는 회의 접근 권한 검증에 실패한다")
+    void validateMeetingAccessWithOtherTeamUser() {
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(false);
+
+        assertThatThrownBy(() -> meetingService.validateMeetingAccess(USER_ID, TEAM_ID))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_ACCESS_DENIED);
+    }
+
+    @Test
+    @DisplayName("ACTIVE 상태가 아닌 팀원은 회의 접근 권한 검증에 실패한다")
+    void validateMeetingAccessWithInactiveTeamMember() {
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(false);
+
+        assertThatThrownBy(() -> meetingService.validateMeetingAccess(USER_ID, TEAM_ID))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_ACCESS_DENIED);
+    }
+
+    @Test
     @DisplayName("활성 팀원은 회의 목록을 조회할 수 있다")
     void getMeetings() {
         setUpListPermission();
