@@ -35,21 +35,30 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
             AudioFormat audioFormat = extractAudioFormat(request.getURI());
             Long userId = authentication.authenticate(request);
             if (registry.exists(recordingSessionId)) {
+                log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. recordingSessionId={}, reason=already connected",
+                        recordingSessionId);
                 response.setStatusCode(HttpStatus.CONFLICT);
                 return false;
             }
             AudioWebSocketContext context = accessService.validate(userId, recordingSessionId, audioFormat);
             if (!aiConnectionService.startAndAwaitReady(context)) {
+                log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. recordingSessionId={}, reason=ai not ready",
+                        recordingSessionId);
                 response.setStatusCode(HttpStatus.SERVICE_UNAVAILABLE);
                 return false;
             }
             attributes.put(CONTEXT_ATTRIBUTE, context);
+            log.info("Audio WebSocket 핸드셰이크를 승인했습니다. recordingSessionId={}, meetingId={}, openSessions={}",
+                    recordingSessionId, context.meetingId(), registry.count());
             return true;
         } catch (IllegalArgumentException e) {
+            log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. uri={}, reason=invalid request, message={}",
+                    request.getURI().getPath(), e.getMessage());
             response.setStatusCode(HttpStatus.BAD_REQUEST);
             return false;
         } catch (RuntimeException e) {
-            log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. uri={}", request.getURI().getPath(), e);
+            log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. uri={}, reason=access denied",
+                    request.getURI().getPath(), e);
             response.setStatusCode(HttpStatus.FORBIDDEN);
             return false;
         }

@@ -4,6 +4,7 @@ import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.time.Duration;
+import java.util.Optional;
 import java.net.URI;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -97,6 +98,10 @@ public class AiLiveMeetingConnectionService {
             log.warn("AI WebSocket 오디오 전달에 실패했습니다. recordingSessionId={}", recordingSessionId, e);
             return false;
         }
+    }
+
+    public Optional<AiLiveMeetingConnectionState> findState(Long recordingSessionId) {
+        return registry.find(recordingSessionId).map(AiLiveMeetingConnection::state);
     }
 
     public void stop(Long recordingSessionId) {

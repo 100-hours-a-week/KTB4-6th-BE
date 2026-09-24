@@ -86,7 +86,12 @@ public class MeetingSseService {
         log.info("[SSE_CONNECT] registry register start meetingId={}, userId={}", meetingId, userId);
         registerLifecycleCallbacks(meetingId, userId, emitter);
         registry.register(meetingId, userId, emitter)
-                .ifPresent(SseEmitter::complete);
+                .ifPresent(previous -> {
+                    log.info("[SSE] 기존 연결을 교체합니다. meetingId={}, userId={}", meetingId, userId);
+                    previous.complete();
+                });
+        log.info("[SSE] 연결 등록 완료. meetingId={}, userId={}, meetingEmitters={}, totalEmitters={}",
+                meetingId, userId, registry.count(meetingId), registry.countAll());
         logElapsed("[SSE_CONNECT] registry register completed meetingId={}, userId={}, elapsedMs={}",
                 elapsedMs(segmentStartedAt), meetingId, userId);
 
@@ -109,9 +114,23 @@ public class MeetingSseService {
     }
 
     private void registerLifecycleCallbacks(Long meetingId, Long userId, SseEmitter emitter) {
-        emitter.onCompletion(() -> registry.remove(meetingId, userId, emitter));
-        emitter.onTimeout(() -> registry.remove(meetingId, userId, emitter));
-        emitter.onError(ignored -> registry.remove(meetingId, userId, emitter));
+        emitter.onCompletion(() -> removeAndLog(meetingId, userId, emitter, "completion", null));
+        emitter.onTimeout(() -> removeAndLog(meetingId, userId, emitter, "timeout", null));
+        emitter.onError(throwable -> removeAndLog(meetingId, userId, emitter, "error", throwable));
+    }
+
+    private void removeAndLog(Long meetingId, Long userId, SseEmitter emitter, String reason, Throwable throwable) {
+        registry.remove(meetingId, userId, emitter);
+        if (throwable == null) {
+            log.info("[SSE] 연결이 종료되었습니다. meetingId={}, userId={}, reason={}, "
+                            + "meetingEmitters={}, totalEmitters={}",
+                    meetingId, userId, reason, registry.count(meetingId), registry.countAll());
+            return;
+        }
+        log.warn("[SSE] 연결이 오류로 종료되었습니다. meetingId={}, userId={}, reason={}, "
+                        + "meetingEmitters={}, totalEmitters={}, cause={}",
+                meetingId, userId, reason, registry.count(meetingId), registry.countAll(),
+                throwable.getClass().getSimpleName());
     }
 
     private void sendConnectedEvent(Long meetingId, SseEmitter emitter) throws IOException {

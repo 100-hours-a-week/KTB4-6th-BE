@@ -56,9 +56,10 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         AudioWebSocketContext context = context(session);
         AudioChunkStats stats = stats(session);
-        log.info("Audio WebSocket 연결이 종료되었습니다. recordingSessionId={}, chunkCount={}, "
-                        + "forwardedCount={}, totalBytes={}",
-                context.recordingSessionId(), stats.chunkCount(), stats.forwardedCount(), stats.totalBytes());
+        log.info("Audio WebSocket 연결이 종료되었습니다. recordingSessionId={}, closeStatus={}, "
+                        + "chunkCount={}, forwardedCount={}, totalBytes={}, aiState={}, openSessions={}",
+                context.recordingSessionId(), status, stats.chunkCount(), stats.forwardedCount(),
+                stats.totalBytes(), aiState(context.recordingSessionId()), registry.count());
         registry.remove(context.recordingSessionId(), session);
     }
 
@@ -66,8 +67,14 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
     public void handleTransportError(WebSocketSession session, Throwable exception) {
         AudioWebSocketContext context = context(session);
         registry.remove(context.recordingSessionId(), session);
-        log.warn("Audio WebSocket 오류가 발생했습니다. recordingSessionId={}",
-                context.recordingSessionId(), exception);
+        log.warn("Audio WebSocket 오류가 발생했습니다. recordingSessionId={}, aiState={}, openSessions={}",
+                context.recordingSessionId(), aiState(context.recordingSessionId()), registry.count(), exception);
+    }
+
+    private String aiState(Long recordingSessionId) {
+        return aiConnectionService.findState(recordingSessionId)
+                .map(Enum::name)
+                .orElse("NONE");
     }
 
     private AudioWebSocketContext context(WebSocketSession session) {
