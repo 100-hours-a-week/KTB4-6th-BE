@@ -1,5 +1,6 @@
 package com.backend.meety.domain.recording.service;
 
+import com.backend.meety.domain.recording.dto.AudioFileDeleteResponse;
 import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
 import com.backend.meety.domain.recording.dto.AudioFileDownloadUrlResponse;
 import com.backend.meety.domain.recording.dto.AudioFileResponse;
@@ -11,11 +12,15 @@ import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.recording.exception.AudioFileErrorCode;
 import com.backend.meety.domain.recording.exception.AudioFileException;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
+import com.backend.meety.domain.recording.event.AudioFileDeleteRequestedEvent;
 import com.backend.meety.domain.recording.exception.RecordingException;
 import com.backend.meety.domain.recording.repository.AudioFileRepository;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.recording.storage.AudioFileStorage;
 import com.backend.meety.domain.team.entity.MembershipStatus;
+import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.exception.TeamErrorCode;
+import com.backend.meety.domain.team.exception.TeamException;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.HikariPoolMXBean;
@@ -29,7 +34,9 @@ import javax.sql.DataSource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
@@ -44,6 +51,7 @@ public class AudioFileService {
     private final TeamMemberRepository teamMemberRepository;
     private final AudioFileStorage audioFileStorage;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
     private DataSource dataSource;
 
     @Autowired(required = false)
@@ -172,6 +180,43 @@ public class AudioFileService {
                 downloadUrl(audioFile),
                 now.plus(AudioFilePolicy.DOWNLOAD_URL_VALIDITY)
         );
+    }
+
+    @Transactional
+    public AudioFileDeleteResponse requestDelete(Long userId, Long audioFileId) {
+        AudioFile audioFile = audioFileRepository.findByIdForUpdate(audioFileId)
+                .filter(found -> !found.isDeleted())
+                .orElseThrow(() -> new AudioFileException(AudioFileErrorCode.AUDIO_FILE_NOT_FOUND));
+        if (!isTeamLeader(userId, audioFile.getRecordingSession())) {
+            throw new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED);
+        }
+        if (audioFile.isDeleting()) {
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_DELETE_IN_PROGRESS);
+        }
+
+        audioFile.markDeletePending(LocalDateTime.now(clock));
+        eventPublisher.publishEvent(
+                new AudioFileDeleteRequestedEvent(audioFile.getId(), audioFile.getStorageKey()));
+        return AudioFileDeleteResponse.from(audioFile);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void completeDelete(Long audioFileId, String storageKey) {
+        try {
+            audioFileStorage.deleteObject(storageKey);
+        } catch (Exception e) {
+            log.error("S3 객체 삭제에 실패했습니다. audioFileId={}", audioFileId, e);
+            audioFileRepository.findById(audioFileId).ifPresent(AudioFile::markDeleteFailed);
+            return;
+        }
+        audioFileRepository.findById(audioFileId).ifPresent(AudioFile::markDeleted);
+    }
+
+    private boolean isTeamLeader(Long userId, RecordingSession session) {
+        return teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(
+                        session.getMeeting().getTeam().getId(), userId, MembershipStatus.ACTIVE)
+                .filter(TeamMember::isLeader)
+                .isPresent();
     }
 
     private String downloadUrl(AudioFile audioFile) {

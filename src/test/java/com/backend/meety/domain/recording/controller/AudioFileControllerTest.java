@@ -5,12 +5,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.backend.meety.domain.recording.dto.AudioFileDeleteResponse;
 import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
 import com.backend.meety.domain.recording.dto.AudioFileDownloadUrlResponse;
 import com.backend.meety.domain.recording.dto.AudioFileResponse;
@@ -19,6 +21,8 @@ import com.backend.meety.domain.recording.entity.AudioFilePolicy;
 import com.backend.meety.domain.recording.entity.AudioFileStatus;
 import com.backend.meety.domain.recording.exception.AudioFileErrorCode;
 import com.backend.meety.domain.recording.exception.AudioFileException;
+import com.backend.meety.domain.team.exception.TeamErrorCode;
+import com.backend.meety.domain.team.exception.TeamException;
 import com.backend.meety.domain.recording.service.AudioFileService;
 import com.backend.meety.global.exception.GlobalExceptionHandler;
 import java.util.List;
@@ -185,6 +189,43 @@ class AudioFileControllerTest {
         mvc.perform(get("/api/v1/audio-files/800/download-url"))
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.error.code").value("AUDIO_FILE_EXPIRED"));
+    }
+
+    @Test
+    @DisplayName("삭제 요청은 202와 DELETE_PENDING을 반환한다")
+    void requestDeleteReturnsAccepted() throws Exception {
+        when(service.requestDelete(1L, 800L))
+                .thenReturn(new AudioFileDeleteResponse(800L, AudioFileStatus.DELETE_PENDING));
+
+        mvc.perform(delete("/api/v1/audio-files/800"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.audioFileId").value(800))
+                .andExpect(jsonPath("$.data.status").value("DELETE_PENDING"));
+
+        verify(service).requestDelete(1L, 800L);
+    }
+
+    @Test
+    @DisplayName("팀장이 아니면 403을 반환한다")
+    void nonLeaderDeleteReturnsForbidden() throws Exception {
+        when(service.requestDelete(1L, 800L))
+                .thenThrow(new TeamException(TeamErrorCode.TEAM_LEADER_REQUIRED));
+
+        mvc.perform(delete("/api/v1/audio-files/800"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("TEAM_LEADER_REQUIRED"));
+    }
+
+    @Test
+    @DisplayName("이미 삭제 중이면 409를 반환한다")
+    void deleteInProgressReturnsConflict() throws Exception {
+        when(service.requestDelete(1L, 800L))
+                .thenThrow(new AudioFileException(AudioFileErrorCode.AUDIO_FILE_DELETE_IN_PROGRESS));
+
+        mvc.perform(delete("/api/v1/audio-files/800"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("AUDIO_FILE_DELETE_IN_PROGRESS"));
     }
 
     @Test

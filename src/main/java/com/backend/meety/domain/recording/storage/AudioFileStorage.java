@@ -7,6 +7,7 @@ import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
@@ -46,6 +47,13 @@ public class AudioFileStorage {
                 .getObjectRequest(getObjectRequest)
                 .build();
         return presigner.presignGetObject(presignRequest).url();
+    }
+
+    public void deleteObject(String storageKey) {
+        s3Client.deleteObject(DeleteObjectRequest.builder()
+                .bucket(properties.bucket())
+                .key(storageKey)
+                .build());
     }
 
     public Optional<Long> findObjectSize(String storageKey) {

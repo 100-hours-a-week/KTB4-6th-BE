@@ -20,6 +20,8 @@ public enum AudioFileErrorCode implements BaseCode {
     AUDIO_FILE_NOT_AVAILABLE(HttpStatus.CONFLICT, "AUDIO_FILE_NOT_AVAILABLE", "아직 사용할 수 없는 음성 파일입니다."),
     AUDIO_FILE_EXPIRED(HttpStatus.GONE, "AUDIO_FILE_EXPIRED", "보관 기간이 만료된 음성 파일입니다."),
     AUDIO_DOWNLOAD_URL_CREATE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "AUDIO_DOWNLOAD_URL_CREATE_FAILED", "다운로드 URL 생성에 실패했습니다."),
+    AUDIO_FILE_DELETE_IN_PROGRESS(HttpStatus.CONFLICT, "AUDIO_FILE_DELETE_IN_PROGRESS", "음성 파일 삭제가 이미 진행 중입니다."),
+    AUDIO_FILE_DELETE_REQUEST_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "AUDIO_FILE_DELETE_REQUEST_FAILED", "음성 파일 삭제 요청에 실패했습니다."),
     AUDIO_FILE_UPDATE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "AUDIO_FILE_UPDATE_FAILED", "음성 파일 상태 변경에 실패했습니다.");
 
     private final HttpStatus httpStatus;

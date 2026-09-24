@@ -70,6 +70,27 @@ public class AudioFile extends BaseEntity {
         return expiresAt != null && !now.isBefore(expiresAt);
     }
 
+    public boolean isDeleting() {
+        return status == AudioFileStatus.DELETE_PENDING;
+    }
+
+    public boolean isDeleted() {
+        return status == AudioFileStatus.DELETED;
+    }
+
+    public void markDeletePending(LocalDateTime now) {
+        this.status = AudioFileStatus.DELETE_PENDING;
+        markDeleted(now);
+    }
+
+    public void markDeleted() {
+        this.status = AudioFileStatus.DELETED;
+    }
+
+    public void markDeleteFailed() {
+        this.status = AudioFileStatus.DELETE_FAILED;
+    }
+
     public void markAvailable(Long fileSizeBytes, Long durationMs, LocalDateTime storedAt, LocalDateTime expiresAt) {
         this.fileSizeBytes = fileSizeBytes;
         this.durationMs = durationMs;
