@@ -20,6 +20,8 @@ public enum TeamErrorCode implements BaseCode {
     TEAM_BLOCKED_USER(HttpStatus.FORBIDDEN, "TEAM_BLOCKED_USER", "해당 팀에 참여할 수 없습니다."),
     ACTIVE_TEAM_ALREADY_EXISTS(HttpStatus.CONFLICT, "ACTIVE_TEAM_ALREADY_EXISTS", "이미 참여 중인 팀이 있습니다."),
     LEADER_CANNOT_LEAVE_TEAM(HttpStatus.CONFLICT, "LEADER_CANNOT_LEAVE_TEAM", "팀장 권한을 위임하거나 팀을 삭제해주세요."),
+    LEADER_MUST_TRANSFER_OR_DELETE_TEAM(HttpStatus.CONFLICT,
+            "LEADER_MUST_TRANSFER_OR_DELETE_TEAM", "팀장은 탈퇴하기 전 팀장 위임이나 팀을 삭제해야 합니다."),
     CANNOT_KICK_SELF(HttpStatus.CONFLICT, "CANNOT_KICK_SELF", "자기 자신을 강퇴할 수 없습니다."),
     TEAM_MEMBER_NOT_ACTIVE(HttpStatus.CONFLICT, "TEAM_MEMBER_NOT_ACTIVE", "활성 상태의 팀원이 아닙니다."),
     TARGET_TEAM_MEMBER_NOT_ACTIVE(HttpStatus.CONFLICT,

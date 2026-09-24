@@ -1,6 +1,11 @@
 package com.backend.meety.domain.user.service;
 
 import com.backend.meety.domain.auth.client.OAuthProviderClient;
+import com.backend.meety.domain.team.entity.MembershipStatus;
+import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.exception.TeamErrorCode;
+import com.backend.meety.domain.team.exception.TeamException;
+import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.user.entity.UserAuthAccount;
 import com.backend.meety.domain.user.exception.UserErrorCode;
@@ -18,6 +23,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final UserAuthAccountRepository userAuthAccountRepository;
     private final UserAccountService userAccountService;
+    private final TeamMemberRepository teamMemberRepository;
     private final Map<String, OAuthProviderClient> oAuthProviderClients;
 
     public void withdraw(Long userId) {
@@ -26,9 +32,17 @@ public class UserService {
         if (user.isWithdrawn()) {
             return;
         }
-        // TODO: 팀 도메인 구현 후 팀장 위임/팀 삭제 선행 검증(409)과 team_members 소속 종료 처리 추가
+        validateNotTeamLeader(userId);
         unlinkProviders(userId);
         userAccountService.withdraw(userId);
+    }
+
+    private void validateNotTeamLeader(Long userId) {
+        teamMemberRepository.findByUserIdAndMembershipStatus(userId, MembershipStatus.ACTIVE)
+                .filter(TeamMember::isLeader)
+                .ifPresent(ignored -> {
+                    throw new TeamException(TeamErrorCode.LEADER_MUST_TRANSFER_OR_DELETE_TEAM);
+                });
     }
 
     private void unlinkProviders(Long userId) {

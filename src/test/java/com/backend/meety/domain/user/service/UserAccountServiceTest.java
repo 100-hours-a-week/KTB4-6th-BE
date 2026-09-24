@@ -7,11 +7,17 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
 import com.backend.meety.domain.auth.service.RefreshTokenService;
+import com.backend.meety.domain.team.entity.MembershipStatus;
+import com.backend.meety.domain.team.entity.Team;
+import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.user.entity.UserAuthAccount;
 import com.backend.meety.domain.user.repository.UserAuthAccountRepository;
 import com.backend.meety.domain.user.repository.UserRepository;
 import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -25,6 +31,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class UserAccountServiceTest {
 
+    private static final Clock CLOCK = Clock.fixed(
+            Instant.parse("2026-09-24T05:00:00Z"), ZoneId.of("Asia/Seoul"));
     private static final String PROVIDER = "kakao";
     private static final String PROVIDER_USER_ID = "12345";
 
@@ -37,12 +45,15 @@ class UserAccountServiceTest {
     @Mock
     private RefreshTokenService refreshTokenService;
 
+    @Mock
+    private TeamMemberRepository teamMemberRepository;
+
     private UserAccountService userAccountService;
 
     @BeforeEach
     void setUp() {
-        userAccountService = new UserAccountService(
-                userRepository, userAuthAccountRepository, refreshTokenService, Clock.systemDefaultZone());
+        userAccountService = new UserAccountService(userRepository, userAuthAccountRepository,
+                refreshTokenService, teamMemberRepository, CLOCK);
     }
 
     @Test
@@ -115,5 +126,36 @@ class UserAccountServiceTest {
         userAccountService.withdraw(1L);
 
         then(refreshTokenService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("탈퇴 시 활성 팀 소속을 LEFT로 종료한다")
+    void endsActiveMembershipOnWithdraw() {
+        User user = User.create();
+        TeamMember teamMember = TeamMember.createMember(user, Team.create("팀"), "팀원");
+        given(userRepository.findById(1L)).willReturn(Optional.of(user));
+        given(userAuthAccountRepository.findAllByUserId(1L)).willReturn(List.of());
+        given(teamMemberRepository.findByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(teamMember));
+
+        userAccountService.withdraw(1L);
+
+        assertThat(teamMember.getMembershipStatus()).isEqualTo(MembershipStatus.LEFT);
+        assertThat(teamMember.getDeletedAt()).isEqualTo(LocalDateTime.now(CLOCK));
+        assertThat(user.isWithdrawn()).isTrue();
+    }
+
+    @Test
+    @DisplayName("소속 팀이 없으면 탈퇴만 처리한다")
+    void withdrawsWithoutMembership() {
+        User user = User.create();
+        given(userRepository.findById(1L)).willReturn(Optional.of(user));
+        given(userAuthAccountRepository.findAllByUserId(1L)).willReturn(List.of());
+        given(teamMemberRepository.findByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.empty());
+
+        userAccountService.withdraw(1L);
+
+        assertThat(user.isWithdrawn()).isTrue();
     }
 }
