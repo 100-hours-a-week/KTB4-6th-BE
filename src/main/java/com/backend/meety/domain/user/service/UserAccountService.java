@@ -1,6 +1,10 @@
 package com.backend.meety.domain.user.service;
 
 import com.backend.meety.domain.auth.service.RefreshTokenService;
+import com.backend.meety.domain.team.entity.MembershipStatus;
+import com.backend.meety.domain.team.exception.TeamErrorCode;
+import com.backend.meety.domain.team.exception.TeamException;
+import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.user.entity.UserAuthAccount;
 import com.backend.meety.domain.user.exception.UserErrorCode;
@@ -20,6 +24,7 @@ public class UserAccountService {
     private final UserRepository userRepository;
     private final UserAuthAccountRepository userAuthAccountRepository;
     private final RefreshTokenService refreshTokenService;
+    private final TeamMemberRepository teamMemberRepository;
     private final Clock clock;
 
     @Transactional
@@ -37,10 +42,21 @@ public class UserAccountService {
             return;
         }
         LocalDateTime now = LocalDateTime.now(clock);
+        endActiveMembership(userId, now);
         user.withdraw(now);
         userAuthAccountRepository.findAllByUserId(userId)
                 .forEach(account -> account.withdraw(now));
         refreshTokenService.revokeAll(userId);
+    }
+
+    private void endActiveMembership(Long userId, LocalDateTime now) {
+        teamMemberRepository.findByUserIdAndMembershipStatus(userId, MembershipStatus.ACTIVE)
+                .ifPresent(teamMember -> {
+                    if (teamMember.isLeader()) {
+                        throw new TeamException(TeamErrorCode.LEADER_MUST_TRANSFER_OR_DELETE_TEAM);
+                    }
+                    teamMember.leave(now);
+                });
     }
 
     private User create(String provider, String providerUserId) {

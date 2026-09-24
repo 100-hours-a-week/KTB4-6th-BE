@@ -3,9 +3,6 @@ package com.backend.meety.domain.credit;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
-/**
- * 크레딧 정책값. 기획 정책이 바뀌면 이 클래스만 수정한다.
- */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class CreditPolicy {
 

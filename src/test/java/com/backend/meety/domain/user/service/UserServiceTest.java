@@ -7,6 +7,11 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
 import com.backend.meety.domain.auth.client.OAuthProviderClient;
+import com.backend.meety.domain.team.entity.MembershipStatus;
+import com.backend.meety.domain.team.entity.Team;
+import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.exception.TeamErrorCode;
+import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.user.entity.UserAuthAccount;
 import com.backend.meety.domain.user.exception.UserErrorCode;
@@ -37,6 +42,9 @@ class UserServiceTest {
     private UserAccountService userAccountService;
 
     @Mock
+    private TeamMemberRepository teamMemberRepository;
+
+    @Mock
     private OAuthProviderClient kakaoOAuthClient;
 
     private UserService userService;
@@ -44,7 +52,7 @@ class UserServiceTest {
     @BeforeEach
     void setUp() {
         userService = new UserService(userRepository, userAuthAccountRepository,
-                userAccountService, Map.of("kakao", kakaoOAuthClient));
+                userAccountService, teamMemberRepository, Map.of("kakao", kakaoOAuthClient));
     }
 
     @Test
@@ -112,5 +120,54 @@ class UserServiceTest {
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(UserErrorCode.USER_DELETE_FAILED));
         then(userAccountService).should(never()).withdraw(1L);
+    }
+
+    @Test
+    @DisplayName("팀장 상태로 탈퇴하면 409를 반환하고 unlink를 호출하지 않는다")
+    void withdrawRejectedWhenTeamLeader() {
+        User user = User.create();
+        Team team = Team.create("팀");
+        given(userRepository.findById(1L)).willReturn(Optional.of(user));
+        given(teamMemberRepository.findByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(TeamMember.createLeader(user, team, "팀장")));
+
+        assertThatThrownBy(() -> userService.withdraw(1L))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(TeamErrorCode.LEADER_MUST_TRANSFER_OR_DELETE_TEAM);
+
+        then(kakaoOAuthClient).should(never()).unlink(org.mockito.ArgumentMatchers.anyString());
+        then(userAccountService).should(never()).withdraw(1L);
+    }
+
+    @Test
+    @DisplayName("팀장이 아닌 팀원은 탈퇴할 수 있다")
+    void withdrawAllowedForMember() {
+        User user = User.create();
+        Team team = Team.create("팀");
+        given(userRepository.findById(1L)).willReturn(Optional.of(user));
+        given(teamMemberRepository.findByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(TeamMember.createMember(user, team, "팀원")));
+        given(userAuthAccountRepository.findAllByUserId(1L))
+                .willReturn(List.of(UserAuthAccount.of(user, "kakao", "12345")));
+        given(kakaoOAuthClient.unlink("12345")).willReturn(true);
+
+        userService.withdraw(1L);
+
+        then(userAccountService).should().withdraw(1L);
+    }
+
+    @Test
+    @DisplayName("소속 팀이 없어도 탈퇴할 수 있다")
+    void withdrawAllowedWithoutTeam() {
+        User user = User.create();
+        given(userRepository.findById(1L)).willReturn(Optional.of(user));
+        given(teamMemberRepository.findByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.empty());
+        given(userAuthAccountRepository.findAllByUserId(1L)).willReturn(List.of());
+
+        userService.withdraw(1L);
+
+        then(userAccountService).should().withdraw(1L);
     }
 }
