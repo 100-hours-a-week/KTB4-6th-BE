@@ -17,6 +17,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
 import com.backend.meety.domain.recording.dto.AudioFileResponse;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlResponse;
 import com.backend.meety.domain.recording.entity.AudioFile;
@@ -250,6 +251,71 @@ class AudioFileServiceTest {
             when(storage.findObjectSize(STORAGE_KEY)).thenThrow(new RuntimeException("head failed"));
 
             assertCode(() -> service.completeUpload(1L, 800L, 1L, 1L), AudioFileErrorCode.AUDIO_FILE_UPDATE_FAILED);
+        }
+    }
+
+    @Nested
+    @DisplayName("회의별 음성 파일 조회")
+    class GetByMeeting {
+
+        private AudioFile audioFile;
+
+        @BeforeEach
+        void setUpAudioFile() {
+            audioFile = withId(AudioFile.create(recordingSession, STORAGE_KEY, "audio/mp4"), 800L);
+            when(audioFiles.findByMeetingIdAndDeletedAtIsNull(100L)).thenReturn(Optional.of(audioFile));
+            when(members.existsByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE))
+                    .thenReturn(true);
+        }
+
+        @Test
+        @DisplayName("AVAILABLE이면 파일 정보를 반환한다")
+        void returnsAvailableAudioFile() {
+            audioFile.markAvailable(135_000_000L, 2_700_000L, NOW, NOW.plus(AudioFilePolicy.RETENTION));
+
+            AudioFileDetailResponse response = service.getByMeeting(1L, 100L);
+
+            assertThat(response.audioFileId()).isEqualTo(800L);
+            assertThat(response.recordingSessionId()).isEqualTo(700L);
+            assertThat(response.status()).isEqualTo(AudioFileStatus.AVAILABLE);
+            assertThat(response.contentType()).isEqualTo("audio/mp4");
+            assertThat(response.fileSizeBytes()).isEqualTo(135_000_000L);
+            assertThat(response.durationMs()).isEqualTo(2_700_000L);
+            assertThat(response.storedAt()).isEqualTo(NOW);
+            assertThat(response.expiresAt()).isEqualTo(NOW.plus(AudioFilePolicy.RETENTION));
+        }
+
+        @Test
+        @DisplayName("음성 파일이 없으면 404다")
+        void rejectsMissingAudioFile() {
+            when(audioFiles.findByMeetingIdAndDeletedAtIsNull(100L)).thenReturn(Optional.empty());
+
+            assertCode(() -> service.getByMeeting(1L, 100L), AudioFileErrorCode.AUDIO_FILE_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("활성 팀원이 아니면 403이다")
+        void rejectsNonTeamMember() {
+            when(members.existsByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE))
+                    .thenReturn(false);
+
+            assertCode(() -> service.getByMeeting(1L, 100L), AudioFileErrorCode.AUDIO_FILE_ACCESS_DENIED);
+        }
+
+        @Test
+        @DisplayName("업로드가 끝나지 않았으면 409다")
+        void rejectsNotAvailable() {
+            assertCode(() -> service.getByMeeting(1L, 100L), AudioFileErrorCode.AUDIO_FILE_NOT_AVAILABLE);
+        }
+
+        @Test
+        @DisplayName("녹음 시작자가 아니어도 같은 팀이면 조회된다")
+        void allowsNonStarterTeamMember() {
+            audioFile.markAvailable(1L, 1L, NOW, NOW);
+            when(members.existsByTeamIdAndUserIdAndMembershipStatus(2L, 9L, MembershipStatus.ACTIVE))
+                    .thenReturn(true);
+
+            assertThat(service.getByMeeting(9L, 100L).audioFileId()).isEqualTo(800L);
         }
     }
 

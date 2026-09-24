@@ -1,9 +1,11 @@
 package com.backend.meety.domain.recording.service;
 
+import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
 import com.backend.meety.domain.recording.dto.AudioFileResponse;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlResponse;
 import com.backend.meety.domain.recording.entity.AudioFile;
 import com.backend.meety.domain.recording.entity.AudioFilePolicy;
+import com.backend.meety.domain.recording.entity.AudioFileStatus;
 import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.recording.exception.AudioFileErrorCode;
 import com.backend.meety.domain.recording.exception.AudioFileException;
@@ -138,6 +140,19 @@ public class AudioFileService {
         return AudioFileResponse.from(audioFile);
     }
 
+    @Transactional(readOnly = true)
+    public AudioFileDetailResponse getByMeeting(Long userId, Long meetingId) {
+        AudioFile audioFile = audioFileRepository.findByMeetingIdAndDeletedAtIsNull(meetingId)
+                .orElseThrow(() -> new AudioFileException(AudioFileErrorCode.AUDIO_FILE_NOT_FOUND));
+        if (!isActiveTeamMember(userId, audioFile.getRecordingSession())) {
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_ACCESS_DENIED);
+        }
+        if (audioFile.getStatus() != AudioFileStatus.AVAILABLE) {
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_NOT_AVAILABLE);
+        }
+        return AudioFileDetailResponse.from(audioFile);
+    }
+
     private long storedObjectSize(AudioFile audioFile) {
         try {
             return audioFileStorage.findObjectSize(audioFile.getStorageKey())
@@ -148,6 +163,11 @@ public class AudioFileService {
             log.error("S3 객체 조회에 실패했습니다. audioFileId={}", audioFile.getId(), e);
             throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_UPDATE_FAILED);
         }
+    }
+
+    private boolean isActiveTeamMember(Long userId, RecordingSession session) {
+        return teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                session.getMeeting().getTeam().getId(), userId, MembershipStatus.ACTIVE);
     }
 
     private boolean isStarter(Long userId, RecordingSession session) {

@@ -17,6 +17,7 @@ public enum AudioFileErrorCode implements BaseCode {
     AUDIO_FILE_NOT_FOUND(HttpStatus.NOT_FOUND, "AUDIO_FILE_NOT_FOUND", "음성 파일을 찾을 수 없습니다."),
     AUDIO_FILE_NOT_UPLOADING(HttpStatus.CONFLICT, "AUDIO_FILE_NOT_UPLOADING", "업로드 중인 파일이 아닙니다."),
     AUDIO_OBJECT_NOT_FOUND(HttpStatus.CONFLICT, "AUDIO_OBJECT_NOT_FOUND", "업로드된 음성 파일을 확인할 수 없습니다."),
+    AUDIO_FILE_NOT_AVAILABLE(HttpStatus.CONFLICT, "AUDIO_FILE_NOT_AVAILABLE", "아직 사용할 수 없는 음성 파일입니다."),
     AUDIO_FILE_UPDATE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "AUDIO_FILE_UPDATE_FAILED", "음성 파일 상태 변경에 실패했습니다.");
 
     private final HttpStatus httpStatus;
