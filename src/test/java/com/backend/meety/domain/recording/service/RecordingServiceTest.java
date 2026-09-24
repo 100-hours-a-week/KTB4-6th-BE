@@ -36,6 +36,9 @@ import com.backend.meety.domain.recording.dto.RecordingSessionResponse;
 import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.recording.entity.RecordingSessionStatus;
 import com.backend.meety.domain.recording.event.RecordingCompletedEvent;
+import com.backend.meety.domain.recording.event.RecordingPausedEvent;
+import com.backend.meety.domain.recording.event.RecordingResumedEvent;
+import com.backend.meety.domain.recording.event.RecordingStartedEvent;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.team.entity.MembershipStatus;
@@ -103,6 +106,7 @@ class RecordingServiceTest {
         assertThat(credit.getBalance()).isZero();
         assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.IN_PROGRESS);
         assertThat(meeting.getStartedAt()).isEqualTo(response.startedAt());
+        verify(eventPublisher).publishEvent(new RecordingStartedEvent(100L, 700L));
 
         ArgumentCaptor<CreditLedger> ledger = ArgumentCaptor.forClass(CreditLedger.class);
         verify(ledgers).save(ledger.capture());
@@ -231,6 +235,7 @@ class RecordingServiceTest {
         order.verify(meetings).findByIdForUpdateAndDeletedAtIsNull(100L);
         order.verify(recordings).findByIdForUpdateAndDeletedAtIsNull(700L);
         order.verify(members).findByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE);
+        verify(eventPublisher).publishEvent(new RecordingPausedEvent(100L, 700L));
     }
 
     @Test
@@ -241,6 +246,7 @@ class RecordingServiceTest {
         assertThat(response.startedAt()).isEqualTo(NOW);
         assertThat(response.pausedAt()).isNull();
         assertThat(response.autoEndAt()).isEqualTo(NOW.plusMinutes(90));
+        verify(eventPublisher).publishEvent(new RecordingResumedEvent(100L, 700L));
     }
 
     @Test
@@ -268,8 +274,12 @@ class RecordingServiceTest {
         assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.COMPLETED);
         assertThat(meeting.getEndedAt()).isEqualTo(response.endedAt());
         ArgumentCaptor<RecordingCompletedEvent> event = ArgumentCaptor.forClass(RecordingCompletedEvent.class);
-        verify(eventPublisher).publishEvent(any(MeetingCompletedEvent.class));
         verify(eventPublisher).publishEvent(event.capture());
+        verify(eventPublisher).publishEvent(any(MeetingCompletedEvent.class));
+        InOrder eventOrder = inOrder(eventPublisher);
+        eventOrder.verify(eventPublisher).publishEvent(any(RecordingCompletedEvent.class));
+        eventOrder.verify(eventPublisher).publishEvent(any(MeetingCompletedEvent.class));
+        assertThat(event.getValue().meetingId()).isEqualTo(100L);
         assertThat(event.getValue().recordingSessionId()).isEqualTo(700L);
         verifyNoInteractions(credits, ledgers);
     }

@@ -222,7 +222,7 @@ public class MeetingService {
         return MeetingInProgressResponse.from(hasInProgressMeeting);
     }
 
-    private void validateMeetingAccess(Long userId, Long teamId) {
+    public void validateMeetingAccess(Long userId, Long teamId) {
         validateTeamMembership(userId, teamId, MeetingErrorCode.MEETING_ACCESS_DENIED);
     }
 

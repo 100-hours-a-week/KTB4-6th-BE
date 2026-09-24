@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
@@ -97,6 +99,8 @@ class MeetingSseCleanupEventListenerTest {
                 .isEqualTo(TransactionPhase.AFTER_COMMIT);
         assertThat(deleted.getAnnotation(TransactionalEventListener.class).phase())
                 .isEqualTo(TransactionPhase.AFTER_COMMIT);
+        assertThat(completed.getAnnotation(Order.class).value())
+                .isEqualTo(Ordered.LOWEST_PRECEDENCE);
     }
 
     private static class TestSseEmitter extends SseEmitter {
