@@ -4,6 +4,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -14,7 +16,9 @@ import com.backend.meety.global.exception.GlobalExceptionHandler;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -57,5 +61,17 @@ class MeetingControllerSseTest {
                 .andExpect(request().asyncStarted());
 
         verify(sseService).connect(1L, 100L);
+    }
+
+    @Test
+    @DisplayName("SSE 응답에 nginx 버퍼링 차단 헤더가 포함된다")
+    void connectEventsDisablesProxyBuffering() throws Exception {
+        when(sseService.connect(1L, 100L)).thenReturn(new SseEmitter());
+
+        mvc.perform(get("/api/v1/meetings/100/events").accept(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Accel-Buffering", "no"))
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-cache"))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM));
     }
 }

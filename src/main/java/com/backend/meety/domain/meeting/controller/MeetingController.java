@@ -11,6 +11,7 @@ import com.backend.meety.domain.meeting.dto.MeetingParticipantResponse;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateResponse;
 import com.backend.meety.domain.meeting.realtime.MeetingSseService;
+import com.backend.meety.domain.meeting.realtime.SseHeaders;
 import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
 import com.backend.meety.global.response.ApiResponse;
@@ -21,6 +22,7 @@ import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -140,11 +142,14 @@ public class MeetingController {
     }
 
     @GetMapping(value = "/meetings/{meetingId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter connectEvents(
+    public ResponseEntity<SseEmitter> connectEvents(
             @AuthenticationPrincipal Long userId,
             @PathVariable Long meetingId
     ) {
-        return meetingSseService.connect(userId, meetingId);
+        return ResponseEntity.ok()
+                .header(SseHeaders.X_ACCEL_BUFFERING, SseHeaders.X_ACCEL_BUFFERING_OFF)
+                .cacheControl(CacheControl.noCache())
+                .body(meetingSseService.connect(userId, meetingId));
     }
 
     @DeleteMapping("/meetings/{meetingId}/participants/me")
