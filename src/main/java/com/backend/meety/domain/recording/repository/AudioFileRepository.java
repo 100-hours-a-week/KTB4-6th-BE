@@ -35,6 +35,10 @@ public interface AudioFileRepository extends JpaRepository<AudioFile, Long> {
     Optional<AudioFile> findByIdAndDeletedAtIsNull(@Param("audioFileId") Long audioFileId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from AudioFile a where a.id = :audioFileId")
+    Optional<AudioFile> findByIdForUpdate(@Param("audioFileId") Long audioFileId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from AudioFile a where a.id = :audioFileId and a.deletedAt is null")
     Optional<AudioFile> findByIdForUpdateAndDeletedAtIsNull(@Param("audioFileId") Long audioFileId);
 }

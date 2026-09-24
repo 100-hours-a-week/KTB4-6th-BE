@@ -11,12 +11,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.recording.dto.AudioFileDeleteResponse;
 import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
 import com.backend.meety.domain.recording.dto.AudioFileDownloadUrlResponse;
 import com.backend.meety.domain.recording.dto.AudioFileResponse;
@@ -26,6 +28,7 @@ import com.backend.meety.domain.recording.entity.AudioFilePolicy;
 import com.backend.meety.domain.recording.entity.AudioFileStatus;
 import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.recording.exception.AudioFileErrorCode;
+import com.backend.meety.domain.recording.event.AudioFileDeleteRequestedEvent;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
 import com.backend.meety.domain.recording.repository.AudioFileRepository;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
@@ -33,11 +36,14 @@ import com.backend.meety.domain.recording.storage.AudioFileStorage;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.exception.TeamErrorCode;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.global.exception.BaseCode;
 import com.backend.meety.global.exception.BusinessException;
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -55,8 +61,9 @@ class AudioFileServiceTest {
     private final AudioFileRepository audioFiles = mock(AudioFileRepository.class);
     private final TeamMemberRepository members = mock(TeamMemberRepository.class);
     private final AudioFileStorage storage = mock(AudioFileStorage.class);
+    private final List<Object> publishedEvents = new ArrayList<>();
     private final AudioFileService service = new AudioFileService(
-            recordings, audioFiles, members, storage, CLOCK);
+            recordings, audioFiles, members, storage, CLOCK, publishedEvents::add);
 
     private Team team;
     private TeamMember starter;
@@ -401,6 +408,92 @@ class AudioFileServiceTest {
 
             assertCode(() -> service.createDownloadUrl(1L, 800L),
                     AudioFileErrorCode.AUDIO_DOWNLOAD_URL_CREATE_FAILED);
+        }
+    }
+
+    @Nested
+    @DisplayName("원본 음성 삭제")
+    class RequestDelete {
+
+        private AudioFile audioFile;
+
+        @BeforeEach
+        void setUpAudioFile() {
+            audioFile = withId(AudioFile.create(recordingSession, STORAGE_KEY, "audio/mp4"), 800L);
+            audioFile.markAvailable(1_024L, 1_000L, NOW, NOW.plus(AudioFilePolicy.RETENTION));
+            when(audioFiles.findByIdForUpdate(800L)).thenReturn(Optional.of(audioFile));
+            when(members.findByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE))
+                    .thenReturn(Optional.of(starter));
+        }
+
+        @Test
+        @DisplayName("팀장이 요청하면 DELETE_PENDING으로 전이하고 삭제 이벤트를 발행한다")
+        void marksDeletePendingAndPublishesEvent() {
+            AudioFileDeleteResponse response = service.requestDelete(1L, 800L);
+
+            assertThat(response.audioFileId()).isEqualTo(800L);
+            assertThat(response.status()).isEqualTo(AudioFileStatus.DELETE_PENDING);
+            assertThat(audioFile.getDeletedAt()).isEqualTo(NOW);
+            assertThat(publishedEvents).singleElement()
+                    .isEqualTo(new AudioFileDeleteRequestedEvent(800L, STORAGE_KEY));
+        }
+
+        @Test
+        @DisplayName("음성 파일이 없으면 404다")
+        void rejectsMissingAudioFile() {
+            when(audioFiles.findByIdForUpdate(800L)).thenReturn(Optional.empty());
+
+            assertCode(() -> service.requestDelete(1L, 800L), AudioFileErrorCode.AUDIO_FILE_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("팀장이 아니면 403이다")
+        void rejectsNonLeader() {
+            TeamMember member = withId(TeamMember.createMember(withId(User.create(), 9L), team, "팀원"), 11L);
+            when(members.findByTeamIdAndUserIdAndMembershipStatus(2L, 9L, MembershipStatus.ACTIVE))
+                    .thenReturn(Optional.of(member));
+
+            assertCode(() -> service.requestDelete(9L, 800L), TeamErrorCode.TEAM_LEADER_REQUIRED);
+            assertThat(publishedEvents).isEmpty();
+        }
+
+        @Test
+        @DisplayName("이미 삭제 진행 중이면 409다")
+        void rejectsAlreadyDeleting() {
+            audioFile.markDeletePending(NOW);
+
+            assertCode(() -> service.requestDelete(1L, 800L), AudioFileErrorCode.AUDIO_FILE_DELETE_IN_PROGRESS);
+        }
+
+        @Test
+        @DisplayName("이미 삭제 완료된 파일은 404다")
+        void rejectsAlreadyDeleted() {
+            audioFile.markDeletePending(NOW);
+            audioFile.markDeleted();
+
+            assertCode(() -> service.requestDelete(1L, 800L), AudioFileErrorCode.AUDIO_FILE_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("S3 삭제에 성공하면 DELETED로 전이한다")
+        void completesDelete() {
+            when(audioFiles.findById(800L)).thenReturn(Optional.of(audioFile));
+
+            service.completeDelete(800L, STORAGE_KEY);
+
+            verify(storage).deleteObject(STORAGE_KEY);
+            assertThat(audioFile.getStatus()).isEqualTo(AudioFileStatus.DELETED);
+        }
+
+        @Test
+        @DisplayName("S3 삭제에 실패하면 DELETE_FAILED로 남긴다")
+        void marksDeleteFailed() {
+            when(audioFiles.findById(800L)).thenReturn(Optional.of(audioFile));
+            doThrow(new RuntimeException("s3 down")).when(storage).deleteObject(STORAGE_KEY);
+
+            service.completeDelete(800L, STORAGE_KEY);
+
+            assertThat(audioFile.getStatus()).isEqualTo(AudioFileStatus.DELETE_FAILED);
         }
     }
 

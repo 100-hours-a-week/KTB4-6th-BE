@@ -1,5 +1,6 @@
 package com.backend.meety.domain.recording.controller;
 
+import com.backend.meety.domain.recording.dto.AudioFileDeleteResponse;
 import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
 import com.backend.meety.domain.recording.dto.AudioFileDownloadUrlResponse;
 import com.backend.meety.domain.recording.dto.AudioFileResponse;
@@ -13,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -53,6 +55,15 @@ public class AudioFileController {
             @PathVariable Long audioFileId
     ) {
         return ResponseEntity.ok(ApiResponse.success(audioFileService.createDownloadUrl(userId, audioFileId)));
+    }
+
+    @DeleteMapping("/audio-files/{audioFileId}")
+    public ResponseEntity<ApiResponse<AudioFileDeleteResponse>> requestDelete(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long audioFileId
+    ) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(ApiResponse.success(audioFileService.requestDelete(userId, audioFileId)));
     }
 
     @PatchMapping("/audio-files/{audioFileId}")
