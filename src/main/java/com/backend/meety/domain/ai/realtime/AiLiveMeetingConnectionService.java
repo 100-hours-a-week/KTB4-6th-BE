@@ -86,9 +86,6 @@ public class AiLiveMeetingConnectionService {
         }
     }
 
-    /**
-     * AI 연결이 READY일 때만 오디오를 전달한다. 전달하지 못한 청크는 버리고 브라우저 연결은 유지한다.
-     */
     public boolean forwardAudio(Long recordingSessionId, byte[] audio) {
         AiLiveMeetingConnection connection = registry.find(recordingSessionId).orElse(null);
         if (connection == null) {
