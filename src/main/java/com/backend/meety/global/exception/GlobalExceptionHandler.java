@@ -3,10 +3,12 @@ package com.backend.meety.global.exception;
 import com.backend.meety.domain.recording.dto.RecordingStatusUpdateRequest;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
 import com.backend.meety.global.response.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.support.DefaultMessageSourceResolvable;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -75,8 +77,12 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ApiResponse<Void>> handleException(Exception e) {
-        log.error("Unexpected exception occurred", e);
+    public ResponseEntity<ApiResponse<Void>> handleException(Exception e, HttpServletRequest request) {
+        Throwable rootCause = NestedExceptionUtils.getMostSpecificCause(e);
+        log.error("처리하지 못한 예외가 발생했습니다. method={}, uri={}, exception={}, message={}, rootCause={}: {}",
+                request.getMethod(), request.getRequestURI(),
+                e.getClass().getSimpleName(), e.getMessage(),
+                rootCause.getClass().getSimpleName(), rootCause.getMessage(), e);
         return ResponseEntity.status(CommonErrorCode.INTERNAL_SERVER_ERROR.getHttpStatus())
                 .body(ApiResponse.error(CommonErrorCode.INTERNAL_SERVER_ERROR));
     }
