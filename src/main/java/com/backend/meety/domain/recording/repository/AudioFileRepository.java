@@ -12,6 +12,17 @@ public interface AudioFileRepository extends JpaRepository<AudioFile, Long> {
 
     boolean existsByRecordingSessionIdAndDeletedAtIsNull(Long recordingSessionId);
 
+    @Query("""
+            select a
+            from AudioFile a
+            join fetch a.recordingSession rs
+            join fetch rs.meeting m
+            join fetch m.team
+            where m.id = :meetingId
+              and a.deletedAt is null
+            """)
+    Optional<AudioFile> findByMeetingIdAndDeletedAtIsNull(@Param("meetingId") Long meetingId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from AudioFile a where a.id = :audioFileId and a.deletedAt is null")
     Optional<AudioFile> findByIdForUpdateAndDeletedAtIsNull(@Param("audioFileId") Long audioFileId);

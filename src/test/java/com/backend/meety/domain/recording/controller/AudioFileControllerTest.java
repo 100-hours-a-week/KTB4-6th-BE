@@ -5,11 +5,13 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
 import com.backend.meety.domain.recording.dto.AudioFileResponse;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlResponse;
 import com.backend.meety.domain.recording.entity.AudioFilePolicy;
@@ -126,6 +128,35 @@ class AudioFileControllerTest {
                         .content("{\"fileSizeBytes\":100,\"durationMs\":100}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("AUDIO_OBJECT_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("회의별 음성 파일 조회는 200과 파일 정보를 반환한다")
+    void getByMeetingReturnsOk() throws Exception {
+        when(service.getByMeeting(1L, 100L)).thenReturn(new AudioFileDetailResponse(
+                800L, 700L, "audio/mp4", 135_000_000L, 2_700_000L,
+                AudioFileStatus.AVAILABLE, NOW, NOW.plus(AudioFilePolicy.RETENTION)));
+
+        mvc.perform(get("/api/v1/meetings/100/audio-file"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.audioFileId").value(800))
+                .andExpect(jsonPath("$.data.recordingSessionId").value(700))
+                .andExpect(jsonPath("$.data.status").value("AVAILABLE"))
+                .andExpect(jsonPath("$.data.storageKey").doesNotExist());
+
+        verify(service).getByMeeting(1L, 100L);
+    }
+
+    @Test
+    @DisplayName("업로드가 끝나지 않은 파일 조회는 409를 반환한다")
+    void getByMeetingNotAvailableReturnsConflict() throws Exception {
+        when(service.getByMeeting(1L, 100L))
+                .thenThrow(new AudioFileException(AudioFileErrorCode.AUDIO_FILE_NOT_AVAILABLE));
+
+        mvc.perform(get("/api/v1/meetings/100/audio-file"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("AUDIO_FILE_NOT_AVAILABLE"));
     }
 
     @Test
