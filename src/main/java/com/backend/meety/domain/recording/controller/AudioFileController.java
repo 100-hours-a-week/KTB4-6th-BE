@@ -1,6 +1,7 @@
 package com.backend.meety.domain.recording.controller;
 
 import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
+import com.backend.meety.domain.recording.dto.AudioFileDownloadUrlResponse;
 import com.backend.meety.domain.recording.dto.AudioFileResponse;
 import com.backend.meety.domain.recording.dto.AudioFileUploadCompleteRequest;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlRequest;
@@ -44,6 +45,14 @@ public class AudioFileController {
             @PathVariable Long meetingId
     ) {
         return ResponseEntity.ok(ApiResponse.success(audioFileService.getByMeeting(userId, meetingId)));
+    }
+
+    @GetMapping("/audio-files/{audioFileId}/download-url")
+    public ResponseEntity<ApiResponse<AudioFileDownloadUrlResponse>> createDownloadUrl(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long audioFileId
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(audioFileService.createDownloadUrl(userId, audioFileId)));
     }
 
     @PatchMapping("/audio-files/{audioFileId}")

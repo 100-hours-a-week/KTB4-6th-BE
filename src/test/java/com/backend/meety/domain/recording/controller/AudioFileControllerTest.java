@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
+import com.backend.meety.domain.recording.dto.AudioFileDownloadUrlResponse;
 import com.backend.meety.domain.recording.dto.AudioFileResponse;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlResponse;
 import com.backend.meety.domain.recording.entity.AudioFilePolicy;
@@ -35,6 +36,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class AudioFileControllerTest {
 
     private static final String UPLOAD_URL = "https://bucket.s3.ap-northeast-2.amazonaws.com/recordings/upload";
+    private static final String DOWNLOAD_URL = "https://bucket.s3.us-east-2.amazonaws.com/recordings/download";
 
     private AudioFileService service;
     private MockMvc mvc;
@@ -157,6 +159,32 @@ class AudioFileControllerTest {
         mvc.perform(get("/api/v1/meetings/100/audio-file"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("AUDIO_FILE_NOT_AVAILABLE"));
+    }
+
+    @Test
+    @DisplayName("다운로드 URL 발급은 200과 URL을 반환한다")
+    void createDownloadUrlReturnsOk() throws Exception {
+        when(service.createDownloadUrl(1L, 800L)).thenReturn(new AudioFileDownloadUrlResponse(
+                DOWNLOAD_URL, NOW.plus(AudioFilePolicy.DOWNLOAD_URL_VALIDITY)));
+
+        mvc.perform(get("/api/v1/audio-files/800/download-url"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.downloadUrl").value(DOWNLOAD_URL))
+                .andExpect(jsonPath("$.data.downloadUrlExpiresAt").exists());
+
+        verify(service).createDownloadUrl(1L, 800L);
+    }
+
+    @Test
+    @DisplayName("보관 기간이 만료된 파일은 410을 반환한다")
+    void expiredAudioFileReturnsGone() throws Exception {
+        when(service.createDownloadUrl(1L, 800L))
+                .thenThrow(new AudioFileException(AudioFileErrorCode.AUDIO_FILE_EXPIRED));
+
+        mvc.perform(get("/api/v1/audio-files/800/download-url"))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.error.code").value("AUDIO_FILE_EXPIRED"));
     }
 
     @Test
