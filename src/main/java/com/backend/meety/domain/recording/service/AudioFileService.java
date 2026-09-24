@@ -1,6 +1,7 @@
 package com.backend.meety.domain.recording.service;
 
 import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
+import com.backend.meety.domain.recording.dto.AudioFileDownloadUrlResponse;
 import com.backend.meety.domain.recording.dto.AudioFileResponse;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlResponse;
 import com.backend.meety.domain.recording.entity.AudioFile;
@@ -151,6 +152,37 @@ public class AudioFileService {
             throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_NOT_AVAILABLE);
         }
         return AudioFileDetailResponse.from(audioFile);
+    }
+
+    @Transactional(readOnly = true)
+    public AudioFileDownloadUrlResponse createDownloadUrl(Long userId, Long audioFileId) {
+        AudioFile audioFile = audioFileRepository.findByIdAndDeletedAtIsNull(audioFileId)
+                .orElseThrow(() -> new AudioFileException(AudioFileErrorCode.AUDIO_FILE_NOT_FOUND));
+        if (!isActiveTeamMember(userId, audioFile.getRecordingSession())) {
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_ACCESS_DENIED);
+        }
+        if (audioFile.getStatus() != AudioFileStatus.AVAILABLE) {
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_NOT_AVAILABLE);
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        if (audioFile.isExpired(now)) {
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_EXPIRED);
+        }
+        return new AudioFileDownloadUrlResponse(
+                downloadUrl(audioFile),
+                now.plus(AudioFilePolicy.DOWNLOAD_URL_VALIDITY)
+        );
+    }
+
+    private String downloadUrl(AudioFile audioFile) {
+        try {
+            return audioFileStorage
+                    .createDownloadUrl(audioFile.getStorageKey(), AudioFilePolicy.DOWNLOAD_URL_VALIDITY)
+                    .toString();
+        } catch (Exception e) {
+            log.error("S3 presigned 다운로드 URL 발급에 실패했습니다. audioFileId={}", audioFile.getId(), e);
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_DOWNLOAD_URL_CREATE_FAILED);
+        }
     }
 
     private long storedObjectSize(AudioFile audioFile) {

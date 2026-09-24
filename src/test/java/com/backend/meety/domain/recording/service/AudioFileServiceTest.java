@@ -18,6 +18,7 @@ import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
+import com.backend.meety.domain.recording.dto.AudioFileDownloadUrlResponse;
 import com.backend.meety.domain.recording.dto.AudioFileResponse;
 import com.backend.meety.domain.recording.dto.AudioFileUploadUrlResponse;
 import com.backend.meety.domain.recording.entity.AudioFile;
@@ -48,6 +49,7 @@ class AudioFileServiceTest {
 
     private static final String UPLOAD_URL = "https://bucket.s3.us-east-2.amazonaws.com/recordings/upload";
     private static final String STORAGE_KEY = "recordings/100/700/abc.mp4";
+    private static final String DOWNLOAD_URL = "https://bucket.s3.us-east-2.amazonaws.com/recordings/download";
 
     private final RecordingSessionRepository recordings = mock(RecordingSessionRepository.class);
     private final AudioFileRepository audioFiles = mock(AudioFileRepository.class);
@@ -316,6 +318,89 @@ class AudioFileServiceTest {
                     .thenReturn(true);
 
             assertThat(service.getByMeeting(9L, 100L).audioFileId()).isEqualTo(800L);
+        }
+    }
+
+    @Nested
+    @DisplayName("다운로드 URL 발급")
+    class CreateDownloadUrl {
+
+        private AudioFile audioFile;
+
+        @BeforeEach
+        void setUpAudioFile() throws Exception {
+            audioFile = withId(AudioFile.create(recordingSession, STORAGE_KEY, "audio/mp4"), 800L);
+            audioFile.markAvailable(1_024L, 1_000L, NOW, NOW.plus(AudioFilePolicy.RETENTION));
+            when(audioFiles.findByIdAndDeletedAtIsNull(800L)).thenReturn(Optional.of(audioFile));
+            when(members.existsByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE))
+                    .thenReturn(true);
+            when(storage.createDownloadUrl(eq(STORAGE_KEY), any())).thenReturn(URI.create(DOWNLOAD_URL).toURL());
+        }
+
+        @Test
+        @DisplayName("AVAILABLE이고 만료 전이면 다운로드 URL을 발급한다")
+        void createsDownloadUrl() {
+            AudioFileDownloadUrlResponse response = service.createDownloadUrl(1L, 800L);
+
+            assertThat(response.downloadUrl()).isEqualTo(DOWNLOAD_URL);
+            assertThat(response.downloadUrlExpiresAt())
+                    .isEqualTo(NOW.plus(AudioFilePolicy.DOWNLOAD_URL_VALIDITY));
+            verify(storage).createDownloadUrl(STORAGE_KEY, AudioFilePolicy.DOWNLOAD_URL_VALIDITY);
+        }
+
+        @Test
+        @DisplayName("음성 파일이 없으면 404다")
+        void rejectsMissingAudioFile() {
+            when(audioFiles.findByIdAndDeletedAtIsNull(800L)).thenReturn(Optional.empty());
+
+            assertCode(() -> service.createDownloadUrl(1L, 800L), AudioFileErrorCode.AUDIO_FILE_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("활성 팀원이 아니면 403이다")
+        void rejectsNonTeamMember() {
+            when(members.existsByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE))
+                    .thenReturn(false);
+
+            assertCode(() -> service.createDownloadUrl(1L, 800L), AudioFileErrorCode.AUDIO_FILE_ACCESS_DENIED);
+        }
+
+        @Test
+        @DisplayName("AVAILABLE이 아니면 409다")
+        void rejectsNotAvailable() {
+            AudioFile uploading = withId(AudioFile.create(recordingSession, STORAGE_KEY, "audio/mp4"), 801L);
+            when(audioFiles.findByIdAndDeletedAtIsNull(801L)).thenReturn(Optional.of(uploading));
+
+            assertCode(() -> service.createDownloadUrl(1L, 801L), AudioFileErrorCode.AUDIO_FILE_NOT_AVAILABLE);
+        }
+
+        @Test
+        @DisplayName("보관 기간이 지났으면 410이다")
+        void rejectsExpired() {
+            AudioFile expired = withId(AudioFile.create(recordingSession, STORAGE_KEY, "audio/mp4"), 802L);
+            expired.markAvailable(1L, 1L, NOW.minusDays(200), NOW.minusDays(1));
+            when(audioFiles.findByIdAndDeletedAtIsNull(802L)).thenReturn(Optional.of(expired));
+
+            assertCode(() -> service.createDownloadUrl(1L, 802L), AudioFileErrorCode.AUDIO_FILE_EXPIRED);
+        }
+
+        @Test
+        @DisplayName("만료 시각 당일 정각은 만료로 처리한다")
+        void treatsExactExpiryAsExpired() {
+            AudioFile boundary = withId(AudioFile.create(recordingSession, STORAGE_KEY, "audio/mp4"), 803L);
+            boundary.markAvailable(1L, 1L, NOW.minusDays(100), NOW);
+            when(audioFiles.findByIdAndDeletedAtIsNull(803L)).thenReturn(Optional.of(boundary));
+
+            assertCode(() -> service.createDownloadUrl(1L, 803L), AudioFileErrorCode.AUDIO_FILE_EXPIRED);
+        }
+
+        @Test
+        @DisplayName("presign에 실패하면 500으로 변환한다")
+        void translatesPresignFailure() {
+            when(storage.createDownloadUrl(eq(STORAGE_KEY), any())).thenThrow(new RuntimeException("presign failed"));
+
+            assertCode(() -> service.createDownloadUrl(1L, 800L),
+                    AudioFileErrorCode.AUDIO_DOWNLOAD_URL_CREATE_FAILED);
         }
     }
 
