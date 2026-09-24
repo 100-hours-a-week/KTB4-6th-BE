@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -45,8 +46,14 @@ class TranscriptControllerTest {
     }
 
     @Test
+    @DisplayName("전사 조회 API는 공통 성공 응답으로 전체 전사를 반환한다")
     void getTranscriptsReturnsCommonSuccessResponse() throws Exception {
-        when(transcriptService.getTranscripts(1L, 100L))
+        // 테스트 목적:
+        // keyword 없이 전사 조회를 요청하면 기존 전체 전사 조회 결과가
+        // 공통 응답 형식으로 반환되는지 검증한다.
+
+        // given
+        when(transcriptService.getTranscripts(1L, 100L, null))
                 .thenReturn(List.of(new TranscriptSegmentResponse(
                         900L,
                         null,
@@ -59,6 +66,7 @@ class TranscriptControllerTest {
                         LocalDateTime.of(2026, 9, 21, 5, 30)
                 )));
 
+        // when & then
         mvc.perform(get("/api/v1/meetings/100/transcripts"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
@@ -67,13 +75,41 @@ class TranscriptControllerTest {
                 .andExpect(jsonPath("$.data[0].content").value("hello"))
                 .andExpect(jsonPath("$.error").doesNotExist());
 
-        verify(transcriptService).getTranscripts(1L, 100L);
+        verify(transcriptService).getTranscripts(1L, 100L, null);
     }
 
     @Test
-    void getTranscriptsReturnsEmptyList() throws Exception {
-        when(transcriptService.getTranscripts(1L, 100L)).thenReturn(List.of());
+    @DisplayName("전사 조회 API는 keyword를 서비스로 전달한다")
+    void getTranscriptsPassesKeywordToService() throws Exception {
+        // 테스트 목적:
+        // 전사 조회 요청에 keyword query parameter가 포함되면
+        // Controller가 인증 사용자와 회의 ID, keyword를 Service에 전달하는지 검증한다.
 
+        // given
+        when(transcriptService.getTranscripts(1L, 100L, "카카오")).thenReturn(List.of());
+
+        // when & then
+        mvc.perform(get("/api/v1/meetings/100/transcripts").param("keyword", "카카오"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data").isEmpty())
+                .andExpect(jsonPath("$.error").doesNotExist());
+
+        verify(transcriptService).getTranscripts(1L, 100L, "카카오");
+    }
+
+    @Test
+    @DisplayName("전사 조회 API는 전사가 없으면 빈 목록을 반환한다")
+    void getTranscriptsReturnsEmptyList() throws Exception {
+        // 테스트 목적:
+        // 조회 가능한 전사가 없는 경우 오류가 아닌 빈 배열이
+        // 공통 성공 응답으로 반환되는지 검증한다.
+
+        // given
+        when(transcriptService.getTranscripts(1L, 100L, null)).thenReturn(List.of());
+
+        // when & then
         mvc.perform(get("/api/v1/meetings/100/transcripts"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
@@ -83,10 +119,17 @@ class TranscriptControllerTest {
     }
 
     @Test
+    @DisplayName("존재하지 않는 회의의 전사 조회는 404를 반환한다")
     void getTranscriptsReturnsMeetingNotFound() throws Exception {
-        when(transcriptService.getTranscripts(1L, 404L))
+        // 테스트 목적:
+        // 회의가 존재하지 않거나 삭제된 경우
+        // 전사 조회 요청이 MEETING_NOT_FOUND로 거부되는지 검증한다.
+
+        // given
+        when(transcriptService.getTranscripts(1L, 404L, null))
                 .thenThrow(new MeetingException(MeetingErrorCode.MEETING_NOT_FOUND));
 
+        // when & then
         mvc.perform(get("/api/v1/meetings/404/transcripts"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.success").value(false))
@@ -95,10 +138,17 @@ class TranscriptControllerTest {
     }
 
     @Test
+    @DisplayName("접근 권한이 없는 회의의 전사 조회는 403을 반환한다")
     void getTranscriptsReturnsMeetingAccessDenied() throws Exception {
-        when(transcriptService.getTranscripts(1L, 100L))
+        // 테스트 목적:
+        // 사용자가 회의가 속한 팀의 ACTIVE 멤버가 아닌 경우
+        // 전사 조회 요청이 MEETING_ACCESS_DENIED로 거부되는지 검증한다.
+
+        // given
+        when(transcriptService.getTranscripts(1L, 100L, null))
                 .thenThrow(new MeetingException(MeetingErrorCode.MEETING_ACCESS_DENIED));
 
+        // when & then
         mvc.perform(get("/api/v1/meetings/100/transcripts"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.success").value(false))

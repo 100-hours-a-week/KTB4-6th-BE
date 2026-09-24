@@ -10,6 +10,8 @@ import com.backend.meety.domain.transcript.dto.TranscriptSegmentResponse;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
 import com.backend.meety.domain.transcript.event.TranscriptCreatedEvent;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
+import com.backend.meety.global.exception.BusinessException;
+import com.backend.meety.global.exception.CommonErrorCode;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -24,6 +26,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class TranscriptService {
+
+    private static final int MIN_KEYWORD_LENGTH = 2;
+    private static final int MAX_KEYWORD_LENGTH = 20;
 
     private final TranscriptSegmentRepository transcriptSegmentRepository;
     private final MeetingRepository meetingRepository;
@@ -79,12 +84,36 @@ public class TranscriptService {
 
     @Transactional(readOnly = true)
     public List<TranscriptSegmentResponse> getTranscripts(Long userId, Long meetingId) {
+        return getTranscripts(userId, meetingId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<TranscriptSegmentResponse> getTranscripts(Long userId, Long meetingId, String keyword) {
+        String normalizedKeyword = normalizeKeyword(keyword);
         Meeting meeting = meetingRepository.findByIdAndDeletedAtIsNull(meetingId)
                 .orElseThrow(() -> new MeetingException(MeetingErrorCode.MEETING_NOT_FOUND));
         meetingService.validateMeetingAccess(userId, meeting.getTeam().getId());
 
-        return transcriptSegmentRepository.findAllByMeetingIdOrderBySequence(meetingId).stream()
+        List<TranscriptSegment> segments = normalizedKeyword == null
+                ? transcriptSegmentRepository.findAllByMeetingIdOrderBySequence(meetingId)
+                : transcriptSegmentRepository.searchByMeetingIdAndContent(meetingId, normalizedKeyword);
+
+        return segments.stream()
                 .map(TranscriptSegmentResponse::from)
                 .toList();
+    }
+
+    private String normalizeKeyword(String keyword) {
+        if (keyword == null) {
+            return null;
+        }
+        String trimmedKeyword = keyword.trim();
+        if (trimmedKeyword.isBlank()) {
+            return null;
+        }
+        if (trimmedKeyword.length() < MIN_KEYWORD_LENGTH || trimmedKeyword.length() > MAX_KEYWORD_LENGTH) {
+            throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
+        }
+        return trimmedKeyword;
     }
 }

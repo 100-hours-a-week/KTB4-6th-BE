@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -22,8 +23,9 @@ public class TranscriptController {
     @GetMapping("/meetings/{meetingId}/transcripts")
     public ResponseEntity<ApiResponse<List<TranscriptSegmentResponse>>> getTranscripts(
             @AuthenticationPrincipal Long userId,
-            @PathVariable Long meetingId
+            @PathVariable Long meetingId,
+            @RequestParam(required = false) String keyword
     ) {
-        return ResponseEntity.ok(ApiResponse.success(transcriptService.getTranscripts(userId, meetingId)));
+        return ResponseEntity.ok(ApiResponse.success(transcriptService.getTranscripts(userId, meetingId, keyword)));
     }
 }
