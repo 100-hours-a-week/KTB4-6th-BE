@@ -49,4 +49,20 @@ public class AiRequest extends BaseEntity {
 
     @Column(name = "retry_count", nullable = false)
     private Long retryCount = 0L;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "failure_reason", length = 30)
+    private AiFailureReason failureReason;
+
+    private AiRequest(Team team, TeamMember teamMember, String idempotencyKey, AiRequestType requestType) {
+        this.team = team;
+        this.teamMember = teamMember;
+        this.idempotencyKey = idempotencyKey;
+        this.requestType = requestType;
+    }
+
+    public static AiRequest create(Team team, TeamMember teamMember,
+                                   String idempotencyKey, AiRequestType requestType) {
+        return new AiRequest(team, teamMember, idempotencyKey, requestType);
+    }
 }

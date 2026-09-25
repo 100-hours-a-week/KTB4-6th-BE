@@ -10,6 +10,8 @@ public interface TranscriptSegmentRepository extends JpaRepository<TranscriptSeg
 
     boolean existsBySourceSegmentKey(String sourceSegmentKey);
 
+    boolean existsByMeetingId(Long meetingId);
+
     @Query("""
             select s
             from TranscriptSegment s
