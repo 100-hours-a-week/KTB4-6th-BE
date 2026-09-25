@@ -11,6 +11,7 @@ import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.HikariPoolMXBean;
+import jakarta.servlet.DispatcherType;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
@@ -19,7 +20,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Slf4j
@@ -45,6 +50,7 @@ public class MeetingSseService {
     @Transactional(readOnly = true)
     public SseEmitter connect(Long userId, Long meetingId) {
         long totalStartedAt = System.nanoTime();
+        logConnectionDiag("SERVICE_ENTER", meetingId, userId, null);
         log.info("[SSE_CONNECT] start meetingId={}, userId={}, thread={}",
                 meetingId, userId, Thread.currentThread().getName());
         logHikari("SSE_CONNECT start");
@@ -76,6 +82,7 @@ public class MeetingSseService {
         logElapsed("[SSE_CONNECT] participant validation completed meetingId={}, userId={}, teamMemberId={}, "
                         + "elapsedMs={}",
                 elapsedMs(segmentStartedAt), meetingId, userId, teamMember.getId());
+        logConnectionDiag("DB_VALIDATION_COMPLETED", meetingId, userId, null);
 
         segmentStartedAt = System.nanoTime();
         SseEmitter emitter = emitterFactory.create();
@@ -94,6 +101,7 @@ public class MeetingSseService {
                 meetingId, userId, registry.count(meetingId), registry.countAll());
         logElapsed("[SSE_CONNECT] registry register completed meetingId={}, userId={}, elapsedMs={}",
                 elapsedMs(segmentStartedAt), meetingId, userId);
+        logConnectionDiag("EMITTER_REGISTERED", meetingId, userId, null);
 
         try {
             segmentStartedAt = System.nanoTime();
@@ -101,6 +109,7 @@ public class MeetingSseService {
             sendConnectedEvent(meetingId, emitter);
             logElapsed("[SSE_CONNECT] connected event send end meetingId={}, userId={}, elapsedMs={}",
                     elapsedMs(segmentStartedAt), meetingId, userId);
+            logConnectionDiag("CONNECTED_EVENT_SENT", meetingId, userId, null);
         } catch (IOException e) {
             registry.remove(meetingId, userId, emitter);
             emitter.completeWithError(e);
@@ -110,6 +119,7 @@ public class MeetingSseService {
         logHikari("SSE_CONNECT end");
         logElapsed("[SSE_CONNECT] end meetingId={}, userId={}, totalElapsedMs={}",
                 elapsedMs(totalStartedAt), meetingId, userId);
+        logConnectionDiag("SERVICE_RETURN_BEFORE", meetingId, userId, null);
         return emitter;
     }
 
@@ -121,6 +131,7 @@ public class MeetingSseService {
 
     private void removeAndLog(Long meetingId, Long userId, SseEmitter emitter, String reason, Throwable throwable) {
         registry.remove(meetingId, userId, emitter);
+        logConnectionDiag(lifecyclePhase(reason), meetingId, userId, reason);
         if (throwable == null) {
             log.info("[SSE] 연결이 종료되었습니다. meetingId={}, userId={}, reason={}, "
                             + "meetingEmitters={}, totalEmitters={}",
@@ -131,6 +142,15 @@ public class MeetingSseService {
                         + "meetingEmitters={}, totalEmitters={}, cause={}",
                 meetingId, userId, reason, registry.count(meetingId), registry.countAll(),
                 throwable.getClass().getSimpleName());
+    }
+
+    private String lifecyclePhase(String reason) {
+        return switch (reason) {
+            case "completion" -> "ON_COMPLETION";
+            case "timeout" -> "ON_TIMEOUT";
+            case "error" -> "ON_ERROR";
+            default -> "ON_CLOSE";
+        };
     }
 
     private void sendConnectedEvent(Long meetingId, SseEmitter emitter) throws IOException {
@@ -167,5 +187,54 @@ public class MeetingSseService {
                 pool.getIdleConnections(),
                 pool.getTotalConnections(),
                 pool.getThreadsAwaitingConnection());
+    }
+
+    private void logConnectionDiag(String phase, Long meetingId, Long userId, String reason) {
+        HikariPoolMXBean pool = hikariPool();
+        log.info("[SSE_CONNECTION_DIAG] phase={} meetingId={} userId={} active={} idle={} total={} pending={} "
+                        + "txActive={} syncActive={} thread={} dispatcherType={} reason={}",
+                phase,
+                meetingId,
+                userId,
+                activeConnections(pool),
+                idleConnections(pool),
+                totalConnections(pool),
+                pendingThreads(pool),
+                TransactionSynchronizationManager.isActualTransactionActive(),
+                TransactionSynchronizationManager.isSynchronizationActive(),
+                Thread.currentThread().getName(),
+                dispatcherType(),
+                reason);
+    }
+
+    private HikariPoolMXBean hikariPool() {
+        if (!(dataSource instanceof HikariDataSource hikariDataSource)) {
+            return null;
+        }
+        return hikariDataSource.getHikariPoolMXBean();
+    }
+
+    private int activeConnections(HikariPoolMXBean pool) {
+        return pool == null ? -1 : pool.getActiveConnections();
+    }
+
+    private int idleConnections(HikariPoolMXBean pool) {
+        return pool == null ? -1 : pool.getIdleConnections();
+    }
+
+    private int totalConnections(HikariPoolMXBean pool) {
+        return pool == null ? -1 : pool.getTotalConnections();
+    }
+
+    private int pendingThreads(HikariPoolMXBean pool) {
+        return pool == null ? -1 : pool.getThreadsAwaitingConnection();
+    }
+
+    private DispatcherType dispatcherType() {
+        RequestAttributes attributes = RequestContextHolder.getRequestAttributes();
+        if (attributes instanceof ServletRequestAttributes servletRequestAttributes) {
+            return servletRequestAttributes.getRequest().getDispatcherType();
+        }
+        return null;
     }
 }
