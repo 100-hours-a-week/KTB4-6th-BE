@@ -6,11 +6,20 @@ import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.meeting.service.MeetingService;
+import com.backend.meety.domain.team.entity.MembershipStatus;
+import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.exception.TeamErrorCode;
+import com.backend.meety.domain.team.exception.TeamException;
+import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.transcript.dto.TranscriptSegmentResponse;
 import com.backend.meety.domain.transcript.dto.TranscriptSpeakerListResponse;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerMappingRequest;
 import com.backend.meety.domain.transcript.dto.TranscriptSpeakerResponse;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
+import com.backend.meety.domain.transcript.entity.TranscriptSpeaker;
 import com.backend.meety.domain.transcript.event.TranscriptCreatedEvent;
+import com.backend.meety.domain.transcript.exception.TranscriptErrorCode;
+import com.backend.meety.domain.transcript.exception.TranscriptException;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
 import com.backend.meety.domain.transcript.repository.TranscriptSpeakerRepository;
 import com.backend.meety.global.exception.BusinessException;
@@ -37,6 +46,7 @@ public class TranscriptService {
     private final TranscriptSpeakerRepository transcriptSpeakerRepository;
     private final MeetingRepository meetingRepository;
     private final MeetingService meetingService;
+    private final TeamMemberRepository teamMemberRepository;
     private final Clock clock;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -119,6 +129,64 @@ public class TranscriptService {
                 .toList();
 
         return new TranscriptSpeakerListResponse(speakers);
+    }
+
+    @Transactional
+    public TranscriptSpeakerResponse updateSpeakerMapping(
+            Long userId,
+            Long meetingId,
+            Long transcriptSpeakerId,
+            TranscriptSpeakerMappingRequest request
+    ) {
+        Meeting meeting = meetingRepository.findByIdAndDeletedAtIsNull(meetingId)
+                .orElseThrow(() -> new MeetingException(MeetingErrorCode.MEETING_NOT_FOUND));
+        Long teamId = meeting.getTeam().getId();
+        meetingService.validateMeetingAccess(userId, teamId);
+
+        TranscriptSpeaker speaker = transcriptSpeakerRepository
+                .findByIdAndMeetingIdAndDeletedAtIsNull(transcriptSpeakerId, meetingId)
+                .orElseThrow(() -> new TranscriptException(TranscriptErrorCode.TRANSCRIPT_SPEAKER_NOT_FOUND));
+
+        String customAlias = normalizeCustomAlias(request.customAlias());
+        if (request.teamMemberId() != null && customAlias != null) {
+            throw new TranscriptException(TranscriptErrorCode.INVALID_SPEAKER_MAPPING);
+        }
+
+        if (request.teamMemberId() != null) {
+            TeamMember teamMember = teamMemberRepository.findById(request.teamMemberId())
+                    .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_MEMBER_NOT_FOUND));
+            validateTeamMemberForMeetingTeam(teamMember, teamId);
+            speaker.mapToTeamMember(teamMember);
+            return TranscriptSpeakerResponse.from(speaker);
+        }
+
+        if (customAlias != null) {
+            speaker.mapToCustomAlias(customAlias);
+            return TranscriptSpeakerResponse.from(speaker);
+        }
+
+        speaker.clearMapping();
+        return TranscriptSpeakerResponse.from(speaker);
+    }
+
+    private void validateTeamMemberForMeetingTeam(TeamMember teamMember, Long teamId) {
+        if (!teamMember.getTeam().getId().equals(teamId)) {
+            throw new TranscriptException(TranscriptErrorCode.TEAM_MEMBER_NOT_IN_MEETING_TEAM);
+        }
+        if (teamMember.getMembershipStatus() != MembershipStatus.ACTIVE || teamMember.getDeletedAt() != null) {
+            throw new TranscriptException(TranscriptErrorCode.TEAM_MEMBER_NOT_IN_MEETING_TEAM);
+        }
+    }
+
+    private String normalizeCustomAlias(String customAlias) {
+        if (customAlias == null) {
+            return null;
+        }
+        String trimmedAlias = customAlias.trim();
+        if (trimmedAlias.isBlank()) {
+            throw new TranscriptException(TranscriptErrorCode.INVALID_SPEAKER_MAPPING);
+        }
+        return trimmedAlias;
     }
 
     private String normalizeKeyword(String keyword) {

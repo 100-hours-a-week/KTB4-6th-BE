@@ -39,4 +39,19 @@ public class TranscriptSpeaker extends BaseEntity {
 
     @Column(name = "custom_alias", length = 10)
     private String customAlias;
+
+    public void mapToTeamMember(TeamMember teamMember) {
+        this.mappedTeamMember = teamMember;
+        this.customAlias = null;
+    }
+
+    public void mapToCustomAlias(String customAlias) {
+        this.mappedTeamMember = null;
+        this.customAlias = customAlias;
+    }
+
+    public void clearMapping() {
+        this.mappedTeamMember = null;
+        this.customAlias = null;
+    }
 }
