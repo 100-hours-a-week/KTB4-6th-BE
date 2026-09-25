@@ -15,12 +15,18 @@ import com.backend.meety.domain.meeting.realtime.SseHeaders;
 import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
 import com.backend.meety.global.response.ApiResponse;
+import com.zaxxer.hikari.HikariDataSource;
+import com.zaxxer.hikari.HikariPoolMXBean;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
+import javax.sql.DataSource;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -37,8 +43,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+@Slf4j
 @Validated
 @RestController
 @RequiredArgsConstructor
@@ -48,6 +56,12 @@ public class MeetingController {
     private final MeetingService meetingService;
     private final MeetingParticipantService meetingParticipantService;
     private final MeetingSseService meetingSseService;
+    private DataSource dataSource;
+
+    @Autowired(required = false)
+    void setDataSource(DataSource dataSource) {
+        this.dataSource = dataSource;
+    }
 
     @PostMapping("/teams/{teamId}/meetings")
     public ResponseEntity<ApiResponse<MeetingCreateResponse>> createMeeting(
@@ -144,12 +158,15 @@ public class MeetingController {
     @GetMapping(value = "/meetings/{meetingId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public ResponseEntity<SseEmitter> connectEvents(
             @AuthenticationPrincipal Long userId,
-            @PathVariable Long meetingId
+            @PathVariable Long meetingId,
+            HttpServletRequest request
     ) {
+        SseEmitter emitter = meetingSseService.connect(userId, meetingId);
+        logConnectionDiag("CONTROLLER_AFTER_SERVICE", meetingId, userId, request);
         return ResponseEntity.ok()
                 .header(SseHeaders.X_ACCEL_BUFFERING, SseHeaders.X_ACCEL_BUFFERING_OFF)
                 .cacheControl(CacheControl.noCache())
-                .body(meetingSseService.connect(userId, meetingId));
+                .body(emitter);
     }
 
     @DeleteMapping("/meetings/{meetingId}/participants/me")
@@ -159,5 +176,51 @@ public class MeetingController {
     ) {
         meetingParticipantService.leaveMeeting(userId, meetingId);
         return ResponseEntity.noContent().build();
+    }
+
+    private void logConnectionDiag(
+            String phase,
+            Long meetingId,
+            Long userId,
+            HttpServletRequest request
+    ) {
+        HikariPoolMXBean pool = hikariPool();
+        log.info("[SSE_CONNECTION_DIAG] phase={} meetingId={} userId={} active={} idle={} total={} pending={} "
+                        + "txActive={} syncActive={} thread={} dispatcherType={} reason={}",
+                phase,
+                meetingId,
+                userId,
+                activeConnections(pool),
+                idleConnections(pool),
+                totalConnections(pool),
+                pendingThreads(pool),
+                TransactionSynchronizationManager.isActualTransactionActive(),
+                TransactionSynchronizationManager.isSynchronizationActive(),
+                Thread.currentThread().getName(),
+                request.getDispatcherType(),
+                null);
+    }
+
+    private HikariPoolMXBean hikariPool() {
+        if (!(dataSource instanceof HikariDataSource hikariDataSource)) {
+            return null;
+        }
+        return hikariDataSource.getHikariPoolMXBean();
+    }
+
+    private int activeConnections(HikariPoolMXBean pool) {
+        return pool == null ? -1 : pool.getActiveConnections();
+    }
+
+    private int idleConnections(HikariPoolMXBean pool) {
+        return pool == null ? -1 : pool.getIdleConnections();
+    }
+
+    private int totalConnections(HikariPoolMXBean pool) {
+        return pool == null ? -1 : pool.getTotalConnections();
+    }
+
+    private int pendingThreads(HikariPoolMXBean pool) {
+        return pool == null ? -1 : pool.getThreadsAwaitingConnection();
     }
 }
