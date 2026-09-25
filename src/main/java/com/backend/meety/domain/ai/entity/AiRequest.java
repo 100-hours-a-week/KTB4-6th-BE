@@ -65,4 +65,29 @@ public class AiRequest extends BaseEntity {
                                    String idempotencyKey, AiRequestType requestType) {
         return new AiRequest(team, teamMember, idempotencyKey, requestType);
     }
+
+    public boolean isAccepted() {
+        return status == AiRequestStatus.ACCEPTED;
+    }
+
+    public void markProcessing() {
+        this.status = AiRequestStatus.PROCESSING;
+    }
+
+    public void markCompleted() {
+        this.status = AiRequestStatus.COMPLETED;
+    }
+
+    public void markFailed(AiFailureReason failureReason) {
+        this.status = AiRequestStatus.FAILED;
+        this.failureReason = failureReason;
+    }
+
+    public void markAccepted() {
+        this.status = AiRequestStatus.ACCEPTED;
+    }
+
+    public void increaseRetryCount() {
+        this.retryCount++;
+    }
 }

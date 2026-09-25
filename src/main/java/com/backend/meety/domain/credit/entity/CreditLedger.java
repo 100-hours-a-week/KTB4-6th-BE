@@ -75,13 +75,22 @@ public class CreditLedger extends BaseEntity {
     private static CreditLedger create(Team team, CreditTransactionType type, CreditSourceType sourceType,
             Long sourceId, long amount, long balanceAfter) {
         Objects.requireNonNull(sourceId, "원본 식별자 없이는 멱등키를 유도할 수 없습니다.");
-        return create(team, type + ":" + sourceType + ":" + sourceId,
+        return create(team, keyOf(type, sourceType, sourceId),
                 type, sourceType, sourceId, amount, balanceAfter);
     }
 
     public static CreditLedger earnForTeamCreate(Team team, long amount, long balanceAfter) {
         return create(team, CreditTransactionType.EARN, CreditSourceType.TEAM_CREATE,
                 team.getId(), amount, balanceAfter);
+    }
+
+    public static String keyOf(CreditTransactionType type, CreditSourceType sourceType, Long sourceId) {
+        return type + ":" + sourceType + ":" + sourceId;
+    }
+
+    public static CreditLedger restoreForSummary(Team team, Long aiRequestId, long amount, long balanceAfter) {
+        return create(team, CreditTransactionType.RESTORE, CreditSourceType.AI_SUMMARY,
+                aiRequestId, amount, balanceAfter);
     }
 
     public static CreditLedger useForSummary(Team team, Long aiRequestId, long amount, long balanceAfter) {
