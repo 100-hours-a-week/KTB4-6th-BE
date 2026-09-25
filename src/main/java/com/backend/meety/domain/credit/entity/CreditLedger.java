@@ -13,6 +13,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.util.Objects;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -20,7 +21,10 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "credit_ledgers")
+@Table(name = "credit_ledgers",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_credit_ledgers_idempotency_key",
+                columnNames = "idempotency_key"))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class CreditLedger extends BaseEntity {
 
@@ -32,7 +36,7 @@ public class CreditLedger extends BaseEntity {
     @JoinColumn(name = "team_id", nullable = false)
     private Team team;
 
-    @Column(name = "idempotency_key", nullable = false, unique = true, length = 100)
+    @Column(name = "idempotency_key", nullable = false, length = 100)
     private String idempotencyKey;
 
     @Column(name = "source_id")

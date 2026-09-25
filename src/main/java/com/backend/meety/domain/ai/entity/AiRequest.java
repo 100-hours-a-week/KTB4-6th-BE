@@ -14,13 +14,17 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "ai_requests")
+@Table(name = "ai_requests",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_ai_requests_idempotency_key",
+                columnNames = "idempotency_key"))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AiRequest extends BaseEntity {
 
@@ -36,7 +40,7 @@ public class AiRequest extends BaseEntity {
     @JoinColumn(name = "team_member_id")
     private TeamMember teamMember;
 
-    @Column(name = "idempotency_key", nullable = false, unique = true, length = 100)
+    @Column(name = "idempotency_key", nullable = false, length = 100)
     private String idempotencyKey;
 
     @Enumerated(EnumType.STRING)
