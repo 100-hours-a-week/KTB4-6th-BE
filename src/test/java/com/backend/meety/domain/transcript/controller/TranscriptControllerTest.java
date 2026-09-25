@@ -10,6 +10,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
 import com.backend.meety.domain.transcript.dto.TranscriptSegmentResponse;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerListResponse;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerResponse;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import com.backend.meety.global.exception.GlobalExceptionHandler;
 import java.time.LocalDateTime;
@@ -150,6 +152,93 @@ class TranscriptControllerTest {
 
         // when & then
         mvc.perform(get("/api/v1/meetings/100/transcripts"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(jsonPath("$.error.code").value("MEETING_ACCESS_DENIED"));
+    }
+
+    @Test
+    @DisplayName("발화자 목록 조회 API는 path variable과 인증 사용자를 서비스로 전달한다")
+    void getSpeakersPassesMeetingIdAndAuthenticatedUserToService() throws Exception {
+        // 테스트 목적:
+        // 발화자 목록 조회 요청이 들어오면 Controller가 path variable의 meetingId와
+        // 인증 사용자 ID를 Service에 전달하는지 검증한다.
+
+        // given
+        when(transcriptService.getSpeakers(1L, 100L))
+                .thenReturn(new TranscriptSpeakerListResponse(List.of(new TranscriptSpeakerResponse(
+                        50L,
+                        "화자 1",
+                        null,
+                        null
+                ))));
+
+        // when & then
+        mvc.perform(get("/api/v1/meetings/100/speakers"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.speakers[0].transcriptSpeakerId").value(50L))
+                .andExpect(jsonPath("$.data.speakers[0].speakerLabel").value("화자 1"))
+                .andExpect(jsonPath("$.data.speakers[0].mappedTeamMemberId").doesNotExist())
+                .andExpect(jsonPath("$.data.speakers[0].customAlias").doesNotExist())
+                .andExpect(jsonPath("$.error").doesNotExist());
+
+        verify(transcriptService).getSpeakers(1L, 100L);
+    }
+
+    @Test
+    @DisplayName("발화자 목록 조회 API는 빈 목록을 공통 성공 응답으로 반환한다")
+    void getSpeakersReturnsEmptyList() throws Exception {
+        // 테스트 목적:
+        // 회의는 존재하지만 식별된 발화자가 없는 경우
+        // 빈 speakers 목록이 공통 성공 응답으로 반환되는지 검증한다.
+
+        // given
+        when(transcriptService.getSpeakers(1L, 100L))
+                .thenReturn(new TranscriptSpeakerListResponse(List.of()));
+
+        // when & then
+        mvc.perform(get("/api/v1/meetings/100/speakers"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.speakers").isArray())
+                .andExpect(jsonPath("$.data.speakers").isEmpty())
+                .andExpect(jsonPath("$.error").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 회의의 발화자 목록 조회는 404를 반환한다")
+    void getSpeakersReturnsMeetingNotFound() throws Exception {
+        // 테스트 목적:
+        // 회의가 존재하지 않거나 삭제된 경우
+        // 발화자 목록 조회 요청이 MEETING_NOT_FOUND로 거부되는지 검증한다.
+
+        // given
+        when(transcriptService.getSpeakers(1L, 404L))
+                .thenThrow(new MeetingException(MeetingErrorCode.MEETING_NOT_FOUND));
+
+        // when & then
+        mvc.perform(get("/api/v1/meetings/404/speakers"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(jsonPath("$.error.code").value("MEETING_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("접근 권한이 없는 회의의 발화자 목록 조회는 403을 반환한다")
+    void getSpeakersReturnsMeetingAccessDenied() throws Exception {
+        // 테스트 목적:
+        // 사용자가 회의가 속한 팀의 ACTIVE 멤버가 아닌 경우
+        // 발화자 목록 조회 요청이 MEETING_ACCESS_DENIED로 거부되는지 검증한다.
+
+        // given
+        when(transcriptService.getSpeakers(1L, 100L))
+                .thenThrow(new MeetingException(MeetingErrorCode.MEETING_ACCESS_DENIED));
+
+        // when & then
+        mvc.perform(get("/api/v1/meetings/100/speakers"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").doesNotExist())
