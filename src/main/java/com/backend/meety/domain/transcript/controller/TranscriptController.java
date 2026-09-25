@@ -1,6 +1,7 @@
 package com.backend.meety.domain.transcript.controller;
 
 import com.backend.meety.domain.transcript.dto.TranscriptSegmentResponse;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerListResponse;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import com.backend.meety.global.response.ApiResponse;
 import java.util.List;
@@ -27,5 +28,13 @@ public class TranscriptController {
             @RequestParam(required = false) String keyword
     ) {
         return ResponseEntity.ok(ApiResponse.success(transcriptService.getTranscripts(userId, meetingId, keyword)));
+    }
+
+    @GetMapping("/meetings/{meetingId}/speakers")
+    public ResponseEntity<ApiResponse<TranscriptSpeakerListResponse>> getSpeakers(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long meetingId
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(transcriptService.getSpeakers(userId, meetingId)));
     }
 }

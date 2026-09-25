@@ -7,9 +7,12 @@ import com.backend.meety.domain.meeting.exception.MeetingException;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.meeting.service.MeetingService;
 import com.backend.meety.domain.transcript.dto.TranscriptSegmentResponse;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerListResponse;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerResponse;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
 import com.backend.meety.domain.transcript.event.TranscriptCreatedEvent;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
+import com.backend.meety.domain.transcript.repository.TranscriptSpeakerRepository;
 import com.backend.meety.global.exception.BusinessException;
 import com.backend.meety.global.exception.CommonErrorCode;
 import java.time.Clock;
@@ -31,6 +34,7 @@ public class TranscriptService {
     private static final int MAX_KEYWORD_LENGTH = 20;
 
     private final TranscriptSegmentRepository transcriptSegmentRepository;
+    private final TranscriptSpeakerRepository transcriptSpeakerRepository;
     private final MeetingRepository meetingRepository;
     private final MeetingService meetingService;
     private final Clock clock;
@@ -101,6 +105,20 @@ public class TranscriptService {
         return segments.stream()
                 .map(TranscriptSegmentResponse::from)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public TranscriptSpeakerListResponse getSpeakers(Long userId, Long meetingId) {
+        Meeting meeting = meetingRepository.findByIdAndDeletedAtIsNull(meetingId)
+                .orElseThrow(() -> new MeetingException(MeetingErrorCode.MEETING_NOT_FOUND));
+        meetingService.validateMeetingAccess(userId, meeting.getTeam().getId());
+
+        List<TranscriptSpeakerResponse> speakers = transcriptSpeakerRepository.findAllByMeetingIdOrderById(meetingId)
+                .stream()
+                .map(TranscriptSpeakerResponse::from)
+                .toList();
+
+        return new TranscriptSpeakerListResponse(speakers);
     }
 
     private String normalizeKeyword(String keyword) {
