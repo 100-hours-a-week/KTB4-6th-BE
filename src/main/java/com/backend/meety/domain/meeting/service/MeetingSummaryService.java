@@ -1,8 +1,9 @@
 package com.backend.meety.domain.meeting.service;
 
+import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
-import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
+import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
@@ -11,6 +12,7 @@ import com.backend.meety.domain.credit.exception.CreditErrorCode;
 import com.backend.meety.domain.credit.exception.CreditException;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
+import com.backend.meety.domain.meeting.SummaryPolicy;
 import com.backend.meety.domain.meeting.dto.SummaryCreateResponse;
 import com.backend.meety.domain.meeting.dto.SummaryDetailResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
@@ -22,6 +24,8 @@ import com.backend.meety.domain.meeting.exception.SummaryErrorCode;
 import com.backend.meety.domain.meeting.exception.SummaryException;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.meeting.repository.MeetingSummaryRepository;
+import com.backend.meety.domain.recording.entity.RecordingSession;
+import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
@@ -32,6 +36,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
@@ -50,6 +55,7 @@ public class MeetingSummaryService {
     private final AiRequestRepository aiRequestRepository;
     private final TeamCreditRepository teamCreditRepository;
     private final CreditLedgerRepository creditLedgerRepository;
+    private final RecordingSessionRepository recordingSessionRepository;
 
     @Transactional
     public SummaryCreateResponse requestSummary(Long userId, Long meetingId, String idempotencyKey) {
@@ -79,6 +85,44 @@ public class MeetingSummaryService {
         MeetingSummary summary = meetingSummaryRepository.findLatestByMeetingId(meetingId)
                 .orElseThrow(() -> new SummaryException(SummaryErrorCode.SUMMARY_NOT_FOUND));
         return SummaryDetailResponse.from(summary);
+    }
+
+    /**
+     * 발행 경로 중 하나(AFTER_COMMIT 리스너)는 이미 완료된 트랜잭션 문맥에서 호출되므로
+     * REQUIRED로는 새 트랜잭션이 열리지 않는다. REQUIRES_NEW로 항상 새 트랜잭션을 연다.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void registerFirstSummary(Long meetingId, Long recordingSessionId) {
+        String idempotencyKey = SummaryPolicy.firstSummaryIdempotencyKey(meetingId);
+        if (aiRequestRepository.findByIdempotencyKey(idempotencyKey).isPresent()) {
+            return;
+        }
+        Meeting meeting = meetingRepository.findByIdAndDeletedAtIsNull(meetingId).orElse(null);
+        if (meeting == null) {
+            log.warn("첫 요약을 등록할 회의가 없습니다. meetingId={}", meetingId);
+            return;
+        }
+
+        AiRequest aiRequest = createFirstSummaryRequest(meeting, recordingSessionId, idempotencyKey);
+        aiRequestRepository.save(aiRequest);
+        createNextVersion(aiRequest, meeting);
+    }
+
+    private AiRequest createFirstSummaryRequest(Meeting meeting, Long recordingSessionId, String idempotencyKey) {
+        TeamMember starter = findRecordingStarter(recordingSessionId);
+        AiRequest aiRequest = AiRequest.create(
+                meeting.getTeam(), starter, idempotencyKey, AiRequestType.SUMMARY);
+        if (!transcriptSegmentRepository.existsByMeetingId(meeting.getId())) {
+            aiRequest.markFailed(AiFailureReason.TRANSCRIPT_EMPTY);
+            log.warn("전사가 없어 첫 요약을 실패로 등록합니다. meetingId={}", meeting.getId());
+        }
+        return aiRequest;
+    }
+
+    private TeamMember findRecordingStarter(Long recordingSessionId) {
+        return recordingSessionRepository.findByIdAndDeletedAtIsNull(recordingSessionId)
+                .map(RecordingSession::getStartedByTeamMember)
+                .orElse(null);
     }
 
     private Meeting findMeeting(Long meetingId) {
