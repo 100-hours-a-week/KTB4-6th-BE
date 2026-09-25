@@ -14,6 +14,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
@@ -27,6 +28,7 @@ import com.backend.meety.domain.credit.exception.CreditErrorCode;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import com.backend.meety.domain.meeting.dto.SummaryCreateResponse;
+import com.backend.meety.domain.meeting.dto.SummaryDetailResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingSummary;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
@@ -45,6 +47,7 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -208,6 +211,78 @@ class MeetingSummaryServiceTest {
                 .thenThrow(new DataIntegrityViolationException("uk_meeting_summaries_meeting_id_version"));
 
         assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY), SummaryErrorCode.SUMMARY_ALREADY_PROCESSING);
+    }
+
+    @Nested
+    @DisplayName("최신 요약 조회")
+    class GetLatestSummary {
+
+        private AiRequest aiRequest;
+        private MeetingSummary summary;
+
+        @BeforeEach
+        void setUpSummary() {
+            aiRequest = withId(AiRequest.create(team, member, IDEMPOTENCY_KEY, AiRequestType.SUMMARY), 900L);
+            summary = withId(MeetingSummary.createPending(aiRequest, team, meeting, 2L), 502L);
+            when(summaries.findLatestByMeetingId(100L)).thenReturn(Optional.of(summary));
+        }
+
+        @Test
+        @DisplayName("완료된 요약이면 본문과 COMPLETED를 반환한다")
+        void returnsCompletedSummary() {
+            summary.complete("## 회의 요약");
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    aiRequest, "status", AiRequestStatus.COMPLETED);
+
+            SummaryDetailResponse response = service.getLatestSummary(1L, 100L);
+
+            assertThat(response.summaryId()).isEqualTo(502L);
+            assertThat(response.content()).isEqualTo("## 회의 요약");
+            assertThat(response.version()).isEqualTo(2L);
+            assertThat(response.status()).isEqualTo(AiRequestStatus.COMPLETED);
+            assertThat(response.failureReason()).isNull();
+        }
+
+        @Test
+        @DisplayName("생성 중이면 content가 null이고 상태로 판별한다")
+        void returnsPendingSummaryWithNullContent() {
+            SummaryDetailResponse response = service.getLatestSummary(1L, 100L);
+
+            assertThat(response.content()).isNull();
+            assertThat(response.status()).isEqualTo(AiRequestStatus.ACCEPTED);
+        }
+
+        @Test
+        @DisplayName("실패한 요약이면 failureReason을 함께 반환한다")
+        void returnsFailureReason() {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    aiRequest, "status", AiRequestStatus.FAILED);
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    aiRequest, "failureReason", AiFailureReason.TRANSCRIPT_EMPTY);
+
+            SummaryDetailResponse response = service.getLatestSummary(1L, 100L);
+
+            assertThat(response.content()).isNull();
+            assertThat(response.status()).isEqualTo(AiRequestStatus.FAILED);
+            assertThat(response.failureReason()).isEqualTo(AiFailureReason.TRANSCRIPT_EMPTY);
+        }
+
+        @Test
+        @DisplayName("요약이 하나도 없으면 404다")
+        void rejectsWhenNoSummary() {
+            when(summaries.findLatestByMeetingId(100L)).thenReturn(Optional.empty());
+
+            assertCode(() -> service.getLatestSummary(1L, 100L), SummaryErrorCode.SUMMARY_NOT_FOUND);
+        }
+
+        @Test
+        @DisplayName("활성 팀원이 아니면 403이다")
+        void rejectsNonTeamMember() {
+            when(members.findByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE))
+                    .thenReturn(Optional.empty());
+
+            assertCode(() -> service.getLatestSummary(1L, 100L), MeetingErrorCode.MEETING_ACCESS_DENIED);
+        }
     }
 
     private void assertCode(Runnable action, BaseCode expected) {

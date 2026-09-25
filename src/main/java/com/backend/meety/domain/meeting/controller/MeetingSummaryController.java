@@ -1,6 +1,7 @@
 package com.backend.meety.domain.meeting.controller;
 
 import com.backend.meety.domain.meeting.dto.SummaryCreateResponse;
+import com.backend.meety.domain.meeting.dto.SummaryDetailResponse;
 import com.backend.meety.domain.meeting.service.MeetingSummaryService;
 import com.backend.meety.global.response.ApiResponse;
 import jakarta.validation.constraints.NotBlank;
@@ -10,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -23,6 +25,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class MeetingSummaryController {
 
     private final MeetingSummaryService meetingSummaryService;
+
+    @GetMapping("/meetings/{meetingId}/summaries")
+    public ResponseEntity<ApiResponse<SummaryDetailResponse>> getLatestSummary(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long meetingId
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(meetingSummaryService.getLatestSummary(userId, meetingId)));
+    }
 
     @PostMapping("/meetings/{meetingId}/summaries")
     public ResponseEntity<ApiResponse<SummaryCreateResponse>> requestSummary(
