@@ -121,6 +121,7 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
             return;
         }
         connection.markEnded();
+        connectionService.notifyTranscriptFinalized(connection);
         cleanup();
     }
 

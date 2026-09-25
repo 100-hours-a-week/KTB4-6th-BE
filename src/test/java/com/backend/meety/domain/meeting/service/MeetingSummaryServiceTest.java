@@ -32,9 +32,11 @@ import com.backend.meety.domain.meeting.dto.SummaryDetailResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingSummary;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
+import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.meeting.exception.SummaryErrorCode;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.meeting.repository.MeetingSummaryRepository;
+import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
@@ -65,8 +67,9 @@ class MeetingSummaryServiceTest {
     private final AiRequestRepository aiRequests = mock(AiRequestRepository.class);
     private final TeamCreditRepository credits = mock(TeamCreditRepository.class);
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
+    private final RecordingSessionRepository recordings = mock(RecordingSessionRepository.class);
     private final MeetingSummaryService service = new MeetingSummaryService(
-            meetings, members, transcripts, summaries, aiRequests, credits, ledgers);
+            meetings, members, transcripts, summaries, aiRequests, credits, ledgers, recordings);
 
     private Team team;
     private TeamMember member;
@@ -282,6 +285,82 @@ class MeetingSummaryServiceTest {
                     .thenReturn(Optional.empty());
 
             assertCode(() -> service.getLatestSummary(1L, 100L), MeetingErrorCode.MEETING_ACCESS_DENIED);
+        }
+    }
+
+    @Nested
+    @DisplayName("첫 요약 자동 등록")
+    class RegisterFirstSummary {
+
+        private static final String AUTO_KEY = "SUMMARY:MEETING:100";
+
+        @BeforeEach
+        void setUpAuto() {
+            when(aiRequests.findByIdempotencyKey(AUTO_KEY)).thenReturn(Optional.empty());
+            when(recordings.findByIdAndDeletedAtIsNull(700L))
+                    .thenReturn(Optional.of(com.backend.meety.domain.recording.RecordingFixtures.session(meeting, member)));
+            when(aiRequests.save(any(AiRequest.class))).thenAnswer(call -> withId(call.getArgument(0), 901L));
+            when(summaries.saveAndFlush(any(MeetingSummary.class)))
+                    .thenAnswer(call -> withId(call.getArgument(0), 503L));
+        }
+
+        @Test
+        @DisplayName("전사가 있으면 무료로 ACCEPTED 요청과 회차 행을 만든다")
+        void registersAcceptedWithoutCharge() {
+            service.registerFirstSummary(100L, 700L);
+
+            ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
+            verify(aiRequests).save(captor.capture());
+            assertThat(captor.getValue().getIdempotencyKey()).isEqualTo(AUTO_KEY);
+            assertThat(captor.getValue().getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
+            verify(summaries).saveAndFlush(any(MeetingSummary.class));
+            verify(credits, never()).findByTeamIdForUpdate(anyLong());
+            verify(ledgers, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("전사가 없으면 FAILED(TRANSCRIPT_EMPTY)로 등록해 조회에서 실패가 보이게 한다")
+        void registersFailedWhenTranscriptEmpty() {
+            when(transcripts.existsByMeetingId(100L)).thenReturn(false);
+
+            service.registerFirstSummary(100L, 700L);
+
+            ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
+            verify(aiRequests).save(captor.capture());
+            assertThat(captor.getValue().getStatus()).isEqualTo(AiRequestStatus.FAILED);
+            assertThat(captor.getValue().getFailureReason()).isEqualTo(AiFailureReason.TRANSCRIPT_EMPTY);
+            verify(summaries).saveAndFlush(any(MeetingSummary.class));
+        }
+
+        @Test
+        @DisplayName("이미 등록돼 있으면 아무것도 하지 않는다 (세 경로 중복 방지)")
+        void skipsWhenAlreadyRegistered() {
+            when(aiRequests.findByIdempotencyKey(AUTO_KEY))
+                    .thenReturn(Optional.of(AiRequest.create(team, member, AUTO_KEY, AiRequestType.SUMMARY)));
+
+            service.registerFirstSummary(100L, 700L);
+
+            verify(aiRequests, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("동시 등록으로 UNIQUE에 걸리면 예외를 그대로 던진다 (리스너가 트랜잭션 밖에서 잡는다)")
+        void propagatesUniqueViolation() {
+            when(summaries.saveAndFlush(any(MeetingSummary.class)))
+                    .thenThrow(new DataIntegrityViolationException("duplicate"));
+
+            assertCode(() -> service.registerFirstSummary(100L, 700L),
+                    SummaryErrorCode.SUMMARY_ALREADY_PROCESSING);
+        }
+
+        @Test
+        @DisplayName("회의가 없으면 아무것도 하지 않는다")
+        void skipsWhenMeetingMissing() {
+            when(meetings.findByIdAndDeletedAtIsNull(100L)).thenReturn(Optional.empty());
+
+            service.registerFirstSummary(100L, 700L);
+
+            verify(aiRequests, never()).save(any());
         }
     }
 

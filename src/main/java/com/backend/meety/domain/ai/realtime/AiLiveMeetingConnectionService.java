@@ -1,9 +1,9 @@
 package com.backend.meety.domain.ai.realtime;
 
 import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
+import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import com.backend.meety.domain.transcript.service.TranscriptService;
-import java.time.Duration;
 import java.util.Optional;
 import java.net.URI;
 import lombok.RequiredArgsConstructor;
@@ -20,9 +20,6 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class AiLiveMeetingConnectionService {
 
-    private static final Duration STOP_TIMEOUT = Duration.ofSeconds(30);
-    private static final Duration READY_TIMEOUT = Duration.ofSeconds(5);
-
     private final AiLiveMeetingConnectionRegistry registry;
     private final AiLiveMeetingWebSocketClient webSocketClient;
     private final AiLiveMeetingProperties properties;
@@ -31,6 +28,11 @@ public class AiLiveMeetingConnectionService {
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final TranscriptService transcriptService;
+
+    void notifyTranscriptFinalized(AiLiveMeetingConnection connection) {
+        eventPublisher.publishEvent(new MeetingTranscriptFinalizedEvent(
+                connection.meetingId(), connection.recordingSessionId()));
+    }
 
     void markReady(AiLiveMeetingConnection connection) {
         connection.markReady();
@@ -46,7 +48,7 @@ public class AiLiveMeetingConnectionService {
             return false;
         }
         try {
-            if (connection.awaitReady(READY_TIMEOUT)) {
+            if (connection.awaitReady(AiLiveMeetingPolicy.READY_TIMEOUT)) {
                 return true;
             }
             log.warn("AI WebSocket session.ready 대기 시간이 초과되었습니다. recordingSessionId={}",
@@ -126,13 +128,14 @@ public class AiLiveMeetingConnectionService {
                     connection.recordingSessionId(), connection.state());
             if (connection.state() == AiLiveMeetingConnectionState.CONNECTING
                     || connection.state() == AiLiveMeetingConnectionState.START_SENT) {
+                notifyTranscriptFinalized(connection);
                 cleanup(connection);
             }
             return;
         }
         connection.setStopTimeoutFuture(stopTimeoutScheduler.schedule(
                 () -> handleStopTimeout(connection),
-                STOP_TIMEOUT
+                AiLiveMeetingPolicy.STOP_TIMEOUT
         ));
         try {
             WebSocketSession aiSession = connection.webSocketSession();
@@ -143,6 +146,7 @@ public class AiLiveMeetingConnectionService {
         } catch (Exception e) {
             log.warn("AI WebSocket session.stop 전송에 실패했습니다. recordingSessionId={}",
                     connection.recordingSessionId(), e);
+            notifyTranscriptFinalized(connection);
             cleanup(connection);
         }
     }
@@ -153,6 +157,8 @@ public class AiLiveMeetingConnectionService {
         }
         log.warn("AI WebSocket session.ended 대기 시간이 초과되었습니다. recordingSessionId={}",
                 connection.recordingSessionId());
+        // 이 경로의 요약은 마지막 전사가 덜 들어왔을 수 있으나 구분 없이 요약한다 (확정 정책)
+        notifyTranscriptFinalized(connection);
         cleanup(connection);
     }
 
