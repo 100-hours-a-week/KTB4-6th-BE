@@ -13,13 +13,17 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "meeting_summaries")
+@Table(name = "meeting_summaries",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_meeting_summaries_meeting_id_version",
+                columnNames = {"meeting_id", "version"}))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class MeetingSummary extends BaseEntity {
 
@@ -39,9 +43,24 @@ public class MeetingSummary extends BaseEntity {
     @JoinColumn(name = "meeting_id", nullable = false)
     private Meeting meeting;
 
-    @Column(name = "content", nullable = false, columnDefinition = "TEXT")
+    @Column(name = "content", columnDefinition = "TEXT")
     private String content;
 
     @Column(name = "version", nullable = false)
     private Long version = 1L;
+
+    private MeetingSummary(AiRequest aiRequest, Team team, Meeting meeting, Long version) {
+        this.aiRequest = aiRequest;
+        this.team = team;
+        this.meeting = meeting;
+        this.version = version;
+    }
+
+    public static MeetingSummary createPending(AiRequest aiRequest, Team team, Meeting meeting, Long version) {
+        return new MeetingSummary(aiRequest, team, meeting, version);
+    }
+
+    public void complete(String content) {
+        this.content = content;
+    }
 }

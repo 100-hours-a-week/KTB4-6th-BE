@@ -84,6 +84,11 @@ public class CreditLedger extends BaseEntity {
                 team.getId(), amount, balanceAfter);
     }
 
+    public static CreditLedger useForSummary(Team team, Long aiRequestId, long amount, long balanceAfter) {
+        return create(team, CreditTransactionType.USE, CreditSourceType.AI_SUMMARY,
+                aiRequestId, amount, balanceAfter);
+    }
+
     public static CreditLedger useForRecording(Team team, Long recordingSessionId, long amount, long balanceAfter) {
         return create(team, CreditTransactionType.USE, CreditSourceType.RECORDING,
                 recordingSessionId, amount, balanceAfter);
