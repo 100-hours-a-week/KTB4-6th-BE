@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
+import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.net.URI;
@@ -258,6 +259,19 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.CLOSED);
         assertThat(client.session.sentMessages).hasSize(1);
         assertThat(registry.find(88L)).isEmpty();
+        assertThat(readyEvents).containsExactly(new MeetingTranscriptFinalizedEvent(42L, 88L));
+    }
+
+    @Test
+    void stopSendFailurePublishesTranscriptFinalizedAndCleansRegistry() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        client.session.open = false;
+
+        service.stop(88L);
+
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.CLOSED);
+        assertThat(registry.find(88L)).isEmpty();
+        assertThat(readyEvents).contains(new MeetingTranscriptFinalizedEvent(42L, 88L));
     }
 
     @ParameterizedTest
