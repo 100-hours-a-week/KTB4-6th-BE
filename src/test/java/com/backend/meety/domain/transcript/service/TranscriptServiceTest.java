@@ -20,6 +20,7 @@ import com.backend.meety.domain.ai.realtime.AiTranscriptSegmentMessage;
 import com.backend.meety.domain.ai.realtime.AiTranscriptSegmentPayload;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingParticipant;
+import com.backend.meety.domain.meeting.entity.ParticipationStatus;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
@@ -31,8 +32,10 @@ import com.backend.meety.domain.team.exception.TeamErrorCode;
 import com.backend.meety.domain.team.exception.TeamException;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.transcript.dto.TranscriptSegmentResponse;
-import com.backend.meety.domain.transcript.dto.TranscriptSpeakerListResponse;
+import com.backend.meety.domain.transcript.dto.TranscriptSegmentListResponse;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerMappingDetailResponse;
 import com.backend.meety.domain.transcript.dto.TranscriptSpeakerMappingRequest;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerMappingType;
 import com.backend.meety.domain.transcript.dto.TranscriptSpeakerResponse;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
 import com.backend.meety.domain.transcript.entity.TranscriptSpeaker;
@@ -41,8 +44,7 @@ import com.backend.meety.domain.transcript.exception.TranscriptErrorCode;
 import com.backend.meety.domain.transcript.exception.TranscriptException;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
 import com.backend.meety.domain.transcript.repository.TranscriptSpeakerRepository;
-import com.backend.meety.global.exception.BusinessException;
-import com.backend.meety.global.exception.CommonErrorCode;
+import com.backend.meety.domain.user.entity.User;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -174,12 +176,12 @@ class TranscriptServiceTest {
         when(transcriptSegments.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(first, second));
 
         // when
-        List<TranscriptSegmentResponse> response = service.getTranscripts(1L, 100L);
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L);
 
         // then
-        assertThat(response).extracting("segmentId").containsExactly(901L, 902L);
-        assertThat(response).extracting("sequenceNumber").containsExactly(1L, 2L);
-        assertThat(response).extracting("content").containsExactly("first text", "second text");
+        assertThat(response.segments()).extracting("segmentId").containsExactly(901L, 902L);
+        assertThat(response.segments()).extracting("sequenceNumber").containsExactly(1L, 2L);
+        assertThat(response.segments()).extracting("content").containsExactly("first text", "second text");
         verify(meetingService).validateMeetingAccess(1L, 2L);
     }
 
@@ -197,12 +199,12 @@ class TranscriptServiceTest {
                 .thenReturn(List.of(first, second));
 
         // when
-        List<TranscriptSegmentResponse> response = service.getTranscripts(1L, 100L, "카카오");
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L, "카카오");
 
         // then
-        assertThat(response).extracting("segmentId").containsExactly(901L, 902L);
-        assertThat(response).extracting("sequenceNumber").containsExactly(3L, 5L);
-        assertThat(response).extracting("content")
+        assertThat(response.segments()).extracting("segmentId").containsExactly(901L, 902L);
+        assertThat(response.segments()).extracting("sequenceNumber").containsExactly(3L, 5L);
+        assertThat(response.segments()).extracting("content")
                 .containsExactly("카카오 프로젝트 일정입니다.", "카카오 배포 계획입니다.");
         verify(meetingService).validateMeetingAccess(1L, 2L);
         verify(transcriptSegments, never()).findAllByMeetingIdOrderBySequence(any());
@@ -222,11 +224,11 @@ class TranscriptServiceTest {
                 .thenReturn(List.of(first, second));
 
         // when
-        List<TranscriptSegmentResponse> response = service.getTranscripts(1L, 100L, "검색");
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L, "검색");
 
         // then
-        assertThat(response).extracting("segmentId").containsExactly(902L, 901L);
-        assertThat(response).extracting("sequenceNumber").containsExactly(1L, 2L);
+        assertThat(response.segments()).extracting("segmentId").containsExactly(902L, 901L);
+        assertThat(response.segments()).extracting("sequenceNumber").containsExactly(1L, 2L);
     }
 
     @Test
@@ -240,10 +242,10 @@ class TranscriptServiceTest {
         when(transcriptSegments.searchByMeetingIdAndContent(100L, "Project")).thenReturn(List.of());
 
         // when
-        List<TranscriptSegmentResponse> response = service.getTranscripts(1L, 100L, "Project");
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L, "Project");
 
         // then
-        assertThat(response).isEmpty();
+        assertThat(response.segments()).isEmpty();
         verify(transcriptSegments).searchByMeetingIdAndContent(100L, "Project");
     }
 
@@ -259,10 +261,10 @@ class TranscriptServiceTest {
         when(transcriptSegments.searchByMeetingIdAndContent(100L, "카카오")).thenReturn(List.of(segment));
 
         // when
-        List<TranscriptSegmentResponse> response = service.getTranscripts(1L, 100L, "  카카오  ");
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L, "  카카오  ");
 
         // then
-        assertThat(response).hasSize(1);
+        assertThat(response.segments()).hasSize(1);
         verify(transcriptSegments).searchByMeetingIdAndContent(100L, "카카오");
     }
 
@@ -277,10 +279,10 @@ class TranscriptServiceTest {
         when(transcriptSegments.searchByMeetingIdAndContent(100L, "없음")).thenReturn(List.of());
 
         // when
-        List<TranscriptSegmentResponse> response = service.getTranscripts(1L, 100L, "없음");
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L, "없음");
 
         // then
-        assertThat(response).isEmpty();
+        assertThat(response.segments()).isEmpty();
     }
 
     @Test
@@ -294,10 +296,10 @@ class TranscriptServiceTest {
         when(transcriptSegments.searchByMeetingIdAndContent(100L, "회의")).thenReturn(List.of());
 
         // when
-        List<TranscriptSegmentResponse> response = service.getTranscripts(1L, 100L, "회의");
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L, "회의");
 
         // then
-        assertThat(response).isEmpty();
+        assertThat(response.segments()).isEmpty();
         verify(transcriptSegments).searchByMeetingIdAndContent(100L, "회의");
     }
 
@@ -313,10 +315,10 @@ class TranscriptServiceTest {
         when(transcriptSegments.searchByMeetingIdAndContent(100L, keyword)).thenReturn(List.of());
 
         // when
-        List<TranscriptSegmentResponse> response = service.getTranscripts(1L, 100L, keyword);
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L, keyword);
 
         // then
-        assertThat(response).isEmpty();
+        assertThat(response.segments()).isEmpty();
         verify(transcriptSegments).searchByMeetingIdAndContent(100L, keyword);
     }
 
@@ -332,10 +334,10 @@ class TranscriptServiceTest {
         when(transcriptSegments.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(segment));
 
         // when
-        List<TranscriptSegmentResponse> response = service.getTranscripts(1L, 100L, "   ");
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L, "   ");
 
         // then
-        assertThat(response).extracting("content").containsExactly("전체 전사");
+        assertThat(response.segments()).extracting("content").containsExactly("전체 전사");
         verify(transcriptSegments).findAllByMeetingIdOrderBySequence(100L);
         verify(transcriptSegments, never()).searchByMeetingIdAndContent(any(), anyString());
     }
@@ -351,10 +353,10 @@ class TranscriptServiceTest {
         when(transcriptSegments.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of());
 
         // when
-        List<TranscriptSegmentResponse> response = service.getTranscripts(1L, 100L);
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L);
 
         // then
-        assertThat(response).isEmpty();
+        assertThat(response.segments()).isEmpty();
         verify(meetingService).validateMeetingAccess(1L, 2L);
     }
 
@@ -370,135 +372,117 @@ class TranscriptServiceTest {
         when(transcriptSegments.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(segment));
 
         // when
-        List<TranscriptSegmentResponse> response = service.getTranscripts(1L, 100L);
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L);
 
         // then
-        assertThat(response).hasSize(1);
-        assertThat(response.get(0).segmentId()).isEqualTo(901L);
-        assertThat(response.get(0).sequenceNumber()).isEqualTo(1L);
-        assertThat(response.get(0).content()).isEqualTo("only text");
+        assertThat(response.segments()).hasSize(1);
+        assertThat(response.segments().get(0).segmentId()).isEqualTo(901L);
+        assertThat(response.segments().get(0).sequenceNumber()).isEqualTo(1L);
+        assertThat(response.segments().get(0).content()).isEqualTo("only text");
     }
 
     @Test
-    @DisplayName("ACTIVE 팀 멤버는 회의 발화자 목록을 조회할 수 있다")
-    void getSpeakersReturnsSpeakersForActiveTeamMember() {
+    @DisplayName("미매핑 발화자는 speakerLabel을 표시 이름으로 반환한다")
+    void getTranscriptsReturnsSpeakerLabelWhenSpeakerIsUnmapped() {
         // 테스트 목적:
-        // 회의가 속한 팀의 ACTIVE 멤버가 발화자 목록을 조회하면
-        // 저장된 발화자 정보가 목록 응답으로 반환되는지 검증한다.
+        // 발화자가 팀원이나 별칭에 매핑되지 않은 경우
+        // 전사 조회 응답의 speakerDisplayName이 speakerLabel인지 검증한다.
 
         // given
         TranscriptSpeaker speaker = speaker(50L, "화자 1", null, null);
-        when(transcriptSpeakers.findAllByMeetingIdOrderById(100L)).thenReturn(List.of(speaker));
+        TranscriptSegment segment = segment(901L, 1L, "미매핑 발화");
+        setSpeaker(segment, speaker);
+        when(transcriptSegments.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(segment));
 
         // when
-        TranscriptSpeakerListResponse response = service.getSpeakers(1L, 100L);
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L);
 
         // then
-        assertThat(response.speakers()).hasSize(1);
-        assertThat(response.speakers().get(0).transcriptSpeakerId()).isEqualTo(50L);
-        assertThat(response.speakers().get(0).speakerLabel()).isEqualTo("화자 1");
-        assertThat(response.speakers().get(0).mappedTeamMemberId()).isNull();
-        assertThat(response.speakers().get(0).customAlias()).isNull();
-        verify(meetingService).validateMeetingAccess(1L, 2L);
+        assertThat(response.segments()).extracting("speakerDisplayName").containsExactly("화자 1");
     }
 
     @Test
-    @DisplayName("여러 발화자는 repository 조회 순서대로 반환한다")
-    void getSpeakersReturnsMultipleSpeakersInRepositoryOrder() {
+    @DisplayName("팀원 매핑 발화자는 팀원 nickname을 표시 이름으로 반환한다")
+    void getTranscriptsReturnsMappedTeamMemberNickname() {
         // 테스트 목적:
-        // 회의에 여러 발화자가 저장된 경우
-        // Service가 repository의 정렬 결과 순서를 변경하지 않고 반환하는지 검증한다.
+        // 발화자가 팀원에 매핑된 경우
+        // 전사 조회 응답의 speakerDisplayName이 팀원 nickname인지 검증한다.
 
         // given
-        TranscriptSpeaker first = speaker(50L, "화자 1", null, null);
-        TranscriptSpeaker second = speaker(51L, "화자 2", null, null);
-        when(transcriptSpeakers.findAllByMeetingIdOrderById(100L)).thenReturn(List.of(first, second));
-
-        // when
-        TranscriptSpeakerListResponse response = service.getSpeakers(1L, 100L);
-
-        // then
-        assertThat(response.speakers()).extracting("transcriptSpeakerId").containsExactly(50L, 51L);
-        assertThat(response.speakers()).extracting("speakerLabel").containsExactly("화자 1", "화자 2");
-    }
-
-    @Test
-    @DisplayName("발화자 목록은 기존 팀원 매핑 상태를 반환한다")
-    void getSpeakersReturnsMappedTeamMemberId() {
-        // 테스트 목적:
-        // 발화자가 팀원에 매핑되어 있는 경우
-        // 저장된 mappedTeamMemberId가 응답에 포함되는지 검증한다.
-
-        // given
-        TeamMember mappedTeamMember = member(meeting.getTeam());
+        TeamMember mappedTeamMember = teamMember(10L, "김진혁");
         TranscriptSpeaker speaker = speaker(50L, "화자 1", mappedTeamMember, null);
-        when(transcriptSpeakers.findAllByMeetingIdOrderById(100L)).thenReturn(List.of(speaker));
+        TranscriptSegment segment = segment(901L, 1L, "팀원 매핑 발화");
+        setSpeaker(segment, speaker);
+        when(transcriptSegments.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(segment));
 
         // when
-        TranscriptSpeakerListResponse response = service.getSpeakers(1L, 100L);
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L);
 
         // then
-        assertThat(response.speakers()).hasSize(1);
-        assertThat(response.speakers().get(0).mappedTeamMemberId()).isEqualTo(10L);
-        assertThat(response.speakers().get(0).customAlias()).isNull();
+        assertThat(response.segments()).extracting("speakerDisplayName").containsExactly("김진혁");
     }
 
     @Test
-    @DisplayName("발화자 목록은 기존 customAlias 상태를 반환한다")
-    void getSpeakersReturnsCustomAlias() {
+    @DisplayName("별칭 매핑 발화자는 customAlias를 표시 이름으로 반환한다")
+    void getTranscriptsReturnsCustomAlias() {
         // 테스트 목적:
-        // 발화자에 별칭이 저장되어 있는 경우
-        // 별도 표시 이름 계산 없이 저장된 customAlias가 응답에 포함되는지 검증한다.
+        // 발화자가 사용자 지정 별칭에 매핑된 경우
+        // 전사 조회 응답의 speakerDisplayName이 customAlias인지 검증한다.
+
+        // given
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, "게스트");
+        TranscriptSegment segment = segment(901L, 1L, "별칭 매핑 발화");
+        setSpeaker(segment, speaker);
+        when(transcriptSegments.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(segment));
+
+        // when
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L);
+
+        // then
+        assertThat(response.segments()).extracting("speakerDisplayName").containsExactly("게스트");
+    }
+
+    @Test
+    @DisplayName("검색 결과에도 발화자 표시 이름을 적용한다")
+    void searchTranscriptsAppliesSpeakerDisplayName() {
+        // 테스트 목적:
+        // 검색 결과로 반환된 전사에도 전체 조회와 동일하게
+        // speakerDisplayName 계산 규칙이 적용되는지 검증한다.
+
+        // given
+        TeamMember mappedTeamMember = teamMember(10L, "김진혁");
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", mappedTeamMember, null);
+        TranscriptSegment segment = segment(901L, 1L, "검색 대상 발화");
+        setSpeaker(segment, speaker);
+        when(transcriptSegments.searchByMeetingIdAndContent(100L, "검색")).thenReturn(List.of(segment));
+
+        // when
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L, "검색");
+
+        // then
+        assertThat(response.segments()).extracting("speakerDisplayName").containsExactly("김진혁");
+    }
+
+    @Test
+    @DisplayName("같은 발화자를 참조하는 여러 전사는 같은 표시 이름을 반환한다")
+    void getTranscriptsReturnsSameDisplayNameForSameSpeaker() {
+        // 테스트 목적:
+        // 여러 전사 세그먼트가 같은 TranscriptSpeaker를 참조하는 경우
+        // 동일한 speakerDisplayName이 반환되는지 검증한다.
 
         // given
         TranscriptSpeaker speaker = speaker(50L, "화자 1", null, "PM");
-        when(transcriptSpeakers.findAllByMeetingIdOrderById(100L)).thenReturn(List.of(speaker));
+        TranscriptSegment first = segment(901L, 1L, "첫 번째 발화");
+        TranscriptSegment second = segment(902L, 2L, "두 번째 발화");
+        setSpeaker(first, speaker);
+        setSpeaker(second, speaker);
+        when(transcriptSegments.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(first, second));
 
         // when
-        TranscriptSpeakerListResponse response = service.getSpeakers(1L, 100L);
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L);
 
         // then
-        assertThat(response.speakers()).hasSize(1);
-        assertThat(response.speakers().get(0).mappedTeamMemberId()).isNull();
-        assertThat(response.speakers().get(0).customAlias()).isEqualTo("PM");
-    }
-
-    @Test
-    @DisplayName("발화자가 없는 회의는 빈 목록을 반환한다")
-    void getSpeakersReturnsEmptyListWhenNoSpeakerExists() {
-        // 테스트 목적:
-        // 회의는 존재하지만 식별된 발화자가 없는 경우
-        // 오류가 아닌 빈 speakers 목록을 반환하는지 검증한다.
-
-        // given
-        when(transcriptSpeakers.findAllByMeetingIdOrderById(100L)).thenReturn(List.of());
-
-        // when
-        TranscriptSpeakerListResponse response = service.getSpeakers(1L, 100L);
-
-        // then
-        assertThat(response.speakers()).isEmpty();
-        verify(meetingService).validateMeetingAccess(1L, 2L);
-    }
-
-    @Test
-    @DisplayName("발화자가 하나만 있어도 목록으로 반환한다")
-    void getSpeakersReturnsSingleSpeaker() {
-        // 테스트 목적:
-        // 조회된 발화자가 단일 건인 경우에도
-        // 동일한 speakers 목록 응답 구조로 반환되는지 검증한다.
-
-        // given
-        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, null);
-        when(transcriptSpeakers.findAllByMeetingIdOrderById(100L)).thenReturn(List.of(speaker));
-
-        // when
-        TranscriptSpeakerListResponse response = service.getSpeakers(1L, 100L);
-
-        // then
-        assertThat(response.speakers()).hasSize(1);
-        assertThat(response.speakers().get(0).transcriptSpeakerId()).isEqualTo(50L);
-        assertThat(response.speakers().get(0).speakerLabel()).isEqualTo("화자 1");
+        assertThat(response.segments()).extracting("speakerDisplayName").containsExactly("PM", "PM");
     }
 
     @Test
@@ -561,6 +545,36 @@ class TranscriptServiceTest {
         assertThat(response.mappedTeamMemberId()).isEqualTo(10L);
         assertThat(response.customAlias()).isNull();
         assertThat(speaker.getMappedTeamMember()).isEqualTo(leftTeamMember);
+    }
+
+    @Test
+    @DisplayName("현재 강퇴 상태인 회의 참석자도 발화자에 매핑할 수 있다")
+    void updateSpeakerMappingMapsKickedMeetingParticipantToSpeaker() {
+        // 테스트 목적:
+        // 과거 회의에 참석했던 팀원이 이후 강퇴 상태가 된 경우에도
+        // 참석 이력을 기준으로 발화자 매핑이 허용되는지 검증한다.
+
+        // given
+        TeamMember kickedTeamMember = member(meeting.getTeam());
+        kickedTeamMember.kick(NOW);
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, null);
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+        when(teamMembers.findById(10L)).thenReturn(Optional.of(kickedTeamMember));
+        when(meetingParticipants.findByMeetingIdAndTeamMemberId(100L, 10L))
+                .thenReturn(Optional.of(MeetingParticipant.create(meeting, kickedTeamMember)));
+
+        // when
+        TranscriptSpeakerResponse response = service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        );
+
+        // then
+        assertThat(response.mappedTeamMemberId()).isEqualTo(10L);
+        assertThat(response.customAlias()).isNull();
+        assertThat(speaker.getMappedTeamMember()).isEqualTo(kickedTeamMember);
     }
 
     @Test
@@ -809,83 +823,210 @@ class TranscriptServiceTest {
     }
 
     @Test
-    @DisplayName("존재하지 않는 회의는 발화자 목록을 조회할 수 없다")
-    void getSpeakersFailsWhenMeetingNotFound() {
+    @DisplayName("미매핑 발화자의 매핑 상세는 NONE 상태를 반환한다")
+    void getSpeakerMappingReturnsNoneState() {
         // 테스트 목적:
-        // 회의가 존재하지 않는 경우
-        // 발화자 목록 조회가 MEETING_NOT_FOUND로 실패하는지 검증한다.
+        // segment가 참조하는 발화자에 팀원과 별칭 매핑이 모두 없는 경우
+        // 매핑 상세 응답이 NONE 상태와 speakerLabel 표시 이름을 반환하는지 검증한다.
+
+        // given
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, null);
+        TranscriptSegment segment = segment(901L, 1L, "미매핑 발화");
+        setSpeaker(segment, speaker);
+        when(transcriptSegments.findByIdAndMeetingIdWithSpeaker(901L, 100L)).thenReturn(Optional.of(segment));
+        when(meetingParticipants.findAllByMeetingIdWithTeamMember(100L)).thenReturn(List.of());
+
+        // when
+        TranscriptSpeakerMappingDetailResponse response = service.getSpeakerMapping(1L, 100L, 901L);
+
+        // then
+        assertThat(response.speaker().transcriptSpeakerId()).isEqualTo(50L);
+        assertThat(response.speaker().speakerLabel()).isEqualTo("화자 1");
+        assertThat(response.speaker().displayName()).isEqualTo("화자 1");
+        assertThat(response.speaker().mappingType()).isEqualTo(TranscriptSpeakerMappingType.NONE);
+        assertThat(response.speaker().mappedTeamMemberId()).isNull();
+        assertThat(response.speaker().customAlias()).isNull();
+        assertThat(response.participants()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("팀원 매핑 발화자의 매핑 상세는 TEAM_MEMBER 상태를 반환한다")
+    void getSpeakerMappingReturnsTeamMemberState() {
+        // 테스트 목적:
+        // segment가 참조하는 발화자가 팀원에 매핑된 경우
+        // 매핑 상세 응답이 TEAM_MEMBER 상태와 팀원 nickname을 반환하는지 검증한다.
+
+        // given
+        TeamMember mappedTeamMember = teamMember(10L, "김진혁");
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", mappedTeamMember, null);
+        TranscriptSegment segment = segment(901L, 1L, "팀원 매핑 발화");
+        setSpeaker(segment, speaker);
+        when(transcriptSegments.findByIdAndMeetingIdWithSpeaker(901L, 100L)).thenReturn(Optional.of(segment));
+        when(meetingParticipants.findAllByMeetingIdWithTeamMember(100L)).thenReturn(List.of());
+
+        // when
+        TranscriptSpeakerMappingDetailResponse response = service.getSpeakerMapping(1L, 100L, 901L);
+
+        // then
+        assertThat(response.speaker().displayName()).isEqualTo("김진혁");
+        assertThat(response.speaker().mappingType()).isEqualTo(TranscriptSpeakerMappingType.TEAM_MEMBER);
+        assertThat(response.speaker().mappedTeamMemberId()).isEqualTo(10L);
+        assertThat(response.speaker().customAlias()).isNull();
+    }
+
+    @Test
+    @DisplayName("별칭 매핑 발화자의 매핑 상세는 CUSTOM_ALIAS 상태를 반환한다")
+    void getSpeakerMappingReturnsCustomAliasState() {
+        // 테스트 목적:
+        // segment가 참조하는 발화자가 사용자 지정 별칭에 매핑된 경우
+        // 매핑 상세 응답이 CUSTOM_ALIAS 상태와 customAlias 표시 이름을 반환하는지 검증한다.
+
+        // given
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, "외부");
+        TranscriptSegment segment = segment(901L, 1L, "별칭 매핑 발화");
+        setSpeaker(segment, speaker);
+        when(transcriptSegments.findByIdAndMeetingIdWithSpeaker(901L, 100L)).thenReturn(Optional.of(segment));
+        when(meetingParticipants.findAllByMeetingIdWithTeamMember(100L)).thenReturn(List.of());
+
+        // when
+        TranscriptSpeakerMappingDetailResponse response = service.getSpeakerMapping(1L, 100L, 901L);
+
+        // then
+        assertThat(response.speaker().displayName()).isEqualTo("외부");
+        assertThat(response.speaker().mappingType()).isEqualTo(TranscriptSpeakerMappingType.CUSTOM_ALIAS);
+        assertThat(response.speaker().mappedTeamMemberId()).isNull();
+        assertThat(response.speaker().customAlias()).isEqualTo("외부");
+    }
+
+    @Test
+    @DisplayName("발화자 매핑 상세는 해당 회의 참석자 목록을 반환한다")
+    void getSpeakerMappingReturnsMeetingParticipants() {
+        // 테스트 목적:
+        // 발화자 매핑 상세 조회 시 같은 팀 전체 멤버가 아니라
+        // 해당 회의의 MeetingParticipant 이력에 있는 팀원만 후보로 반환하는지 검증한다.
+
+        // given
+        TeamMember activeParticipant = teamMember(10L, "김진혁");
+        TeamMember leftParticipant = teamMember(11L, "hoon");
+        leftParticipant.leave(NOW);
+        TeamMember kickedParticipant = teamMember(12L, "min");
+        kickedParticipant.kick(NOW);
+        TeamMember nonParticipant = teamMember(13L, "미참석");
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, null);
+        TranscriptSegment segment = segment(901L, 1L, "후보 조회");
+        setSpeaker(segment, speaker);
+        when(transcriptSegments.findByIdAndMeetingIdWithSpeaker(901L, 100L)).thenReturn(Optional.of(segment));
+        when(meetingParticipants.findAllByMeetingIdWithTeamMember(100L)).thenReturn(List.of(
+                participant(101L, activeParticipant, ParticipationStatus.JOINED, null),
+                participant(102L, leftParticipant, ParticipationStatus.JOINED, null),
+                participant(103L, kickedParticipant, ParticipationStatus.JOINED, null)
+        ));
+
+        // when
+        TranscriptSpeakerMappingDetailResponse response = service.getSpeakerMapping(1L, 100L, 901L);
+
+        // then
+        assertThat(response.participants()).extracting("teamMemberId").containsExactly(10L, 11L, 12L);
+        assertThat(response.participants()).extracting("nickname").containsExactly("김진혁", "hoon", "min");
+        assertThat(response.participants()).extracting("teamMemberId").doesNotContain(nonParticipant.getId());
+    }
+
+    @Test
+    @DisplayName("다른 회의의 segment는 매핑 상세를 조회할 수 없다")
+    void getSpeakerMappingFailsWhenSegmentBelongsToOtherMeeting() {
+        // 테스트 목적:
+        // segmentId가 존재하더라도 요청 meetingId에 속하지 않는 경우
+        // TRANSCRIPT_SEGMENT_NOT_FOUND로 거부되는지 검증한다.
+
+        // given
+        when(transcriptSegments.findByIdAndMeetingIdWithSpeaker(901L, 100L)).thenReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> service.getSpeakerMapping(1L, 100L, 901L))
+                .isInstanceOf(TranscriptException.class)
+                .extracting("errorCode")
+                .isEqualTo(TranscriptErrorCode.TRANSCRIPT_SEGMENT_NOT_FOUND);
+
+        verifyNoInteractions(meetingParticipants);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 segment는 매핑 상세를 조회할 수 없다")
+    void getSpeakerMappingFailsWhenSegmentNotFound() {
+        // 테스트 목적:
+        // 요청한 meetingId와 segmentId에 해당하는 전사 세그먼트가 없는 경우
+        // TRANSCRIPT_SEGMENT_NOT_FOUND로 거부되는지 검증한다.
+
+        // given
+        when(transcriptSegments.findByIdAndMeetingIdWithSpeaker(404L, 100L)).thenReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> service.getSpeakerMapping(1L, 100L, 404L))
+                .isInstanceOf(TranscriptException.class)
+                .extracting("errorCode")
+                .isEqualTo(TranscriptErrorCode.TRANSCRIPT_SEGMENT_NOT_FOUND);
+
+        verifyNoInteractions(meetingParticipants);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 회의는 발화자 매핑 상세를 조회할 수 없다")
+    void getSpeakerMappingFailsWhenMeetingNotFound() {
+        // 테스트 목적:
+        // 회의가 존재하지 않거나 삭제된 경우
+        // 발화자 매핑 상세 조회가 MEETING_NOT_FOUND로 실패하는지 검증한다.
 
         // given
         when(meetings.findByIdAndDeletedAtIsNull(404L)).thenReturn(Optional.empty());
 
         // when & then
-        assertThatThrownBy(() -> service.getSpeakers(1L, 404L))
+        assertThatThrownBy(() -> service.getSpeakerMapping(1L, 404L, 901L))
                 .isInstanceOf(MeetingException.class)
                 .extracting("errorCode")
                 .isEqualTo(MeetingErrorCode.MEETING_NOT_FOUND);
 
         verifyNoInteractions(meetingService);
-        verify(transcriptSpeakers, never()).findAllByMeetingIdOrderById(any());
+        verify(transcriptSegments, never()).findByIdAndMeetingIdWithSpeaker(any(), any());
     }
 
     @Test
-    @DisplayName("삭제된 회의는 발화자 목록을 조회할 수 없다")
-    void getSpeakersFailsWhenMeetingDeleted() {
-        // 테스트 목적:
-        // 삭제된 회의가 repository의 deletedAt 조건으로 제외되는 경우
-        // 발화자 목록 조회가 MEETING_NOT_FOUND로 실패하는지 검증한다.
-
-        // given
-        when(meetings.findByIdAndDeletedAtIsNull(405L)).thenReturn(Optional.empty());
-
-        // when & then
-        assertThatThrownBy(() -> service.getSpeakers(1L, 405L))
-                .isInstanceOf(MeetingException.class)
-                .extracting("errorCode")
-                .isEqualTo(MeetingErrorCode.MEETING_NOT_FOUND);
-
-        verifyNoInteractions(meetingService);
-        verify(transcriptSpeakers, never()).findAllByMeetingIdOrderById(any());
-    }
-
-    @Test
-    @DisplayName("다른 팀 사용자는 발화자 목록을 조회할 수 없다")
-    void getSpeakersFailsWhenUserCannotAccessMeetingTeam() {
+    @DisplayName("접근 권한이 없는 사용자는 발화자 매핑 상세를 조회할 수 없다")
+    void getSpeakerMappingFailsWhenUserCannotAccessMeetingTeam() {
         // 테스트 목적:
         // 사용자가 회의가 속한 팀의 ACTIVE 멤버가 아닌 경우
-        // 발화자 목록 조회가 MEETING_ACCESS_DENIED로 실패하는지 검증한다.
+        // 발화자 매핑 상세 조회가 MEETING_ACCESS_DENIED로 실패하는지 검증한다.
 
         // given
         org.mockito.Mockito.doThrow(new MeetingException(MeetingErrorCode.MEETING_ACCESS_DENIED))
                 .when(meetingService).validateMeetingAccess(99L, 2L);
 
         // when & then
-        assertThatThrownBy(() -> service.getSpeakers(99L, 100L))
+        assertThatThrownBy(() -> service.getSpeakerMapping(99L, 100L, 901L))
                 .isInstanceOf(MeetingException.class)
                 .extracting("errorCode")
                 .isEqualTo(MeetingErrorCode.MEETING_ACCESS_DENIED);
 
-        verify(transcriptSpeakers, never()).findAllByMeetingIdOrderById(any());
+        verify(transcriptSegments, never()).findByIdAndMeetingIdWithSpeaker(any(), any());
     }
 
     @Test
-    @DisplayName("ACTIVE 멤버가 아닌 사용자는 발화자 목록을 조회할 수 없다")
-    void getSpeakersFailsWhenUserIsNotActiveTeamMember() {
+    @DisplayName("발화자가 없는 segment는 매핑 상세를 조회할 수 없다")
+    void getSpeakerMappingFailsWhenSegmentHasNoSpeaker() {
         // 테스트 목적:
-        // 사용자가 회의 팀의 ACTIVE 멤버가 아닌 경우
-        // 발화자 목록 조회가 기존 전사 조회와 동일하게 거부되는지 검증한다.
+        // segment는 존재하지만 연결된 TranscriptSpeaker가 없는 경우
+        // 매핑할 발화자가 없으므로 TRANSCRIPT_SPEAKER_NOT_FOUND로 실패하는지 검증한다.
 
         // given
-        org.mockito.Mockito.doThrow(new MeetingException(MeetingErrorCode.MEETING_ACCESS_DENIED))
-                .when(meetingService).validateMeetingAccess(1L, 2L);
+        TranscriptSegment segment = segment(901L, 1L, "발화자 없음");
+        when(transcriptSegments.findByIdAndMeetingIdWithSpeaker(901L, 100L)).thenReturn(Optional.of(segment));
 
         // when & then
-        assertThatThrownBy(() -> service.getSpeakers(1L, 100L))
-                .isInstanceOf(MeetingException.class)
+        assertThatThrownBy(() -> service.getSpeakerMapping(1L, 100L, 901L))
+                .isInstanceOf(TranscriptException.class)
                 .extracting("errorCode")
-                .isEqualTo(MeetingErrorCode.MEETING_ACCESS_DENIED);
+                .isEqualTo(TranscriptErrorCode.TRANSCRIPT_SPEAKER_NOT_FOUND);
 
-        verify(transcriptSpeakers, never()).findAllByMeetingIdOrderById(any());
+        verifyNoInteractions(meetingParticipants);
     }
 
     @Test
@@ -1102,9 +1243,9 @@ class TranscriptServiceTest {
 
         // when & then
         assertThatThrownBy(() -> service.getTranscripts(1L, 100L, keyword))
-                .isInstanceOf(BusinessException.class)
+                .isInstanceOf(TranscriptException.class)
                 .extracting("errorCode")
-                .isEqualTo(CommonErrorCode.INVALID_INPUT_VALUE);
+                .isEqualTo(TranscriptErrorCode.INVALID_TRANSCRIPT_KEYWORD);
 
         verifyNoInteractions(meetingService);
         verify(transcriptSegments, never()).searchByMeetingIdAndContent(any(), anyString());
@@ -1122,9 +1263,9 @@ class TranscriptServiceTest {
 
         // when & then
         assertThatThrownBy(() -> service.getTranscripts(1L, 100L, keyword))
-                .isInstanceOf(BusinessException.class)
+                .isInstanceOf(TranscriptException.class)
                 .extracting("errorCode")
-                .isEqualTo(CommonErrorCode.INVALID_INPUT_VALUE);
+                .isEqualTo(TranscriptErrorCode.INVALID_TRANSCRIPT_KEYWORD);
 
         verifyNoInteractions(meetingService);
         verify(transcriptSegments, never()).searchByMeetingIdAndContent(any(), anyString());
@@ -1151,6 +1292,10 @@ class TranscriptServiceTest {
         ), id);
     }
 
+    private void setSpeaker(TranscriptSegment segment, TranscriptSpeaker speaker) {
+        ReflectionTestUtils.setField(segment, "transcriptSpeaker", speaker);
+    }
+
     private TranscriptSpeaker speaker(Long id, String speakerLabel, TeamMember mappedTeamMember, String customAlias) {
         TranscriptSpeaker speaker = BeanUtils.instantiateClass(TranscriptSpeaker.class);
         ReflectionTestUtils.setField(speaker, "id", id);
@@ -1159,5 +1304,22 @@ class TranscriptServiceTest {
         ReflectionTestUtils.setField(speaker, "speakerLabel", speakerLabel);
         ReflectionTestUtils.setField(speaker, "customAlias", customAlias);
         return speaker;
+    }
+
+    private TeamMember teamMember(Long id, String displayName) {
+        return withId(TeamMember.createMember(withId(User.create(), id), meeting.getTeam(), displayName), id);
+    }
+
+    private MeetingParticipant participant(
+            Long id,
+            TeamMember teamMember,
+            ParticipationStatus participationStatus,
+            LocalDateTime deletedAt
+    ) {
+        MeetingParticipant participant = MeetingParticipant.create(meeting, teamMember);
+        ReflectionTestUtils.setField(participant, "id", id);
+        ReflectionTestUtils.setField(participant, "participationStatus", participationStatus);
+        ReflectionTestUtils.setField(participant, "deletedAt", deletedAt);
+        return participant;
     }
 }

@@ -26,4 +26,13 @@ public interface MeetingParticipantRepository extends JpaRepository<MeetingParti
             order by p.createdAt asc, p.id asc
             """)
     List<MeetingParticipant> findCurrentParticipantsByMeetingId(@Param("meetingId") Long meetingId);
+
+    @Query("""
+            select p
+            from MeetingParticipant p
+            join fetch p.teamMember
+            where p.meeting.id = :meetingId
+            order by p.createdAt asc, p.id asc
+            """)
+    List<MeetingParticipant> findAllByMeetingIdWithTeamMember(@Param("meetingId") Long meetingId);
 }

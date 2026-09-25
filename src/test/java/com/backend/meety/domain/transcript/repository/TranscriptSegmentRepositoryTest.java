@@ -28,8 +28,34 @@ class TranscriptSegmentRepositoryTest {
         assertThat(jpql).contains("s.meeting.id = :meetingId");
         assertThat(jpql).contains("s.deletedAt is null");
         assertThat(jpql).contains("order by s.sequenceNumber asc, s.id asc");
+        assertThat(jpql).contains("left join fetch s.transcriptSpeaker speaker");
+        assertThat(jpql).contains("left join fetch speaker.mappedTeamMember");
         assertThat(jpql).doesNotContain("lower(");
         assertThat(jpql).doesNotContain("like");
+    }
+
+    @Test
+    @DisplayName("segment 기반 발화자 매핑 조회 쿼리는 발화자와 매핑 팀원을 fetch join한다")
+    void findByIdAndMeetingIdWithSpeakerFetchesSpeakerAndMappedTeamMember() throws NoSuchMethodException {
+        // 테스트 목적:
+        // segment 기반 발화자 매핑 상세 조회에서 발화자와 매핑 팀원 접근 시
+        // 추가 쿼리가 반복되지 않도록 fetch join을 사용하는지 검증한다.
+
+        // given
+        Query query = TranscriptSegmentRepository.class
+                .getMethod("findByIdAndMeetingIdWithSpeaker", Long.class, Long.class)
+                .getAnnotation(Query.class);
+
+        // when
+        String jpql = query.value();
+
+        // then
+        assertThat(query).isNotNull();
+        assertThat(jpql).contains("s.id = :segmentId");
+        assertThat(jpql).contains("s.meeting.id = :meetingId");
+        assertThat(jpql).contains("s.deletedAt is null");
+        assertThat(jpql).contains("left join fetch s.transcriptSpeaker speaker");
+        assertThat(jpql).contains("left join fetch speaker.mappedTeamMember");
     }
 
     @Test
