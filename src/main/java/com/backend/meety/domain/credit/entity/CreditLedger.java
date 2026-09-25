@@ -13,6 +13,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.util.Objects;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -20,7 +21,10 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "credit_ledgers")
+@Table(name = "credit_ledgers",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_credit_ledgers_idempotency_key",
+                columnNames = "idempotency_key"))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class CreditLedger extends BaseEntity {
 
@@ -32,7 +36,7 @@ public class CreditLedger extends BaseEntity {
     @JoinColumn(name = "team_id", nullable = false)
     private Team team;
 
-    @Column(name = "idempotency_key", nullable = false, unique = true, length = 100)
+    @Column(name = "idempotency_key", nullable = false, length = 100)
     private String idempotencyKey;
 
     @Column(name = "source_id")
@@ -75,13 +79,22 @@ public class CreditLedger extends BaseEntity {
     private static CreditLedger create(Team team, CreditTransactionType type, CreditSourceType sourceType,
             Long sourceId, long amount, long balanceAfter) {
         Objects.requireNonNull(sourceId, "원본 식별자 없이는 멱등키를 유도할 수 없습니다.");
-        return create(team, type + ":" + sourceType + ":" + sourceId,
+        return create(team, keyOf(type, sourceType, sourceId),
                 type, sourceType, sourceId, amount, balanceAfter);
     }
 
     public static CreditLedger earnForTeamCreate(Team team, long amount, long balanceAfter) {
         return create(team, CreditTransactionType.EARN, CreditSourceType.TEAM_CREATE,
                 team.getId(), amount, balanceAfter);
+    }
+
+    public static String keyOf(CreditTransactionType type, CreditSourceType sourceType, Long sourceId) {
+        return type + ":" + sourceType + ":" + sourceId;
+    }
+
+    public static CreditLedger restoreForSummary(Team team, Long aiRequestId, long amount, long balanceAfter) {
+        return create(team, CreditTransactionType.RESTORE, CreditSourceType.AI_SUMMARY,
+                aiRequestId, amount, balanceAfter);
     }
 
     public static CreditLedger useForSummary(Team team, Long aiRequestId, long amount, long balanceAfter) {
