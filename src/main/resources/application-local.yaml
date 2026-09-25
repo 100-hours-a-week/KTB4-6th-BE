@@ -30,6 +30,7 @@ cors:
 
 ai:
   websocket-url: ${AI_WEBSOCKET_URL:ws://localhost:8000/v1/live-meeting}
+  http-url: ${AI_HTTP_URL:http://localhost:8001}
 
 aws:
   s3:

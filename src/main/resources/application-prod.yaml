@@ -30,3 +30,4 @@ cors:
 
 ai:
   websocket-url: ${AI_WEBSOCKET_URL}
+  http-url: ${AI_HTTP_URL:https://analysis.meety.io.kr}

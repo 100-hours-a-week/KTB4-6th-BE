@@ -35,6 +35,7 @@ jwt:
 
 ai:
   websocket-url: ${AI_WEBSOCKET_URL}
+  http-url: ${AI_HTTP_URL}
 
 aws:
   s3:
