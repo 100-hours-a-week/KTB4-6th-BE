@@ -6,9 +6,7 @@ import java.time.LocalDateTime;
 
 public record TranscriptSegmentResponse(
         Long segmentId,
-        Long speakerId,
-        String speakerLabel,
-        String speakerAlias,
+        String speakerDisplayName,
         Long sequenceNumber,
         String content,
         Long startedAtMs,
@@ -20,14 +18,25 @@ public record TranscriptSegmentResponse(
         TranscriptSpeaker speaker = segment.getTranscriptSpeaker();
         return new TranscriptSegmentResponse(
                 segment.getId(),
-                speaker == null ? null : speaker.getId(),
-                speaker == null ? null : speaker.getSpeakerLabel(),
-                speaker == null ? null : speaker.getCustomAlias(),
+                resolveSpeakerDisplayName(speaker),
                 segment.getSequenceNumber(),
                 segment.getContent(),
                 segment.getStartedAtMs(),
                 segment.getEndedAtMs(),
                 segment.getRecognizedAt()
         );
+    }
+
+    private static String resolveSpeakerDisplayName(TranscriptSpeaker speaker) {
+        if (speaker == null) {
+            return null;
+        }
+        if (speaker.getCustomAlias() != null) {
+            return speaker.getCustomAlias();
+        }
+        if (speaker.getMappedTeamMember() != null) {
+            return speaker.getMappedTeamMember().getDisplayName();
+        }
+        return speaker.getSpeakerLabel();
     }
 }
