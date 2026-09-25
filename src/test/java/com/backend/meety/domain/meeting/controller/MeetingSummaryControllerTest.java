@@ -1,8 +1,10 @@
 package com.backend.meety.domain.meeting.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -18,10 +20,12 @@ import com.backend.meety.domain.meeting.service.MeetingSummaryService;
 import com.backend.meety.global.exception.GlobalExceptionHandler;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
@@ -102,12 +106,17 @@ class MeetingSummaryControllerTest {
     }
 
     @Test
-    @DisplayName("Idempotency-Key 헤더가 없으면 400이다")
-    void missingIdempotencyKeyIsRejected() throws Exception {
-        mvc.perform(post("/api/v1/meetings/100/summaries"))
-                .andExpect(status().isBadRequest());
+    @DisplayName("Idempotency-Key 헤더가 없으면 서버가 UUID를 만들어 채운다")
+    void missingIdempotencyKeyIsGenerated() throws Exception {
+        when(service.requestSummary(eq(1L), eq(100L), anyString())).thenReturn(
+                new SummaryCreateResponse(502L, 2L, AiRequestStatus.ACCEPTED, 266L));
 
-        verifyNoInteractions(service);
+        mvc.perform(post("/api/v1/meetings/100/summaries"))
+                .andExpect(status().isAccepted());
+
+        ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+        verify(service).requestSummary(eq(1L), eq(100L), captor.capture());
+        assertThat(UUID.fromString(captor.getValue())).isNotNull();
     }
 
     @Test
