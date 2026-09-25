@@ -4,9 +4,9 @@ import com.backend.meety.domain.ai.realtime.AiTranscriptSegmentMessage;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
+import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.meeting.service.MeetingService;
-import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.exception.TeamErrorCode;
 import com.backend.meety.domain.team.exception.TeamException;
@@ -45,6 +45,7 @@ public class TranscriptService {
     private final TranscriptSegmentRepository transcriptSegmentRepository;
     private final TranscriptSpeakerRepository transcriptSpeakerRepository;
     private final MeetingRepository meetingRepository;
+    private final MeetingParticipantRepository meetingParticipantRepository;
     private final MeetingService meetingService;
     private final TeamMemberRepository teamMemberRepository;
     private final Clock clock;
@@ -155,7 +156,7 @@ public class TranscriptService {
         if (request.teamMemberId() != null) {
             TeamMember teamMember = teamMemberRepository.findById(request.teamMemberId())
                     .orElseThrow(() -> new TeamException(TeamErrorCode.TEAM_MEMBER_NOT_FOUND));
-            validateTeamMemberForMeetingTeam(teamMember, teamId);
+            validateTeamMemberParticipatedInMeeting(meetingId, teamMember);
             speaker.mapToTeamMember(teamMember);
             return TranscriptSpeakerResponse.from(speaker);
         }
@@ -169,12 +170,9 @@ public class TranscriptService {
         return TranscriptSpeakerResponse.from(speaker);
     }
 
-    private void validateTeamMemberForMeetingTeam(TeamMember teamMember, Long teamId) {
-        if (!teamMember.getTeam().getId().equals(teamId)) {
-            throw new TranscriptException(TranscriptErrorCode.TEAM_MEMBER_NOT_IN_MEETING_TEAM);
-        }
-        if (teamMember.getMembershipStatus() != MembershipStatus.ACTIVE || teamMember.getDeletedAt() != null) {
-            throw new TranscriptException(TranscriptErrorCode.TEAM_MEMBER_NOT_IN_MEETING_TEAM);
+    private void validateTeamMemberParticipatedInMeeting(Long meetingId, TeamMember teamMember) {
+        if (meetingParticipantRepository.findByMeetingIdAndTeamMemberId(meetingId, teamMember.getId()).isEmpty()) {
+            throw new TranscriptException(TranscriptErrorCode.TEAM_MEMBER_NOT_MEETING_PARTICIPANT);
         }
     }
 
