@@ -12,6 +12,7 @@ import com.backend.meety.domain.credit.exception.CreditException;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import com.backend.meety.domain.meeting.dto.SummaryCreateResponse;
+import com.backend.meety.domain.meeting.dto.SummaryDetailResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import com.backend.meety.domain.meeting.entity.MeetingSummary;
@@ -69,6 +70,15 @@ public class MeetingSummaryService {
         useCredit(credit, meeting.getTeam(), aiRequest.getId());
         MeetingSummary summary = createNextVersion(aiRequest, meeting);
         return SummaryCreateResponse.of(summary, credit.getBalance());
+    }
+
+    @Transactional(readOnly = true)
+    public SummaryDetailResponse getLatestSummary(Long userId, Long meetingId) {
+        Meeting meeting = findMeeting(meetingId);
+        findActiveMember(userId, meeting);
+        MeetingSummary summary = meetingSummaryRepository.findLatestByMeetingId(meetingId)
+                .orElseThrow(() -> new SummaryException(SummaryErrorCode.SUMMARY_NOT_FOUND));
+        return SummaryDetailResponse.from(summary);
     }
 
     private Meeting findMeeting(Long meetingId) {

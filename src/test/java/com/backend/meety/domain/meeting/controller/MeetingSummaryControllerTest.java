@@ -4,16 +4,19 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.meeting.dto.SummaryCreateResponse;
+import com.backend.meety.domain.meeting.dto.SummaryDetailResponse;
 import com.backend.meety.domain.meeting.exception.SummaryErrorCode;
 import com.backend.meety.domain.meeting.exception.SummaryException;
 import com.backend.meety.domain.meeting.service.MeetingSummaryService;
 import com.backend.meety.global.exception.GlobalExceptionHandler;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,6 +71,34 @@ class MeetingSummaryControllerTest {
                 .andExpect(jsonPath("$.data.creditBalance").value(266));
 
         verify(service).requestSummary(1L, 100L, IDEMPOTENCY_KEY);
+    }
+
+    @Test
+    @DisplayName("요약 조회는 200과 최신 회차를 반환한다")
+    void getLatestSummaryReturnsOk() throws Exception {
+        when(service.getLatestSummary(1L, 100L)).thenReturn(new SummaryDetailResponse(
+                501L, "## 회의 요약", 1L, AiRequestStatus.COMPLETED, null,
+                LocalDateTime.of(2026, 8, 25, 13, 5, 22)));
+
+        mvc.perform(get("/api/v1/meetings/100/summaries"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.summaryId").value(501))
+                .andExpect(jsonPath("$.data.content").value("## 회의 요약"))
+                .andExpect(jsonPath("$.data.version").value(1))
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.createdAt").exists());
+    }
+
+    @Test
+    @DisplayName("요약이 없으면 404를 반환한다")
+    void noSummaryReturnsNotFound() throws Exception {
+        when(service.getLatestSummary(1L, 100L))
+                .thenThrow(new SummaryException(SummaryErrorCode.SUMMARY_NOT_FOUND));
+
+        mvc.perform(get("/api/v1/meetings/100/summaries"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("SUMMARY_NOT_FOUND"));
     }
 
     @Test
