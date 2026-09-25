@@ -4,14 +4,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerMappingRequest;
 import com.backend.meety.domain.transcript.dto.TranscriptSegmentResponse;
 import com.backend.meety.domain.transcript.dto.TranscriptSpeakerListResponse;
 import com.backend.meety.domain.transcript.dto.TranscriptSpeakerResponse;
+import com.backend.meety.domain.transcript.exception.TranscriptErrorCode;
+import com.backend.meety.domain.transcript.exception.TranscriptException;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import com.backend.meety.global.exception.GlobalExceptionHandler;
 import java.time.LocalDateTime;
@@ -20,6 +24,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
@@ -243,5 +248,169 @@ class TranscriptControllerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").doesNotExist())
                 .andExpect(jsonPath("$.error.code").value("MEETING_ACCESS_DENIED"));
+    }
+
+    @Test
+    @DisplayName("발화자 매핑 API는 path variable과 인증 사용자, request body를 서비스로 전달한다")
+    void updateSpeakerMappingPassesPathVariablesAuthenticatedUserAndRequestBody() throws Exception {
+        // 테스트 목적:
+        // 발화자 매핑 수정 요청이 들어오면 Controller가 meetingId, transcriptSpeakerId,
+        // 인증 사용자 ID와 요청 본문을 Service에 전달하는지 검증한다.
+
+        // given
+        when(transcriptService.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        )).thenReturn(new TranscriptSpeakerResponse(50L, "화자 1", 10L, null));
+
+        // when & then
+        mvc.perform(put("/api/v1/meetings/100/speakers/50/mapping")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "teamMemberId": 10,
+                                  "customAlias": null
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.transcriptSpeakerId").value(50L))
+                .andExpect(jsonPath("$.data.speakerLabel").value("화자 1"))
+                .andExpect(jsonPath("$.data.mappedTeamMemberId").value(10L))
+                .andExpect(jsonPath("$.data.customAlias").doesNotExist())
+                .andExpect(jsonPath("$.error").doesNotExist());
+
+        verify(transcriptService).updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        );
+    }
+
+    @Test
+    @DisplayName("발화자 매핑 API는 별칭 연결 결과를 공통 성공 응답으로 반환한다")
+    void updateSpeakerMappingReturnsAliasMappingResponse() throws Exception {
+        // 테스트 목적:
+        // customAlias 매핑 요청이 성공하면
+        // 매핑된 별칭 정보가 공통 응답 형식으로 반환되는지 검증한다.
+
+        // given
+        when(transcriptService.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(null, "외부참석자")
+        )).thenReturn(new TranscriptSpeakerResponse(50L, "화자 1", null, "외부참석자"));
+
+        // when & then
+        mvc.perform(put("/api/v1/meetings/100/speakers/50/mapping")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "teamMemberId": null,
+                                  "customAlias": "외부참석자"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.transcriptSpeakerId").value(50L))
+                .andExpect(jsonPath("$.data.mappedTeamMemberId").doesNotExist())
+                .andExpect(jsonPath("$.data.customAlias").value("외부참석자"))
+                .andExpect(jsonPath("$.error").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("발화자 매핑 API는 연결 해제 결과를 공통 성공 응답으로 반환한다")
+    void updateSpeakerMappingReturnsClearMappingResponse() throws Exception {
+        // 테스트 목적:
+        // teamMemberId와 customAlias가 모두 null인 연결 해제 요청이 성공하면
+        // 미연결 상태가 공통 응답 형식으로 반환되는지 검증한다.
+
+        // given
+        when(transcriptService.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(null, null)
+        )).thenReturn(new TranscriptSpeakerResponse(50L, "화자 1", null, null));
+
+        // when & then
+        mvc.perform(put("/api/v1/meetings/100/speakers/50/mapping")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "teamMemberId": null,
+                                  "customAlias": null
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.transcriptSpeakerId").value(50L))
+                .andExpect(jsonPath("$.data.mappedTeamMemberId").doesNotExist())
+                .andExpect(jsonPath("$.data.customAlias").doesNotExist())
+                .andExpect(jsonPath("$.error").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("잘못된 발화자 매핑 요청은 400을 반환한다")
+    void updateSpeakerMappingReturnsInvalidSpeakerMapping() throws Exception {
+        // 테스트 목적:
+        // teamMemberId와 customAlias가 동시에 입력된 경우
+        // 발화자 매핑 요청이 INVALID_SPEAKER_MAPPING으로 거부되는지 검증한다.
+
+        // given
+        when(transcriptService.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, "외부참석자")
+        )).thenThrow(new TranscriptException(TranscriptErrorCode.INVALID_SPEAKER_MAPPING));
+
+        // when & then
+        mvc.perform(put("/api/v1/meetings/100/speakers/50/mapping")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "teamMemberId": 10,
+                                  "customAlias": "외부참석자"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(jsonPath("$.error.code").value("INVALID_SPEAKER_MAPPING"));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 발화자 매핑 수정은 404를 반환한다")
+    void updateSpeakerMappingReturnsTranscriptSpeakerNotFound() throws Exception {
+        // 테스트 목적:
+        // 요청 회의의 발화자를 찾을 수 없는 경우
+        // 발화자 매핑 요청이 TRANSCRIPT_SPEAKER_NOT_FOUND로 거부되는지 검증한다.
+
+        // given
+        when(transcriptService.updateSpeakerMapping(
+                1L,
+                100L,
+                404L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        )).thenThrow(new TranscriptException(TranscriptErrorCode.TRANSCRIPT_SPEAKER_NOT_FOUND));
+
+        // when & then
+        mvc.perform(put("/api/v1/meetings/100/speakers/404/mapping")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "teamMemberId": 10,
+                                  "customAlias": null
+                                }
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(jsonPath("$.error.code").value("TRANSCRIPT_SPEAKER_NOT_FOUND"));
     }
 }

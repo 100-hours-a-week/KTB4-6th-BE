@@ -25,11 +25,18 @@ import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.meeting.service.MeetingService;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.exception.TeamErrorCode;
+import com.backend.meety.domain.team.exception.TeamException;
+import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.transcript.dto.TranscriptSegmentResponse;
 import com.backend.meety.domain.transcript.dto.TranscriptSpeakerListResponse;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerMappingRequest;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerResponse;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
 import com.backend.meety.domain.transcript.entity.TranscriptSpeaker;
 import com.backend.meety.domain.transcript.event.TranscriptCreatedEvent;
+import com.backend.meety.domain.transcript.exception.TranscriptErrorCode;
+import com.backend.meety.domain.transcript.exception.TranscriptException;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
 import com.backend.meety.domain.transcript.repository.TranscriptSpeakerRepository;
 import com.backend.meety.global.exception.BusinessException;
@@ -52,12 +59,14 @@ class TranscriptServiceTest {
     private final TranscriptSpeakerRepository transcriptSpeakers = mock(TranscriptSpeakerRepository.class);
     private final MeetingRepository meetings = mock(MeetingRepository.class);
     private final MeetingService meetingService = mock(MeetingService.class);
+    private final TeamMemberRepository teamMembers = mock(TeamMemberRepository.class);
     private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
     private final TranscriptService service = new TranscriptService(
             transcriptSegments,
             transcriptSpeakers,
             meetings,
             meetingService,
+            teamMembers,
             CLOCK,
             eventPublisher
     );
@@ -489,6 +498,219 @@ class TranscriptServiceTest {
     }
 
     @Test
+    @DisplayName("발화자를 팀원과 연결한다")
+    void updateSpeakerMappingMapsSpeakerToTeamMember() {
+        // 테스트 목적:
+        // teamMemberId만 입력한 경우 발화자의 기존 별칭을 제거하고
+        // 회의 팀의 ACTIVE 팀원으로 연결되는지 검증한다.
+
+        // given
+        TeamMember teamMember = member(meeting.getTeam());
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, "외부");
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+        when(teamMembers.findById(10L)).thenReturn(Optional.of(teamMember));
+
+        // when
+        TranscriptSpeakerResponse response = service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        );
+
+        // then
+        assertThat(response.transcriptSpeakerId()).isEqualTo(50L);
+        assertThat(response.mappedTeamMemberId()).isEqualTo(10L);
+        assertThat(response.customAlias()).isNull();
+        assertThat(speaker.getMappedTeamMember()).isEqualTo(teamMember);
+        assertThat(speaker.getCustomAlias()).isNull();
+        verify(meetingService).validateMeetingAccess(1L, 2L);
+    }
+
+    @Test
+    @DisplayName("발화자를 customAlias와 연결한다")
+    void updateSpeakerMappingMapsSpeakerToCustomAlias() {
+        // 테스트 목적:
+        // customAlias만 입력한 경우 발화자의 기존 팀원 연결을 제거하고
+        // trim된 별칭으로 연결되는지 검증한다.
+
+        // given
+        TeamMember teamMember = member(meeting.getTeam());
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", teamMember, null);
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+
+        // when
+        TranscriptSpeakerResponse response = service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(null, "  외부참석자  ")
+        );
+
+        // then
+        assertThat(response.mappedTeamMemberId()).isNull();
+        assertThat(response.customAlias()).isEqualTo("외부참석자");
+        assertThat(speaker.getMappedTeamMember()).isNull();
+        assertThat(speaker.getCustomAlias()).isEqualTo("외부참석자");
+    }
+
+    @Test
+    @DisplayName("팀원 연결 상태에서 alias 연결로 변경한다")
+    void updateSpeakerMappingChangesTeamMemberMappingToAlias() {
+        // 테스트 목적:
+        // 기존에 팀원과 연결된 발화자에 alias 매핑을 요청하면
+        // 팀원 연결이 제거되고 별칭만 남는지 검증한다.
+
+        // given
+        TeamMember teamMember = member(meeting.getTeam());
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", teamMember, null);
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+
+        // when
+        TranscriptSpeakerResponse response = service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(null, "게스트")
+        );
+
+        // then
+        assertThat(response.mappedTeamMemberId()).isNull();
+        assertThat(response.customAlias()).isEqualTo("게스트");
+        assertThat(speaker.getMappedTeamMember()).isNull();
+        assertThat(speaker.getCustomAlias()).isEqualTo("게스트");
+    }
+
+    @Test
+    @DisplayName("alias 연결 상태에서 팀원 연결로 변경한다")
+    void updateSpeakerMappingChangesAliasMappingToTeamMember() {
+        // 테스트 목적:
+        // 기존에 별칭과 연결된 발화자에 teamMemberId 매핑을 요청하면
+        // 별칭이 제거되고 팀원 연결만 남는지 검증한다.
+
+        // given
+        TeamMember teamMember = member(meeting.getTeam());
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, "게스트");
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+        when(teamMembers.findById(10L)).thenReturn(Optional.of(teamMember));
+
+        // when
+        TranscriptSpeakerResponse response = service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        );
+
+        // then
+        assertThat(response.mappedTeamMemberId()).isEqualTo(10L);
+        assertThat(response.customAlias()).isNull();
+        assertThat(speaker.getMappedTeamMember()).isEqualTo(teamMember);
+        assertThat(speaker.getCustomAlias()).isNull();
+    }
+
+    @Test
+    @DisplayName("기존 연결을 해제한다")
+    void updateSpeakerMappingClearsExistingMapping() {
+        // 테스트 목적:
+        // teamMemberId와 customAlias가 모두 null이면
+        // 기존 발화자 매핑이 해제되는지 검증한다.
+
+        // given
+        TeamMember teamMember = member(meeting.getTeam());
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", teamMember, null);
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+
+        // when
+        TranscriptSpeakerResponse response = service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(null, null)
+        );
+
+        // then
+        assertThat(response.mappedTeamMemberId()).isNull();
+        assertThat(response.customAlias()).isNull();
+        assertThat(speaker.getMappedTeamMember()).isNull();
+        assertThat(speaker.getCustomAlias()).isNull();
+    }
+
+    @Test
+    @DisplayName("이미 미연결 상태에서 연결 해제 요청은 멱등적으로 처리한다")
+    void updateSpeakerMappingClearIsIdempotentWhenAlreadyUnmapped() {
+        // 테스트 목적:
+        // 이미 팀원과 별칭이 모두 없는 발화자에 연결 해제를 요청해도
+        // 오류 없이 동일한 미연결 상태를 유지하는지 검증한다.
+
+        // given
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, null);
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+
+        // when
+        TranscriptSpeakerResponse response = service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(null, null)
+        );
+
+        // then
+        assertThat(response.mappedTeamMemberId()).isNull();
+        assertThat(response.customAlias()).isNull();
+        assertThat(speaker.getMappedTeamMember()).isNull();
+        assertThat(speaker.getCustomAlias()).isNull();
+    }
+
+    @Test
+    @DisplayName("teamMemberId와 customAlias가 모두 있으면 발화자 매핑을 거부한다")
+    void updateSpeakerMappingRejectsTeamMemberAndAliasTogether() {
+        // 테스트 목적:
+        // 팀원 연결과 별칭 연결이 동시에 요청된 경우
+        // 모호한 매핑 요청으로 보고 INVALID_SPEAKER_MAPPING으로 거부하는지 검증한다.
+
+        // given
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, null);
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+
+        // when & then
+        assertThatThrownBy(() -> service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, "외부참석자")
+        ))
+                .isInstanceOf(TranscriptException.class)
+                .extracting("errorCode")
+                .isEqualTo(TranscriptErrorCode.INVALID_SPEAKER_MAPPING);
+
+        verifyNoInteractions(teamMembers);
+    }
+
+    @Test
+    @DisplayName("공백만 있는 customAlias는 발화자 매핑을 거부한다")
+    void updateSpeakerMappingRejectsBlankAlias() {
+        // 테스트 목적:
+        // customAlias가 공백만 포함하는 경우
+        // 유효한 별칭으로 저장하지 않고 INVALID_SPEAKER_MAPPING으로 거부하는지 검증한다.
+
+        // given
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, null);
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+
+        // when & then
+        assertThatThrownBy(() -> service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(null, "   ")
+        ))
+                .isInstanceOf(TranscriptException.class)
+                .extracting("errorCode")
+                .isEqualTo(TranscriptErrorCode.INVALID_SPEAKER_MAPPING);
+    }
+
+    @Test
     @DisplayName("존재하지 않거나 삭제된 회의는 전사를 조회할 수 없다")
     void getTranscriptsFailsWhenMeetingNotFoundOrDeleted() {
         // 테스트 목적:
@@ -626,6 +848,205 @@ class TranscriptServiceTest {
                 .isEqualTo(MeetingErrorCode.MEETING_ACCESS_DENIED);
 
         verify(transcriptSpeakers, never()).findAllByMeetingIdOrderById(any());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 회의는 발화자 매핑을 수정할 수 없다")
+    void updateSpeakerMappingFailsWhenMeetingNotFound() {
+        // 테스트 목적:
+        // 회의가 존재하지 않는 경우
+        // 발화자 매핑 수정이 MEETING_NOT_FOUND로 실패하는지 검증한다.
+
+        // given
+        when(meetings.findByIdAndDeletedAtIsNull(404L)).thenReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> service.updateSpeakerMapping(
+                1L,
+                404L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        ))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_NOT_FOUND);
+
+        verifyNoInteractions(meetingService);
+        verify(transcriptSpeakers, never()).findByIdAndMeetingIdAndDeletedAtIsNull(any(), any());
+    }
+
+    @Test
+    @DisplayName("삭제된 회의는 발화자 매핑을 수정할 수 없다")
+    void updateSpeakerMappingFailsWhenMeetingDeleted() {
+        // 테스트 목적:
+        // 삭제된 회의가 repository의 deletedAt 조건으로 제외되는 경우
+        // 발화자 매핑 수정이 MEETING_NOT_FOUND로 실패하는지 검증한다.
+
+        // given
+        when(meetings.findByIdAndDeletedAtIsNull(405L)).thenReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> service.updateSpeakerMapping(
+                1L,
+                405L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        ))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_NOT_FOUND);
+
+        verifyNoInteractions(meetingService);
+        verify(transcriptSpeakers, never()).findByIdAndMeetingIdAndDeletedAtIsNull(any(), any());
+    }
+
+    @Test
+    @DisplayName("접근 권한이 없는 사용자는 발화자 매핑을 수정할 수 없다")
+    void updateSpeakerMappingFailsWhenUserCannotAccessMeetingTeam() {
+        // 테스트 목적:
+        // 사용자가 회의가 속한 팀의 ACTIVE 멤버가 아닌 경우
+        // 발화자 매핑 수정이 MEETING_ACCESS_DENIED로 실패하는지 검증한다.
+
+        // given
+        org.mockito.Mockito.doThrow(new MeetingException(MeetingErrorCode.MEETING_ACCESS_DENIED))
+                .when(meetingService).validateMeetingAccess(99L, 2L);
+
+        // when & then
+        assertThatThrownBy(() -> service.updateSpeakerMapping(
+                99L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        ))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.MEETING_ACCESS_DENIED);
+
+        verify(transcriptSpeakers, never()).findByIdAndMeetingIdAndDeletedAtIsNull(any(), any());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 발화자는 매핑을 수정할 수 없다")
+    void updateSpeakerMappingFailsWhenSpeakerNotFound() {
+        // 테스트 목적:
+        // transcriptSpeakerId에 해당하는 유효한 발화자가 없는 경우
+        // 발화자 매핑 수정이 TRANSCRIPT_SPEAKER_NOT_FOUND로 실패하는지 검증한다.
+
+        // given
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(404L, 100L)).thenReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> service.updateSpeakerMapping(
+                1L,
+                100L,
+                404L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        ))
+                .isInstanceOf(TranscriptException.class)
+                .extracting("errorCode")
+                .isEqualTo(TranscriptErrorCode.TRANSCRIPT_SPEAKER_NOT_FOUND);
+
+        verifyNoInteractions(teamMembers);
+    }
+
+    @Test
+    @DisplayName("다른 회의의 발화자는 매핑을 수정할 수 없다")
+    void updateSpeakerMappingFailsWhenSpeakerBelongsToOtherMeeting() {
+        // 테스트 목적:
+        // transcriptSpeakerId가 존재하더라도 요청 meetingId의 발화자가 아닌 경우
+        // 회의 범위 조회에서 제외되어 TRANSCRIPT_SPEAKER_NOT_FOUND로 실패하는지 검증한다.
+
+        // given
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        ))
+                .isInstanceOf(TranscriptException.class)
+                .extracting("errorCode")
+                .isEqualTo(TranscriptErrorCode.TRANSCRIPT_SPEAKER_NOT_FOUND);
+
+        verifyNoInteractions(teamMembers);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 팀원에는 발화자를 연결할 수 없다")
+    void updateSpeakerMappingFailsWhenTeamMemberNotFound() {
+        // 테스트 목적:
+        // teamMemberId 자체가 존재하지 않는 경우
+        // 발화자 매핑 수정이 TEAM_MEMBER_NOT_FOUND로 실패하는지 검증한다.
+
+        // given
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, null);
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+        when(teamMembers.findById(404L)).thenReturn(Optional.empty());
+
+        // when & then
+        assertThatThrownBy(() -> service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(404L, null)
+        ))
+                .isInstanceOf(TeamException.class)
+                .extracting("errorCode")
+                .isEqualTo(TeamErrorCode.TEAM_MEMBER_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("다른 팀의 팀원에는 발화자를 연결할 수 없다")
+    void updateSpeakerMappingFailsWhenTeamMemberBelongsToOtherTeam() {
+        // 테스트 목적:
+        // 존재하는 팀원이지만 회의가 속한 팀의 팀원이 아닌 경우
+        // 발화자 매핑 수정이 TEAM_MEMBER_NOT_IN_MEETING_TEAM으로 실패하는지 검증한다.
+
+        // given
+        Team otherTeam = withId(Team.create("다른팀"), 3L);
+        TeamMember otherTeamMember = member(otherTeam);
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, null);
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+        when(teamMembers.findById(10L)).thenReturn(Optional.of(otherTeamMember));
+
+        // when & then
+        assertThatThrownBy(() -> service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        ))
+                .isInstanceOf(TranscriptException.class)
+                .extracting("errorCode")
+                .isEqualTo(TranscriptErrorCode.TEAM_MEMBER_NOT_IN_MEETING_TEAM);
+    }
+
+    @Test
+    @DisplayName("ACTIVE가 아닌 팀원에는 발화자를 연결할 수 없다")
+    void updateSpeakerMappingFailsWhenTeamMemberIsNotActive() {
+        // 테스트 목적:
+        // 회의 팀의 팀원이더라도 ACTIVE 상태가 아닌 경우
+        // 발화자 매핑 수정이 TEAM_MEMBER_NOT_IN_MEETING_TEAM으로 실패하는지 검증한다.
+
+        // given
+        TeamMember inactiveTeamMember = member(meeting.getTeam());
+        inactiveTeamMember.leave(NOW);
+        TranscriptSpeaker speaker = speaker(50L, "화자 1", null, null);
+        when(transcriptSpeakers.findByIdAndMeetingIdAndDeletedAtIsNull(50L, 100L)).thenReturn(Optional.of(speaker));
+        when(teamMembers.findById(10L)).thenReturn(Optional.of(inactiveTeamMember));
+
+        // when & then
+        assertThatThrownBy(() -> service.updateSpeakerMapping(
+                1L,
+                100L,
+                50L,
+                new TranscriptSpeakerMappingRequest(10L, null)
+        ))
+                .isInstanceOf(TranscriptException.class)
+                .extracting("errorCode")
+                .isEqualTo(TranscriptErrorCode.TEAM_MEMBER_NOT_IN_MEETING_TEAM);
     }
 
     @Test

@@ -2,14 +2,19 @@ package com.backend.meety.domain.transcript.controller;
 
 import com.backend.meety.domain.transcript.dto.TranscriptSegmentResponse;
 import com.backend.meety.domain.transcript.dto.TranscriptSpeakerListResponse;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerMappingRequest;
+import com.backend.meety.domain.transcript.dto.TranscriptSpeakerResponse;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import com.backend.meety.global.response.ApiResponse;
+import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -36,5 +41,17 @@ public class TranscriptController {
             @PathVariable Long meetingId
     ) {
         return ResponseEntity.ok(ApiResponse.success(transcriptService.getSpeakers(userId, meetingId)));
+    }
+
+    @PutMapping("/meetings/{meetingId}/speakers/{transcriptSpeakerId}/mapping")
+    public ResponseEntity<ApiResponse<TranscriptSpeakerResponse>> updateSpeakerMapping(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long meetingId,
+            @PathVariable Long transcriptSpeakerId,
+            @Valid @RequestBody TranscriptSpeakerMappingRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(
+                transcriptService.updateSpeakerMapping(userId, meetingId, transcriptSpeakerId, request)
+        ));
     }
 }
