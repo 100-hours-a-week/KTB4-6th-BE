@@ -66,6 +66,10 @@ public class AudioFile extends BaseEntity {
         return status == AudioFileStatus.UPLOADING;
     }
 
+    public boolean isAvailable() {
+        return status == AudioFileStatus.AVAILABLE;
+    }
+
     public boolean isExpired(LocalDateTime now) {
         return expiresAt != null && !now.isBefore(expiresAt);
     }

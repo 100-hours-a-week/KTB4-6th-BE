@@ -40,6 +40,13 @@ public class TranscriptSpeaker extends BaseEntity {
     @Column(name = "custom_alias", length = 10)
     private String customAlias;
 
+    public static TranscriptSpeaker create(Meeting meeting, String speakerLabel) {
+        TranscriptSpeaker speaker = new TranscriptSpeaker();
+        speaker.meeting = meeting;
+        speaker.speakerLabel = speakerLabel;
+        return speaker;
+    }
+
     public void mapToTeamMember(TeamMember teamMember) {
         this.mappedTeamMember = teamMember;
         this.customAlias = null;

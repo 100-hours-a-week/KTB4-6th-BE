@@ -76,4 +76,8 @@ public class TranscriptSegment extends BaseEntity {
         segment.transcriptSpeaker = null;
         return segment;
     }
+
+    public void assignSpeaker(TranscriptSpeaker transcriptSpeaker) {
+        this.transcriptSpeaker = transcriptSpeaker;
+    }
 }
