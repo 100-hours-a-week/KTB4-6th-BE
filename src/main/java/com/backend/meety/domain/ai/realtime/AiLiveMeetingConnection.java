@@ -23,6 +23,8 @@ public class AiLiveMeetingConnection {
     private final String sessionStartRequestId;
     private volatile WebSocketSession webSocketSession;
     private volatile AiLiveMeetingConnectionState state;
+    private volatile String sessionPauseRequestId;
+    private volatile String sessionResumeRequestId;
     private volatile String sessionStopRequestId;
     private volatile ScheduledFuture<?> stopTimeoutFuture;
 
@@ -82,6 +84,54 @@ public class AiLiveMeetingConnection {
         }
     }
 
+    public boolean sendPause(ObjectMapper objectMapper, String requestId) throws IOException {
+        synchronized (sendLock) {
+            if (state() != AiLiveMeetingConnectionState.READY) {
+                return false;
+            }
+            WebSocketSession session = webSocketSession;
+            if (session == null || !session.isOpen()) {
+                return false;
+            }
+            this.sessionPauseRequestId = requestId;
+            this.state = AiLiveMeetingConnectionState.PAUSE_SENT;
+            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiSessionPauseMessage.of(this))));
+            return true;
+        }
+    }
+
+    public boolean sendResume(ObjectMapper objectMapper, String requestId) throws IOException {
+        synchronized (sendLock) {
+            if (state() != AiLiveMeetingConnectionState.PAUSED) {
+                return false;
+            }
+            WebSocketSession session = webSocketSession;
+            if (session == null || !session.isOpen()) {
+                return false;
+            }
+            this.sessionResumeRequestId = requestId;
+            this.state = AiLiveMeetingConnectionState.RESUME_SENT;
+            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiSessionResumeMessage.of(this))));
+            return true;
+        }
+    }
+
+    public boolean sendStop(ObjectMapper objectMapper, String requestId) throws IOException {
+        synchronized (sendLock) {
+            if (state() != AiLiveMeetingConnectionState.READY && state() != AiLiveMeetingConnectionState.PAUSED) {
+                return false;
+            }
+            WebSocketSession session = webSocketSession;
+            if (session == null || !session.isOpen()) {
+                throw new IllegalStateException("AI WebSocket session is not open");
+            }
+            this.sessionStopRequestId = requestId;
+            this.state = AiLiveMeetingConnectionState.STOP_SENT;
+            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiSessionStopMessage.of(this))));
+            return true;
+        }
+    }
+
     public synchronized void markStartSent() {
         if (state != AiLiveMeetingConnectionState.CONNECTING) {
             return;
@@ -94,18 +144,38 @@ public class AiLiveMeetingConnection {
         readyLatch.countDown();
     }
 
+    public synchronized void markPaused() {
+        if (state == AiLiveMeetingConnectionState.PAUSE_SENT) {
+            this.state = AiLiveMeetingConnectionState.PAUSED;
+        }
+    }
+
+    public synchronized void markResumed() {
+        if (state == AiLiveMeetingConnectionState.RESUME_SENT) {
+            this.state = AiLiveMeetingConnectionState.READY;
+        }
+    }
+
     public boolean awaitReady(Duration timeout) throws InterruptedException {
         return readyLatch.await(timeout.toMillis(), TimeUnit.MILLISECONDS)
                 && state() == AiLiveMeetingConnectionState.READY;
     }
 
     public synchronized boolean markStopSent(String requestId) {
-        if (state != AiLiveMeetingConnectionState.READY) {
+        if (state != AiLiveMeetingConnectionState.READY && state != AiLiveMeetingConnectionState.PAUSED) {
             return false;
         }
         this.sessionStopRequestId = requestId;
         this.state = AiLiveMeetingConnectionState.STOP_SENT;
         return true;
+    }
+
+    public String sessionPauseRequestId() {
+        return sessionPauseRequestId;
+    }
+
+    public String sessionResumeRequestId() {
+        return sessionResumeRequestId;
     }
 
     public String sessionStopRequestId() {

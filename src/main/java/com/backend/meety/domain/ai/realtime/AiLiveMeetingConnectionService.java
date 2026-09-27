@@ -106,6 +106,16 @@ public class AiLiveMeetingConnectionService {
         return registry.find(recordingSessionId).map(AiLiveMeetingConnection::state);
     }
 
+    public void pause(Long recordingSessionId) {
+        registry.find(recordingSessionId).ifPresentOrElse(this::pause,
+                () -> log.info("일시정지할 AI WebSocket connection이 없습니다. recordingSessionId={}", recordingSessionId));
+    }
+
+    public void resume(Long recordingSessionId) {
+        registry.find(recordingSessionId).ifPresentOrElse(this::resume,
+                () -> log.info("재개할 AI WebSocket connection이 없습니다. recordingSessionId={}", recordingSessionId));
+    }
+
     public void stop(Long recordingSessionId) {
         registry.find(recordingSessionId).ifPresentOrElse(this::stop,
                 () -> log.info("종료할 AI WebSocket connection이 없습니다. recordingSessionId={}", recordingSessionId));
@@ -121,28 +131,49 @@ public class AiLiveMeetingConnectionService {
         connection.markStartSent();
     }
 
+    private void pause(AiLiveMeetingConnection connection) {
+        String requestId = requestIdGenerator.sessionPauseRequestId();
+        try {
+            if (!connection.sendPause(objectMapper, requestId)) {
+                log.info("AI WebSocket session.pause를 전송하지 않습니다. recordingSessionId={}, state={}",
+                        connection.recordingSessionId(), connection.state());
+            }
+        } catch (Exception e) {
+            log.warn("AI WebSocket session.pause 전송에 실패했습니다. recordingSessionId={}",
+                    connection.recordingSessionId(), e);
+        }
+    }
+
+    private void resume(AiLiveMeetingConnection connection) {
+        String requestId = requestIdGenerator.sessionResumeRequestId();
+        try {
+            if (!connection.sendResume(objectMapper, requestId)) {
+                log.info("AI WebSocket session.resume을 전송하지 않습니다. recordingSessionId={}, state={}",
+                        connection.recordingSessionId(), connection.state());
+            }
+        } catch (Exception e) {
+            log.warn("AI WebSocket session.resume 전송에 실패했습니다. recordingSessionId={}",
+                    connection.recordingSessionId(), e);
+        }
+    }
+
     private void stop(AiLiveMeetingConnection connection) {
         String requestId = requestIdGenerator.sessionStopRequestId();
-        if (!connection.markStopSent(requestId)) {
-            log.info("AI WebSocket session.stop을 전송하지 않습니다. recordingSessionId={}, state={}",
-                    connection.recordingSessionId(), connection.state());
-            if (connection.state() == AiLiveMeetingConnectionState.CONNECTING
-                    || connection.state() == AiLiveMeetingConnectionState.START_SENT) {
-                notifyTranscriptFinalized(connection);
-                cleanup(connection);
-            }
-            return;
-        }
-        connection.setStopTimeoutFuture(stopTimeoutScheduler.schedule(
-                () -> handleStopTimeout(connection),
-                AiLiveMeetingPolicy.STOP_TIMEOUT
-        ));
         try {
-            WebSocketSession aiSession = connection.webSocketSession();
-            if (aiSession == null || !aiSession.isOpen()) {
-                throw new IllegalStateException("AI WebSocket session is not open");
+            if (!connection.sendStop(objectMapper, requestId)) {
+                log.info("AI WebSocket session.stop을 전송하지 않습니다. recordingSessionId={}, state={}",
+                        connection.recordingSessionId(), connection.state());
+                if (connection.state() == AiLiveMeetingConnectionState.CONNECTING
+                        || connection.state() == AiLiveMeetingConnectionState.START_SENT) {
+                    notifyTranscriptFinalized(connection);
+                    cleanup(connection);
+                }
+                return;
             }
-            aiSession.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiSessionStopMessage.of(connection))));
+            connection.setStopTimeoutFuture(stopTimeoutScheduler.schedule(
+                    () -> handleStopTimeout(connection),
+                    AiLiveMeetingPolicy.STOP_TIMEOUT
+            ));
         } catch (Exception e) {
             log.warn("AI WebSocket session.stop 전송에 실패했습니다. recordingSessionId={}",
                     connection.recordingSessionId(), e);

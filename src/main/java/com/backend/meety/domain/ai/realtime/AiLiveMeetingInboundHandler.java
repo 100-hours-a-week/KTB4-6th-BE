@@ -15,10 +15,13 @@ import tools.jackson.databind.ObjectMapper;
 public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
 
     private static final String SESSION_READY = "session.ready";
+    private static final String SESSION_PAUSED = "session.paused";
+    private static final String SESSION_RESUMED = "session.resumed";
     private static final String SESSION_ENDED = "session.ended";
     private static final String ERROR = "error";
     private static final String TRANSCRIPT_SEGMENT_FINAL = AiTranscriptSegmentMessage.TYPE;
     private static final String READY = "READY";
+    private static final String PAUSED = "PAUSED";
     private static final String ENDED = "ENDED";
 
     private final AiLiveMeetingConnection connection;
@@ -38,6 +41,14 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
             }
             if (SESSION_ENDED.equals(type)) {
                 handleSessionEnded(root);
+                return;
+            }
+            if (SESSION_PAUSED.equals(type)) {
+                handleSessionPaused(root);
+                return;
+            }
+            if (SESSION_RESUMED.equals(type)) {
+                handleSessionResumed(root);
                 return;
             }
             if (ERROR.equals(type)) {
@@ -109,6 +120,34 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
         transcriptService.saveFinalSegment(message);
     }
 
+    private void handleSessionPaused(JsonNode root) {
+        if (!matchesSessionPause(root)) {
+            log.warn("AI session.paused 이벤트가 현재 connection과 일치하지 않습니다. recordingSessionId={}",
+                    connection.recordingSessionId());
+            return;
+        }
+        if (!PAUSED.equals(root.path("payload").path("status").asText())) {
+            log.warn("AI session.paused status가 PAUSED가 아닙니다. recordingSessionId={}, status={}",
+                    connection.recordingSessionId(), root.path("payload").path("status").asText());
+            return;
+        }
+        connection.markPaused();
+    }
+
+    private void handleSessionResumed(JsonNode root) {
+        if (!matchesSessionResume(root)) {
+            log.warn("AI session.resumed 이벤트가 현재 connection과 일치하지 않습니다. recordingSessionId={}",
+                    connection.recordingSessionId());
+            return;
+        }
+        if (!READY.equals(root.path("payload").path("status").asText())) {
+            log.warn("AI session.resumed status가 READY가 아닙니다. recordingSessionId={}, status={}",
+                    connection.recordingSessionId(), root.path("payload").path("status").asText());
+            return;
+        }
+        connection.markResumed();
+    }
+
     private void handleSessionEnded(JsonNode root) {
         if (!matchesSessionStop(root)) {
             log.warn("AI session.ended 이벤트가 현재 connection과 일치하지 않습니다. recordingSessionId={}",
@@ -138,6 +177,18 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                 && String.valueOf(connection.meetingId()).equals(root.path("meetingId").asText())
                 && connection.sessionStopRequestId() != null
                 && connection.sessionStopRequestId().equals(root.path("requestId").asText());
+    }
+
+    private boolean matchesSessionPause(JsonNode root) {
+        return SESSION_PAUSED.equals(root.path("type").asText())
+                && connection.sessionPauseRequestId() != null
+                && connection.sessionPauseRequestId().equals(root.path("requestId").asText());
+    }
+
+    private boolean matchesSessionResume(JsonNode root) {
+        return SESSION_RESUMED.equals(root.path("type").asText())
+                && connection.sessionResumeRequestId() != null
+                && connection.sessionResumeRequestId().equals(root.path("requestId").asText());
     }
 
     private void cleanup() {

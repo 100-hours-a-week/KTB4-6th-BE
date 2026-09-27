@@ -20,6 +20,7 @@ import java.util.concurrent.Delayed;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -225,6 +226,126 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     @Test
+    @DisplayName("READY 상태에서 pause를 요청하면 기존 AI connection으로 session.pause를 전송한다")
+    void pauseSendsSessionPauseWithExistingConnection() throws Exception {
+        // 테스트 목적:
+        // AI connection이 READY인 상태에서 녹음 일시정지 이벤트가 처리되면
+        // 새 connection 생성 없이 기존 connection으로 명세에 맞는 session.pause가 전송되는지 검증한다.
+
+        // given
+        AiLiveMeetingConnection connection = readyConnection();
+
+        // when
+        service.pause(88L);
+
+        // then
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.PAUSE_SENT);
+        assertSessionPause(client.session.sentMessages.get(1));
+        assertThat(client.connectCount).isOne();
+        assertThat(registry.find(88L)).contains(connection);
+    }
+
+    @Test
+    @DisplayName("session.paused를 받으면 AI connection 상태를 PAUSED로 반영한다")
+    void sessionPausedMarksConnectionPaused() throws Exception {
+        // 테스트 목적:
+        // session.pause 요청과 같은 requestId의 session.paused ACK를 수신했을 때
+        // AI connection 상태가 PAUSED로 변경되는지 검증한다.
+
+        // given
+        AiLiveMeetingConnection connection = readyConnection();
+        service.pause(88L);
+
+        // when
+        client.receive("""
+                {
+                  "type": "session.paused",
+                  "requestId": "pause-test",
+                  "payload": {"status": "PAUSED"}
+                }
+                """);
+
+        // then
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.PAUSED);
+        assertThat(registry.find(88L)).contains(connection);
+    }
+
+    @Test
+    @DisplayName("PAUSED 상태에서 resume을 요청하면 기존 AI connection으로 session.resume을 전송한다")
+    void resumeSendsSessionResumeWithExistingConnection() throws Exception {
+        // 테스트 목적:
+        // AI connection이 PAUSED인 상태에서 녹음 재개 이벤트가 처리되면
+        // 새 connection 생성 없이 기존 connection으로 명세에 맞는 session.resume이 전송되는지 검증한다.
+
+        // given
+        AiLiveMeetingConnection connection = pausedConnection();
+
+        // when
+        service.resume(88L);
+
+        // then
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.RESUME_SENT);
+        assertSessionResume(client.session.sentMessages.get(2));
+        assertThat(client.connectCount).isOne();
+        assertThat(registry.find(88L)).contains(connection);
+    }
+
+    @Test
+    @DisplayName("session.resumed를 받으면 AI connection 상태를 READY로 반영한다")
+    void sessionResumedMarksConnectionReady() throws Exception {
+        // 테스트 목적:
+        // session.resume 요청과 같은 requestId의 session.resumed ACK를 수신했을 때
+        // AI connection 상태가 READY로 변경되어 오디오 전송 가능 상태가 되는지 검증한다.
+
+        // given
+        AiLiveMeetingConnection connection = pausedConnection();
+        service.resume(88L);
+
+        // when
+        client.receive("""
+                {
+                  "type": "session.resumed",
+                  "requestId": "resume-test",
+                  "payload": {"status": "READY"}
+                }
+                """);
+
+        // then
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.READY);
+        assertThat(registry.find(88L)).contains(connection);
+    }
+
+    @Test
+    @DisplayName("pause와 resume payload는 type과 requestId만 포함한다")
+    void pauseAndResumePayloadContainOnlyTypeAndRequestId() throws Exception {
+        // 테스트 목적:
+        // AI 명세에 정의되지 않은 meetingId, recordingSessionId, payload가
+        // session.pause와 session.resume 메시지에 포함되지 않는지 검증한다.
+
+        // given
+        pausedConnection();
+
+        // when
+        service.resume(88L);
+
+        // then
+        JsonNode pause = objectMapper.readTree(client.session.sentMessages.get(1));
+        JsonNode resume = objectMapper.readTree(client.session.sentMessages.get(2));
+        assertThat(pause.size()).isEqualTo(2);
+        assertThat(pause.path("type").asText()).isEqualTo("session.pause");
+        assertThat(pause.path("requestId").asText()).isEqualTo("pause-test");
+        assertThat(pause.has("meetingId")).isFalse();
+        assertThat(pause.has("recordingSessionId")).isFalse();
+        assertThat(pause.has("payload")).isFalse();
+        assertThat(resume.size()).isEqualTo(2);
+        assertThat(resume.path("type").asText()).isEqualTo("session.resume");
+        assertThat(resume.path("requestId").asText()).isEqualTo("resume-test");
+        assertThat(resume.has("meetingId")).isFalse();
+        assertThat(resume.has("recordingSessionId")).isFalse();
+        assertThat(resume.has("payload")).isFalse();
+    }
+
+    @Test
     void stopWithMissingConnectionIsNoop() {
         service.stop(88L);
 
@@ -260,6 +381,25 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(client.session.sentMessages).hasSize(1);
         assertThat(registry.find(88L)).isEmpty();
         assertThat(readyEvents).containsExactly(new MeetingTranscriptFinalizedEvent(42L, 88L));
+    }
+
+    @Test
+    @DisplayName("PAUSED 상태에서 stop을 요청하면 resume 없이 session.stop을 전송한다")
+    void stopWhenPausedSendsSessionStopWithoutResume() throws Exception {
+        // 테스트 목적:
+        // AI connection이 PAUSED인 상태에서 녹음 종료 이벤트가 처리되면
+        // session.resume 없이 기존 connection으로 session.stop이 전송되는지 검증한다.
+
+        // given
+        AiLiveMeetingConnection connection = pausedConnection();
+
+        // when
+        service.stop(88L);
+
+        // then
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.STOP_SENT);
+        assertThat(client.session.sentMessages).hasSize(3);
+        assertSessionStop(client.session.sentMessages.get(2));
     }
 
     @Test
@@ -467,6 +607,24 @@ class AiLiveMeetingConnectionServiceTest {
         return connection;
     }
 
+    private AiLiveMeetingConnection pausedConnection() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        pauseCurrentReadyConnection();
+        return connection;
+    }
+
+    private void pauseCurrentReadyConnection() throws Exception {
+        service.pause(88L);
+        client.receive("""
+                {
+                  "type": "session.paused",
+                  "requestId": "pause-test",
+                  "payload": {"status": "PAUSED"}
+                }
+                """);
+        assertThat(registry.find(88L).orElseThrow().state()).isEqualTo(AiLiveMeetingConnectionState.PAUSED);
+    }
+
     @Test
     @DisplayName("READY 상태에서 오디오를 전달하면 audio.meta와 바이너리가 순서대로 전송된다")
     void forwardAudioSendsMetaThenBinaryWhenReady() throws Exception {
@@ -481,6 +639,86 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(client.session.sentBinaries).hasSize(1);
         assertThat(client.session.sentBinaries.getFirst()).containsExactly(1, 2, 3);
         assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.READY);
+    }
+
+    @Test
+    @DisplayName("PAUSED 상태와 resume ACK 전에는 오디오를 AI로 전달하지 않는다")
+    void forwardAudioRejectedWhenPausedOrResumeSent() throws Exception {
+        // 테스트 목적:
+        // AI connection이 PAUSED이거나 session.resume ACK를 받기 전인 경우
+        // FE가 오디오를 보내더라도 AI로 audio.meta와 binary가 전달되지 않는지 검증한다.
+
+        // given
+        AiLiveMeetingConnection connection = pausedConnection();
+
+        // when
+        boolean pausedForwarded = service.forwardAudio(88L, new byte[]{1});
+        service.resume(88L);
+        boolean resumeSentForwarded = service.forwardAudio(88L, new byte[]{2});
+
+        // then
+        assertThat(pausedForwarded).isFalse();
+        assertThat(resumeSentForwarded).isFalse();
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.RESUME_SENT);
+        assertThat(client.session.sentBinaries).isEmpty();
+        assertThat(audioSequences()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("session.resumed 이후 오디오 전송이 재개되고 sequence는 이어진다")
+    void forwardAudioResumesAfterSessionResumedAndKeepsSequence() throws Exception {
+        // 테스트 목적:
+        // pause/resume 전후에도 audio sequence가 초기화되지 않고
+        // session.resumed 수신 이후에만 오디오 전송이 재개되는지 검증한다.
+
+        // given
+        readyConnection();
+        service.forwardAudio(88L, new byte[]{1});
+        pauseCurrentReadyConnection();
+        service.resume(88L);
+        service.forwardAudio(88L, new byte[]{2});
+
+        // when
+        client.receive("""
+                {
+                  "type": "session.resumed",
+                  "requestId": "resume-test",
+                  "payload": {"status": "READY"}
+                }
+                """);
+        boolean forwarded = service.forwardAudio(88L, new byte[]{3});
+
+        // then
+        assertThat(forwarded).isTrue();
+        assertThat(audioSequences()).containsExactly(0L, 1L);
+        assertThat(client.session.sentBinaries).hasSize(2);
+        assertThat(client.session.sentBinaries.get(1)).containsExactly(3);
+    }
+
+    @Test
+    @DisplayName("pause 요청은 진행 중인 audio.meta와 binary 쌍 뒤에 전송된다")
+    void pauseDoesNotInterleaveBetweenAudioMetaAndBinary() throws Exception {
+        // 테스트 목적:
+        // audio.meta 전송 직후 pause 요청이 동시에 발생해도
+        // 동일한 직렬화 경계로 인해 binary 전송 뒤에 session.pause가 전송되는지 검증한다.
+
+        // given
+        readyConnection();
+        AtomicReference<Thread> pauseThread = new AtomicReference<>();
+        client.session.onAudioMeta = () -> {
+            Thread thread = new Thread(() -> service.pause(88L));
+            pauseThread.set(thread);
+            thread.start();
+        };
+
+        // when
+        boolean forwarded = service.forwardAudio(88L, new byte[]{1});
+        pauseThread.get().join(3_000);
+
+        // then
+        assertThat(forwarded).isTrue();
+        assertThat(client.session.sentFrameTypes)
+                .containsExactly("session.start", "audio.meta", "binary", "session.pause");
     }
 
     @Test
@@ -613,6 +851,31 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(root.path("requestId").asText()).isEqualTo("stop-test");
     }
 
+    private void assertSessionPause(String json) throws Exception {
+        JsonNode root = objectMapper.readTree(json);
+        assertThat(root.size()).isEqualTo(2);
+        assertThat(root.path("type").asText()).isEqualTo("session.pause");
+        assertThat(root.path("requestId").asText()).isEqualTo("pause-test");
+    }
+
+    private void assertSessionResume(String json) throws Exception {
+        JsonNode root = objectMapper.readTree(json);
+        assertThat(root.size()).isEqualTo(2);
+        assertThat(root.path("type").asText()).isEqualTo("session.resume");
+        assertThat(root.path("requestId").asText()).isEqualTo("resume-test");
+    }
+
+    private List<Long> audioSequences() throws Exception {
+        List<Long> sequences = new ArrayList<>();
+        for (String message : client.session.sentMessages) {
+            JsonNode root = objectMapper.readTree(message);
+            if ("audio.meta".equals(root.path("type").asText())) {
+                sequences.add(root.path("payload").path("sequence").asLong());
+            }
+        }
+        return sequences;
+    }
+
     private static class FixedAiRequestIdGenerator extends AiRequestIdGenerator {
 
         @Override
@@ -623,6 +886,16 @@ class AiLiveMeetingConnectionServiceTest {
         @Override
         public String sessionStopRequestId() {
             return "stop-test";
+        }
+
+        @Override
+        public String sessionPauseRequestId() {
+            return "pause-test";
+        }
+
+        @Override
+        public String sessionResumeRequestId() {
+            return "resume-test";
         }
     }
 
@@ -657,8 +930,10 @@ class AiLiveMeetingConnectionServiceTest {
 
         private final WebSocketSession delegate = mock(WebSocketSession.class);
         private final List<String> sentMessages = new CopyOnWriteArrayList<>();
+        private final List<String> sentFrameTypes = new CopyOnWriteArrayList<>();
         private final List<byte[]> sentBinaries = new ArrayList<>();
         private final List<CloseStatus> closeStatuses = new ArrayList<>();
+        private Runnable onAudioMeta;
         private boolean open = true;
 
         private TestWebSocketSession() {
@@ -672,9 +947,27 @@ class AiLiveMeetingConnectionServiceTest {
                 byte[] audio = new byte[payload.remaining()];
                 payload.get(audio);
                 sentBinaries.add(audio);
+                sentFrameTypes.add("binary");
                 return;
             }
-            sentMessages.add((String) message.getPayload());
+            String payload = (String) message.getPayload();
+            sentMessages.add(payload);
+            String type = extractType(payload);
+            sentFrameTypes.add(type);
+            if ("audio.meta".equals(type) && onAudioMeta != null) {
+                onAudioMeta.run();
+            }
+        }
+
+        private String extractType(String payload) {
+            String marker = "\"type\":\"";
+            int start = payload.indexOf(marker);
+            if (start < 0) {
+                return "text";
+            }
+            int valueStart = start + marker.length();
+            int valueEnd = payload.indexOf('"', valueStart);
+            return payload.substring(valueStart, valueEnd);
         }
 
         @Override
