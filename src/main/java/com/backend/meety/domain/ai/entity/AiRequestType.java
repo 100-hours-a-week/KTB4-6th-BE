@@ -4,5 +4,6 @@ public enum AiRequestType {
     CHAT,
     SUMMARY,
     REPORT,
-    METRIC
+    METRIC,
+    DIARIZATION
 }
