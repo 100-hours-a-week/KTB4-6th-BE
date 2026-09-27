@@ -8,6 +8,7 @@ public record SummaryAiRequest(
         String title,
         String purpose,
         String note,
+        String regenerationReason,
         String meetingStartedAt,
         List<SummaryAiSpeaker> speakers,
         List<SummaryAiSegment> segments

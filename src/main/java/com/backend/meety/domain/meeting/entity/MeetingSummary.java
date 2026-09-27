@@ -49,15 +49,20 @@ public class MeetingSummary extends BaseEntity {
     @Column(name = "version", nullable = false)
     private Long version = 1L;
 
-    private MeetingSummary(AiRequest aiRequest, Team team, Meeting meeting, Long version) {
+    @Column(name = "regeneration_reason", length = 100)
+    private String regenerationReason;
+
+    private MeetingSummary(AiRequest aiRequest, Team team, Meeting meeting, Long version, String regenerationReason) {
         this.aiRequest = aiRequest;
         this.team = team;
         this.meeting = meeting;
         this.version = version;
+        this.regenerationReason = regenerationReason;
     }
 
-    public static MeetingSummary createPending(AiRequest aiRequest, Team team, Meeting meeting, Long version) {
-        return new MeetingSummary(aiRequest, team, meeting, version);
+    public static MeetingSummary createPending(
+            AiRequest aiRequest, Team team, Meeting meeting, Long version, String regenerationReason) {
+        return new MeetingSummary(aiRequest, team, meeting, version, regenerationReason);
     }
 
     public void complete(String content) {

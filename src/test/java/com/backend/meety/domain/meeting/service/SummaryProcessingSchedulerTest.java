@@ -39,7 +39,7 @@ class SummaryProcessingSchedulerTest {
             aiRequests, processingService, aiClient);
 
     private final SummaryAiRequest payload = new SummaryAiRequest(
-            "900", 100L, "회의", "", "", "2026-09-25T14:00:00+09:00", List.of(), List.of());
+            "900", 100L, "회의", "", "", null, "2026-09-25T14:00:00+09:00", List.of(), List.of());
 
     private Team team;
     private TeamMember member;

@@ -3,8 +3,10 @@ package com.backend.meety.domain.meeting.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -62,11 +64,13 @@ class MeetingSummaryControllerTest {
     @Test
     @DisplayName("요약 재생성은 202와 접수 정보를 반환한다")
     void regenerateReturnsAccepted() throws Exception {
-        when(service.requestSummary(1L, 100L, IDEMPOTENCY_KEY)).thenReturn(
+        when(service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null)).thenReturn(
                 new SummaryCreateResponse(502L, 2L, AiRequestStatus.ACCEPTED, 266L));
 
         mvc.perform(post("/api/v1/meetings/100/summaries")
-                        .header("Idempotency-Key", IDEMPOTENCY_KEY))
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType("application/json")
+                        .content("{\"reason\":null}"))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.summaryId").value(502))
@@ -74,7 +78,46 @@ class MeetingSummaryControllerTest {
                 .andExpect(jsonPath("$.data.status").value("ACCEPTED"))
                 .andExpect(jsonPath("$.data.creditBalance").value(266));
 
-        verify(service).requestSummary(1L, 100L, IDEMPOTENCY_KEY);
+        verify(service).requestSummary(1L, 100L, IDEMPOTENCY_KEY, null);
+    }
+
+    @Test
+    @DisplayName("재생성 사유를 body로 보내면 서비스에 전달한다")
+    void regenerateWithReason() throws Exception {
+        when(service.requestSummary(eq(1L), eq(100L), eq(IDEMPOTENCY_KEY), eq("다시 요약해줘"))).thenReturn(
+                new SummaryCreateResponse(502L, 2L, AiRequestStatus.ACCEPTED, 266L));
+
+        mvc.perform(post("/api/v1/meetings/100/summaries")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType("application/json")
+                        .content("{\"reason\":\"다시 요약해줘\"}"))
+                .andExpect(status().isAccepted());
+
+        verify(service).requestSummary(1L, 100L, IDEMPOTENCY_KEY, "다시 요약해줘");
+    }
+
+    @Test
+    @DisplayName("body가 없으면 400이다")
+    void missingBodyIsRejected() throws Exception {
+        mvc.perform(post("/api/v1/meetings/100/summaries")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    @DisplayName("재생성 사유가 100자를 넘으면 400이다")
+    void regenerateReasonTooLong() throws Exception {
+        String tooLong = "가".repeat(101);
+
+        mvc.perform(post("/api/v1/meetings/100/summaries")
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType("application/json")
+                        .content("{\"reason\":\"" + tooLong + "\"}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service);
     }
 
     @Test
@@ -108,25 +151,29 @@ class MeetingSummaryControllerTest {
     @Test
     @DisplayName("Idempotency-Key 헤더가 없으면 서버가 UUID를 만들어 채운다")
     void missingIdempotencyKeyIsGenerated() throws Exception {
-        when(service.requestSummary(eq(1L), eq(100L), anyString())).thenReturn(
+        when(service.requestSummary(eq(1L), eq(100L), anyString(), isNull())).thenReturn(
                 new SummaryCreateResponse(502L, 2L, AiRequestStatus.ACCEPTED, 266L));
 
-        mvc.perform(post("/api/v1/meetings/100/summaries"))
+        mvc.perform(post("/api/v1/meetings/100/summaries")
+                        .contentType("application/json")
+                        .content("{\"reason\":null}"))
                 .andExpect(status().isAccepted());
 
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(service).requestSummary(eq(1L), eq(100L), captor.capture());
+        verify(service).requestSummary(eq(1L), eq(100L), captor.capture(), isNull());
         assertThat(UUID.fromString(captor.getValue())).isNotNull();
     }
 
     @Test
     @DisplayName("전사가 없으면 409를 반환한다")
     void emptyTranscriptReturnsConflict() throws Exception {
-        when(service.requestSummary(1L, 100L, IDEMPOTENCY_KEY))
+        when(service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null))
                 .thenThrow(new SummaryException(SummaryErrorCode.TRANSCRIPT_EMPTY));
 
         mvc.perform(post("/api/v1/meetings/100/summaries")
-                        .header("Idempotency-Key", IDEMPOTENCY_KEY))
+                        .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                        .contentType("application/json")
+                        .content("{\"reason\":null}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("TRANSCRIPT_EMPTY"));
     }

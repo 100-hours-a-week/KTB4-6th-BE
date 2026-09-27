@@ -12,6 +12,7 @@ import com.backend.meety.domain.ai.client.SummaryAiRequest;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.meeting.entity.MeetingSummary;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
@@ -39,14 +40,16 @@ class SummaryAiRequestFactoryTest {
         TranscriptSegment withoutEnd = withId(TranscriptSegment.createFinal(
                 meeting, "1:2", 2L, "둘째 발언", 4000L, null, LocalDateTime.now()), 102L);
         when(transcripts.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(withEnd, withoutEnd));
+        MeetingSummary summary = MeetingSummary.createPending(aiRequest, team, meeting, 2L, "다시 요약해줘");
 
-        SummaryAiRequest request = factory.create(aiRequest, meeting);
+        SummaryAiRequest request = factory.create(aiRequest, summary);
 
         assertThat(request.requestId()).isEqualTo("900");
         assertThat(request.meetingId()).isEqualTo(100L);
         assertThat(request.title()).isEqualTo("회의");
         assertThat(request.purpose()).isEqualTo("테스트");
         assertThat(request.note()).isEqualTo("");
+        assertThat(request.regenerationReason()).isEqualTo("다시 요약해줘");
         assertThat(request.meetingStartedAt()).startsWith("2026-09-25T14:00");
         assertThat(request.speakers()).isEmpty();
         assertThat(request.segments()).hasSize(2);
@@ -56,5 +59,21 @@ class SummaryAiRequestFactoryTest {
         assertThat(request.segments().getLast().endedAtMs())
                 .as("endedAtMs가 null이면 startedAtMs로 대체한다")
                 .isEqualTo(4000L);
+    }
+
+    @Test
+    @DisplayName("재생성 사유가 없으면 null로 전달한다")
+    void buildsRequestWithoutReason() {
+        Team team = team();
+        TeamMember member = member(team);
+        Meeting meeting = meeting(team, member);
+        meeting.start(LocalDateTime.of(2026, 9, 25, 14, 0));
+        AiRequest aiRequest = withId(AiRequest.create(team, member, "key", AiRequestType.SUMMARY), 900L);
+        when(transcripts.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of());
+        MeetingSummary summary = MeetingSummary.createPending(aiRequest, team, meeting, 1L, null);
+
+        SummaryAiRequest request = factory.create(aiRequest, summary);
+
+        assertThat(request.regenerationReason()).isNull();
     }
 }
