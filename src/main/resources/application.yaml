@@ -3,6 +3,10 @@ spring:
     name: meety
   jpa:
     open-in-view: false
+  task:
+    scheduling:
+      pool:
+        size: 2
   profiles:
     active:
       - prod
