@@ -93,6 +93,6 @@ public class HomeService {
         if (totalMeetingCount == 0) {
             return null;
         }
-        return totalMeetingMinutes / totalMeetingCount;
+        return Math.ceilDiv(totalMeetingMinutes, totalMeetingCount);
     }
 }

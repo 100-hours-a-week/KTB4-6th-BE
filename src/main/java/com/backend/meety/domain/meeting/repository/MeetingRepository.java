@@ -95,13 +95,13 @@ public interface MeetingRepository extends JpaRepository<Meeting, Long>, Meeting
     @Query(value = """
             select
               count(*) as totalMeetingCount,
-              coalesce(sum(
+              cast(coalesce(sum(
                 case
                   when started_at is not null and ended_at is not null
-                  then timestampdiff(minute, started_at, ended_at)
+                  then ceiling(timestampdiff(second, started_at, ended_at) / 60.0)
                   else 0
                 end
-              ), 0) as totalMeetingMinutes
+              ), 0) as signed) as totalMeetingMinutes
             from meetings
             where team_id = :teamId
               and status = 'COMPLETED'

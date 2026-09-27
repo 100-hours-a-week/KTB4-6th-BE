@@ -120,7 +120,7 @@ class HomeServiceTest {
         assertThat(response.team().memberCount()).isEqualTo(5L);
         assertThat(response.meetingSummary().totalMeetingCount()).isEqualTo(12L);
         assertThat(response.meetingSummary().totalMeetingMinutes()).isEqualTo(530L);
-        assertThat(response.meetingMetrics().averageMeetingMinutes()).isEqualTo(44L);
+        assertThat(response.meetingMetrics().averageMeetingMinutes()).isEqualTo(45L);
         assertThat(response.meetingMetrics().speechBalanceScore()).isEqualByComparingTo("78.35");
         assertThat(response.todayMeetingCount()).isEqualTo(response.todayMeetings().size());
         assertThat(response.todayMeetings()).extracting("meetingId")
@@ -162,6 +162,37 @@ class HomeServiceTest {
         assertThat(response.meetingMetrics().speechBalanceScore()).isNull();
         assertThat(response.todayMeetingCount()).isZero();
         assertThat(response.todayMeetings()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("평균 회의 시간은 전체 녹음 시간을 회의 수로 나눈 뒤 올림한다")
+    void getHomeRoundsUpAverageMeetingMinutes() {
+
+        // 테스트 목적:
+        // 홈 화면 평균 회의 시간이 정수 나눗셈으로 버림되지 않고
+        // 전체 녹음 시간과 동일하게 분 단위 올림 기준을 따르는지 검증한다.
+
+        // given
+        Team team = team();
+        TeamMember teamMember = activeTeamMember(team);
+        when(teamMemberRepository.findByUserIdAndMembershipStatusWithTeam(USER_ID, MembershipStatus.ACTIVE))
+                .thenReturn(Optional.of(teamMember));
+        when(teamInvitationCodeRepository.findByTeamIdAndDeletedAtIsNull(TEAM_ID))
+                .thenReturn(Optional.empty());
+        when(teamMemberRepository.countByTeamIdAndMembershipStatus(TEAM_ID, MembershipStatus.ACTIVE))
+                .thenReturn(1L);
+        when(meetingRepository.aggregateCompletedMeetingSummary(TEAM_ID))
+                .thenReturn(summary(12L, 530L));
+        when(meetingMetricRepository.averageSpeechBalanceScoreByTeamId(TEAM_ID))
+                .thenReturn(null);
+        when(meetingRepository.findTodayMeetingsByTeamIdAndEffectiveStartAtBetween(any(), any(), any()))
+                .thenReturn(List.of());
+
+        // when
+        HomeResponse response = homeService.getHome(USER_ID);
+
+        // then
+        assertThat(response.meetingMetrics().averageMeetingMinutes()).isEqualTo(45L);
     }
 
     private Team team() {
