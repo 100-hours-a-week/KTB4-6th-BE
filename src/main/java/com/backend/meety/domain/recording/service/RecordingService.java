@@ -104,6 +104,10 @@ public class RecordingService {
         logElapsed("[RECORDING_START] credit lock acquired meetingId={}, userId={}, teamId={}, elapsedMs={}",
                 elapsedMs(segmentStartedAt), meetingId, userId, meeting.getTeam().getId());
 
+        if (meetingRepository.findFirstByTeamIdAndStatusAndDeletedAtIsNullOrderByIdAsc(
+                meeting.getTeam().getId(), MeetingStatus.IN_PROGRESS).isPresent()) {
+            throw new RecordingException(RecordingErrorCode.RECORDING_ALREADY_ACTIVE);
+        }
         if (!credit.canUse(RECORDING_CREDIT_COST)) {
             throw new CreditException(CreditErrorCode.INSUFFICIENT_CREDIT);
         }
