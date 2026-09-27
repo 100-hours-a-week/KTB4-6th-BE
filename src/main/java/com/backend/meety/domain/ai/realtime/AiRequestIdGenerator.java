@@ -13,4 +13,12 @@ public class AiRequestIdGenerator {
     public String sessionStopRequestId() {
         return "stop-" + UUID.randomUUID();
     }
+
+    public String sessionPauseRequestId() {
+        return "pause-" + UUID.randomUUID();
+    }
+
+    public String sessionResumeRequestId() {
+        return "resume-" + UUID.randomUUID();
+    }
 }
