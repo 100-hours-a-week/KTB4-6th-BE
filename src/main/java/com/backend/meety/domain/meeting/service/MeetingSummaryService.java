@@ -58,7 +58,8 @@ public class MeetingSummaryService {
     private final RecordingSessionRepository recordingSessionRepository;
 
     @Transactional
-    public SummaryCreateResponse requestSummary(Long userId, Long meetingId, String idempotencyKey) {
+    public SummaryCreateResponse requestSummary(
+            Long userId, Long meetingId, String idempotencyKey, String reason) {
         AiRequest existing = aiRequestRepository.findByIdempotencyKey(idempotencyKey).orElse(null);
         if (existing != null) {
             return alreadyAcceptedResponse(existing);
@@ -69,12 +70,14 @@ public class MeetingSummaryService {
         validateSummarizable(meeting);
 
         TeamCredit credit = lockCredit(meeting.getTeam().getId());
-        credit.validateCanUse(CreditPolicy.SUMMARY_REGENERATE_COST);
+        if (!credit.canUse(CreditPolicy.SUMMARY_REGENERATE_COST)) {
+            throw new CreditException(CreditErrorCode.INSUFFICIENT_CREDIT);
+        }
 
         AiRequest aiRequest = aiRequestRepository.save(
                 AiRequest.create(meeting.getTeam(), member, idempotencyKey, AiRequestType.SUMMARY));
         useCredit(credit, meeting.getTeam(), aiRequest.getId());
-        MeetingSummary summary = createNextVersion(aiRequest, meeting);
+        MeetingSummary summary = createNextVersion(aiRequest, meeting, normalizeReason(reason));
         return SummaryCreateResponse.of(summary, credit.getBalance());
     }
 
@@ -87,10 +90,6 @@ public class MeetingSummaryService {
         return SummaryDetailResponse.from(summary);
     }
 
-    /**
-     * 발행 경로 중 하나(AFTER_COMMIT 리스너)는 이미 완료된 트랜잭션 문맥에서 호출되므로
-     * REQUIRED로는 새 트랜잭션이 열리지 않는다. REQUIRES_NEW로 항상 새 트랜잭션을 연다.
-     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void registerFirstSummary(Long meetingId, Long recordingSessionId) {
         String idempotencyKey = SummaryPolicy.firstSummaryIdempotencyKey(meetingId);
@@ -105,7 +104,7 @@ public class MeetingSummaryService {
 
         AiRequest aiRequest = createFirstSummaryRequest(meeting, recordingSessionId, idempotencyKey);
         aiRequestRepository.save(aiRequest);
-        createNextVersion(aiRequest, meeting);
+        createNextVersion(aiRequest, meeting, null);
     }
 
     private AiRequest createFirstSummaryRequest(Meeting meeting, Long recordingSessionId, String idempotencyKey) {
@@ -162,11 +161,11 @@ public class MeetingSummaryService {
                 team, aiRequestId, CreditPolicy.SUMMARY_REGENERATE_COST, credit.getBalance()));
     }
 
-    private MeetingSummary createNextVersion(AiRequest aiRequest, Meeting meeting) {
+    private MeetingSummary createNextVersion(AiRequest aiRequest, Meeting meeting, String regenerationReason) {
         long version = meetingSummaryRepository.countByMeetingId(meeting.getId()) + 1;
         try {
             return meetingSummaryRepository.saveAndFlush(
-                    MeetingSummary.createPending(aiRequest, meeting.getTeam(), meeting, version));
+                    MeetingSummary.createPending(aiRequest, meeting.getTeam(), meeting, version, regenerationReason));
         } catch (DataIntegrityViolationException e) {
             throw new SummaryException(SummaryErrorCode.SUMMARY_ALREADY_PROCESSING);
         }
@@ -182,5 +181,12 @@ public class MeetingSummaryService {
                     return new CreditException(CreditErrorCode.TEAM_CREDIT_NOT_FOUND);
                 });
         return SummaryCreateResponse.of(summary, balance);
+    }
+
+    private String normalizeReason(String reason) {
+        if (reason == null || reason.isBlank()) {
+            return null;
+        }
+        return reason;
     }
 }

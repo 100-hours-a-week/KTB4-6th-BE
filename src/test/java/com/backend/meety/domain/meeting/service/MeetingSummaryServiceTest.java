@@ -99,7 +99,7 @@ class MeetingSummaryServiceTest {
     @Test
     @DisplayName("재생성이 접수되면 크레딧을 차감하고 회차 행을 만든다")
     void regenerateSucceeds() {
-        SummaryCreateResponse response = service.requestSummary(1L, 100L, IDEMPOTENCY_KEY);
+        SummaryCreateResponse response = service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null);
 
         assertThat(response.summaryId()).isEqualTo(502L);
         assertThat(response.version()).isEqualTo(2L);
@@ -110,7 +110,7 @@ class MeetingSummaryServiceTest {
     @Test
     @DisplayName("원장에 USE:AI_SUMMARY:{aiRequestId} 멱등키가 기록된다")
     void recordsLedgerWithIdempotencyKey() {
-        service.requestSummary(1L, 100L, IDEMPOTENCY_KEY);
+        service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null);
 
         ArgumentCaptor<CreditLedger> captor = ArgumentCaptor.forClass(CreditLedger.class);
         verify(ledgers).save(captor.capture());
@@ -124,7 +124,7 @@ class MeetingSummaryServiceTest {
     @Test
     @DisplayName("생성되는 AiRequest는 SUMMARY 타입에 ACCEPTED 상태다")
     void createsAcceptedSummaryRequest() {
-        service.requestSummary(1L, 100L, IDEMPOTENCY_KEY);
+        service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null);
 
         ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
         verify(aiRequests).save(captor.capture());
@@ -139,12 +139,12 @@ class MeetingSummaryServiceTest {
     void replaysSameIdempotencyKey() {
         AiRequest existing = withId(AiRequest.create(team, member, IDEMPOTENCY_KEY, AiRequestType.SUMMARY), 900L);
         MeetingSummary existingSummary = withId(
-                MeetingSummary.createPending(existing, team, meeting, 2L), 502L);
+                MeetingSummary.createPending(existing, team, meeting, 2L, null), 502L);
         when(aiRequests.findByIdempotencyKey(IDEMPOTENCY_KEY)).thenReturn(Optional.of(existing));
         when(summaries.findByAiRequestId(900L)).thenReturn(Optional.of(existingSummary));
         when(credits.findByTeamIdAndDeletedAtIsNull(2L)).thenReturn(Optional.of(credit));
 
-        SummaryCreateResponse response = service.requestSummary(1L, 100L, IDEMPOTENCY_KEY);
+        SummaryCreateResponse response = service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null);
 
         assertThat(response.summaryId()).isEqualTo(502L);
         verify(aiRequests, never()).save(any());
@@ -156,7 +156,7 @@ class MeetingSummaryServiceTest {
     void rejectsMissingMeeting() {
         when(meetings.findByIdAndDeletedAtIsNull(100L)).thenReturn(Optional.empty());
 
-        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY), MeetingErrorCode.MEETING_NOT_FOUND);
+        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null), MeetingErrorCode.MEETING_NOT_FOUND);
     }
 
     @Test
@@ -165,7 +165,7 @@ class MeetingSummaryServiceTest {
         when(members.findByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE))
                 .thenReturn(Optional.empty());
 
-        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY), MeetingErrorCode.MEETING_ACCESS_DENIED);
+        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null), MeetingErrorCode.MEETING_ACCESS_DENIED);
     }
 
     @Test
@@ -174,7 +174,7 @@ class MeetingSummaryServiceTest {
         Meeting waiting = meeting(team, member);
         when(meetings.findByIdAndDeletedAtIsNull(100L)).thenReturn(Optional.of(waiting));
 
-        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY), SummaryErrorCode.MEETING_NOT_COMPLETED);
+        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null), SummaryErrorCode.MEETING_NOT_COMPLETED);
         verify(aiRequests, never()).save(any());
     }
 
@@ -183,7 +183,7 @@ class MeetingSummaryServiceTest {
     void rejectsEmptyTranscript() {
         when(transcripts.existsByMeetingId(100L)).thenReturn(false);
 
-        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY), SummaryErrorCode.TRANSCRIPT_EMPTY);
+        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null), SummaryErrorCode.TRANSCRIPT_EMPTY);
         verify(credits, never()).findByTeamIdForUpdate(anyLong());
         assertThat(credit.getBalance()).isEqualTo(10L);
     }
@@ -193,7 +193,7 @@ class MeetingSummaryServiceTest {
     void rejectsAlreadyProcessing() {
         when(summaries.existsByMeetingIdAndAiRequestStatusIn(100L, PROCESSING)).thenReturn(true);
 
-        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY), SummaryErrorCode.SUMMARY_ALREADY_PROCESSING);
+        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null), SummaryErrorCode.SUMMARY_ALREADY_PROCESSING);
         verify(credits, never()).findByTeamIdForUpdate(anyLong());
     }
 
@@ -203,7 +203,7 @@ class MeetingSummaryServiceTest {
         TeamCredit poor = credit(team, CreditPolicy.SUMMARY_REGENERATE_COST - 1);
         when(credits.findByTeamIdForUpdate(2L)).thenReturn(Optional.of(poor));
 
-        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY), CreditErrorCode.INSUFFICIENT_CREDIT);
+        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null), CreditErrorCode.INSUFFICIENT_CREDIT);
         verify(aiRequests, never()).save(any());
     }
 
@@ -213,7 +213,7 @@ class MeetingSummaryServiceTest {
         when(summaries.saveAndFlush(any(MeetingSummary.class)))
                 .thenThrow(new DataIntegrityViolationException("uk_meeting_summaries_meeting_id_version"));
 
-        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY), SummaryErrorCode.SUMMARY_ALREADY_PROCESSING);
+        assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null), SummaryErrorCode.SUMMARY_ALREADY_PROCESSING);
     }
 
     @Nested
@@ -226,7 +226,7 @@ class MeetingSummaryServiceTest {
         @BeforeEach
         void setUpSummary() {
             aiRequest = withId(AiRequest.create(team, member, IDEMPOTENCY_KEY, AiRequestType.SUMMARY), 900L);
-            summary = withId(MeetingSummary.createPending(aiRequest, team, meeting, 2L), 502L);
+            summary = withId(MeetingSummary.createPending(aiRequest, team, meeting, 2L, null), 502L);
             when(summaries.findLatestByMeetingId(100L)).thenReturn(Optional.of(summary));
         }
 

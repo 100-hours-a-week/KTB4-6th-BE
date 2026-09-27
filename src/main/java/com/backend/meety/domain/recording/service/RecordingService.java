@@ -104,7 +104,9 @@ public class RecordingService {
         logElapsed("[RECORDING_START] credit lock acquired meetingId={}, userId={}, teamId={}, elapsedMs={}",
                 elapsedMs(segmentStartedAt), meetingId, userId, meeting.getTeam().getId());
 
-        credit.validateCanUse(RECORDING_CREDIT_COST);
+        if (!credit.canUse(RECORDING_CREDIT_COST)) {
+            throw new CreditException(CreditErrorCode.INSUFFICIENT_CREDIT);
+        }
         LocalDateTime now = LocalDateTime.now(clock);
         segmentStartedAt = System.nanoTime();
         RecordingSession session = recordingRepository.save(RecordingSession.start(meeting, member, now));

@@ -63,7 +63,7 @@ class SummaryProcessingServiceTest {
         meeting.start(LocalDateTime.now());
         meeting.complete(LocalDateTime.now());
         aiRequest = withId(AiRequest.create(team, member, "key-1", AiRequestType.SUMMARY), 900L);
-        summary = withId(MeetingSummary.createPending(aiRequest, team, meeting, 1L), 502L);
+        summary = withId(MeetingSummary.createPending(aiRequest, team, meeting, 1L, null), 502L);
         when(aiRequests.findById(900L)).thenReturn(Optional.of(aiRequest));
         when(summaries.findByAiRequestId(900L)).thenReturn(Optional.of(summary));
         when(transcripts.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of());

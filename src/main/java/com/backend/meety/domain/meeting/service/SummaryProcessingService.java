@@ -44,7 +44,7 @@ public class SummaryProcessingService {
             return Optional.empty();
         }
         aiRequest.markProcessing();
-        return Optional.of(summaryAiRequestFactory.create(aiRequest, summary.getMeeting()));
+        return Optional.of(summaryAiRequestFactory.create(aiRequest, summary));
     }
 
     @Transactional

@@ -4,6 +4,7 @@ import com.backend.meety.domain.ai.client.SummaryAiRequest;
 import com.backend.meety.domain.ai.client.SummaryAiSegment;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.meeting.entity.MeetingSummary;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
 import java.time.ZoneId;
@@ -23,7 +24,8 @@ public class SummaryAiRequestFactory {
 
     private final TranscriptSegmentRepository transcriptSegmentRepository;
 
-    public SummaryAiRequest create(AiRequest aiRequest, Meeting meeting) {
+    public SummaryAiRequest create(AiRequest aiRequest, MeetingSummary summary) {
+        Meeting meeting = summary.getMeeting();
         List<SummaryAiSegment> segments = transcriptSegmentRepository
                 .findAllByMeetingIdOrderBySequence(meeting.getId()).stream()
                 .map(this::toSegment)
@@ -34,6 +36,7 @@ public class SummaryAiRequestFactory {
                 meeting.getTitle(),
                 emptyIfNull(meeting.getPurpose()),
                 emptyIfNull(meeting.getNote()),
+                summary.getRegenerationReason(),
                 meeting.getStartedAt().atZone(ZoneId.systemDefault()).toOffsetDateTime().toString(),
                 List.of(),
                 segments
