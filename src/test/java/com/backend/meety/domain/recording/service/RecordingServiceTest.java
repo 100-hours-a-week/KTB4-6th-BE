@@ -50,6 +50,7 @@ import com.backend.meety.global.exception.BusinessException;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -119,6 +120,7 @@ class RecordingServiceTest {
         InOrder order = inOrder(meetings, credits, recordings, ledgers);
         order.verify(meetings).findByIdForUpdateAndDeletedAtIsNull(100L);
         order.verify(credits).findByTeamIdForUpdate(2L);
+        order.verify(meetings).findFirstByTeamIdAndStatusAndDeletedAtIsNullOrderByIdAsc(2L, MeetingStatus.IN_PROGRESS);
         order.verify(recordings).save(any());
         order.verify(ledgers).save(any());
     }
@@ -166,6 +168,28 @@ class RecordingServiceTest {
         when(recordings.existsByMeetingIdAndStatusInAndDeletedAtIsNull(100L, ACTIVE)).thenReturn(true);
         assertCode(() -> service.start(1L, 100L), RecordingErrorCode.RECORDING_ALREADY_ACTIVE);
         verifyNoInteractions(credits, ledgers);
+    }
+
+    @Test
+    @DisplayName("같은 팀에 진행 중 회의가 있으면 다른 회의 녹음 시작을 거부한다")
+    void startRejectsWhenTeamAlreadyHasInProgressMeeting() {
+        // 테스트 목적:
+        // 같은 팀의 다른 회의가 이미 진행 중인 경우
+        // 새 녹음 세션 생성과 크레딧 차감 없이 녹음 시작 요청이 거부되는지 검증한다.
+
+        // given
+        allowStart();
+        Meeting inProgressMeeting = meeting(team, member);
+        inProgressMeeting.start(NOW);
+        when(meetings.findFirstByTeamIdAndStatusAndDeletedAtIsNullOrderByIdAsc(2L, MeetingStatus.IN_PROGRESS))
+                .thenReturn(Optional.of(inProgressMeeting));
+
+        // when, then
+        assertCode(() -> service.start(1L, 100L), RecordingErrorCode.RECORDING_ALREADY_ACTIVE);
+        verify(recordings, never()).save(any());
+        verifyNoInteractions(ledgers);
+        assertThat(credit.getBalance()).isEqualTo(20L);
+        assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.WAITING);
     }
 
     @Test

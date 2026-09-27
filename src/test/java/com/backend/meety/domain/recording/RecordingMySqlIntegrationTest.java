@@ -42,6 +42,7 @@ import javax.sql.DataSource;
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -190,7 +191,7 @@ class RecordingMySqlIntegrationTest {
         Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
         statistics.clear();
         long sessionId = recordings.start(userId, meetingId).recordingSessionId();
-        assertThat(statistics.getPrepareStatementCount()).as("start SQL count").isEqualTo(9);
+        assertThat(statistics.getPrepareStatementCount()).as("start SQL count").isEqualTo(10);
         statistics.clear();
         recordings.getActive(userId, meetingId);
         assertThat(statistics.getPrepareStatementCount()).as("GET SQL count").isEqualTo(3);
@@ -253,13 +254,24 @@ class RecordingMySqlIntegrationTest {
     }
 
     @Test
-    void twoMeetingsCannotSpendSameTeamBalance() throws Exception {
+    @DisplayName("같은 팀의 두 회의를 동시에 시작해도 진행 중 회의는 하나만 생성된다")
+    void twoMeetingsInSameTeamCannotStartTogether() throws Exception {
+        // 테스트 목적:
+        // 같은 팀의 서로 다른 회의 녹음 시작 요청이 동시에 들어온 경우
+        // 팀 내 진행 중 회의가 하나로 제한되고 크레딧도 한 번만 차감되는지 검증한다.
+
+        // given
+        jdbc.update("update team_credits set balance = 40 where team_id = ?", teamId);
         long secondMeeting = anotherMeeting();
+
+        // when
         List<String> outcomes = race(
                 () -> recordings.start(userId, meetingId),
                 () -> recordings.start(userId, secondMeeting));
-        assertThat(outcomes).containsExactlyInAnyOrder("OK", "INSUFFICIENT_CREDIT");
-        assertThat(balance()).isZero();
+
+        // then
+        assertThat(outcomes).containsExactlyInAnyOrder("OK", "RECORDING_ALREADY_ACTIVE");
+        assertThat(balance()).isEqualTo(20L);
         assertThat(count("recording_sessions")).isEqualTo(1);
         assertThat(count("credit_ledgers")).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from meetings where status = 'IN_PROGRESS'", Long.class))

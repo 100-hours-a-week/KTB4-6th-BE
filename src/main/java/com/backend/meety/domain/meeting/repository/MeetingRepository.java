@@ -63,6 +63,9 @@ public interface MeetingRepository extends JpaRepository<Meeting, Long>, Meeting
             """)
     Optional<Meeting> findByIdForUpdateAndDeletedAtIsNull(@Param("meetingId") Long meetingId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<Meeting> findFirstByTeamIdAndStatusAndDeletedAtIsNullOrderByIdAsc(Long teamId, MeetingStatus status);
+
     @Query("""
             select m
             from Meeting m
