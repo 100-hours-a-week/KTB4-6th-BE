@@ -51,4 +51,23 @@ class TeamCreditTest {
 
         assertThat(credit.getBalance()).isEqualTo(CreditPolicy.MAX_BALANCE);
     }
+
+    @Test
+    @DisplayName("잔액이 차감액 이상이면 canUse는 true다")
+    void canUseWhenEnough() {
+        TeamCredit credit = TeamCredit.create(TEAM, 10L);
+
+        assertThat(credit.canUse(10L)).isTrue();
+        assertThat(credit.canUse(11L)).isFalse();
+    }
+
+    @Test
+    @DisplayName("use는 잔액을 차감한다")
+    void use() {
+        TeamCredit credit = TeamCredit.create(TEAM, 10L);
+
+        credit.use(3L);
+
+        assertThat(credit.getBalance()).isEqualTo(7L);
+    }
 }

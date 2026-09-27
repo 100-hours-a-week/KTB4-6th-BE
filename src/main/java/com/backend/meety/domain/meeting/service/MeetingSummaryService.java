@@ -70,7 +70,9 @@ public class MeetingSummaryService {
         validateSummarizable(meeting);
 
         TeamCredit credit = lockCredit(meeting.getTeam().getId());
-        credit.validateCanUse(CreditPolicy.SUMMARY_REGENERATE_COST);
+        if (!credit.canUse(CreditPolicy.SUMMARY_REGENERATE_COST)) {
+            throw new CreditException(CreditErrorCode.INSUFFICIENT_CREDIT);
+        }
 
         AiRequest aiRequest = aiRequestRepository.save(
                 AiRequest.create(meeting.getTeam(), member, idempotencyKey, AiRequestType.SUMMARY));
