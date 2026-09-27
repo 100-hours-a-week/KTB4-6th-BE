@@ -13,7 +13,7 @@ spring:
     password: ${DB_PASSWORD}
   jpa:
     hibernate:
-      ddl-auto: create
+      ddl-auto: update
     properties:
       hibernate:
         format_sql: false
@@ -30,4 +30,4 @@ cors:
 
 ai:
   websocket-url: ${AI_WEBSOCKET_URL}
-  http-url: ${AI_HTTP_URL:https://analysis.meety.io.kr}
+  http-url: ${AI_HTTP_URL}
