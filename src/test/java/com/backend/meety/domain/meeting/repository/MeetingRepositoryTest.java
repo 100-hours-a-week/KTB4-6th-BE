@@ -78,16 +78,24 @@ class MeetingRepositoryTest {
     }
 
     @Test
-    @DisplayName("홈 종료 회의 요약 query는 COMPLETED와 soft delete 조건으로 MySQL duration aggregate를 사용한다")
+    @DisplayName("홈 종료 회의 요약 query는 완료 회의 시간을 초 단위에서 분 단위로 올림 집계한다")
     void aggregateCompletedMeetingSummaryQuery() throws NoSuchMethodException {
+        // 테스트 목적:
+        // 홈 화면 전체 녹음 시간이 30초를 0분으로 버림하지 않고
+        // 완료 회의별 초 단위 시간을 분 단위로 올림 집계하는지 검증한다.
+
+        // given
         Query query = MeetingRepository.class
                 .getMethod("aggregateCompletedMeetingSummary", Long.class)
                 .getAnnotation(Query.class);
 
+        // when & then
         assertThat(query).isNotNull();
         assertThat(query.nativeQuery()).isTrue();
         assertThat(query.value()).contains("count(*) as totalMeetingCount");
-        assertThat(query.value()).contains("timestampdiff(minute, started_at, ended_at)");
+        assertThat(query.value()).contains("ceiling(timestampdiff(second, started_at, ended_at) / 60.0)");
+        assertThat(query.value()).contains("cast(coalesce(sum(");
+        assertThat(query.value()).contains("as signed) as totalMeetingMinutes");
         assertThat(query.value()).contains("team_id = :teamId");
         assertThat(query.value()).contains("status = 'COMPLETED'");
         assertThat(query.value()).contains("deleted_at is null");
