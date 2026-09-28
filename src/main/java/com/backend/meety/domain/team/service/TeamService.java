@@ -10,6 +10,7 @@ import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
 import com.backend.meety.domain.team.dto.TeamDetailResponse;
+import com.backend.meety.domain.team.dto.TeamNameUpdateResponse;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamInvitationCode;
@@ -88,6 +89,15 @@ public class TeamService {
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.INVITATION_CODE_CREATE_FAILED);
         }
+    }
+
+    @Transactional
+    public TeamNameUpdateResponse changeName(Long userId, Long teamId, String name) {
+        Team team = lockActiveTeam(teamId);
+        validateLeader(teamId, userId);
+        team.changeName(name);
+        teamRepository.flush();
+        return TeamNameUpdateResponse.from(team);
     }
 
     @Transactional(readOnly = true)

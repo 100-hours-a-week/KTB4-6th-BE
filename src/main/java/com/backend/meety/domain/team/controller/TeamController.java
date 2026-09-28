@@ -8,6 +8,8 @@ import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
 import com.backend.meety.domain.team.dto.TeamDetailResponse;
 import com.backend.meety.domain.team.dto.TeamMemberListResponse;
+import com.backend.meety.domain.team.dto.TeamNameUpdateRequest;
+import com.backend.meety.domain.team.dto.TeamNameUpdateResponse;
 import com.backend.meety.domain.team.service.TeamMemberService;
 import com.backend.meety.domain.team.service.TeamService;
 import com.backend.meety.global.response.ApiResponse;
@@ -18,6 +20,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -54,6 +57,15 @@ public class TeamController {
             @PathVariable Long teamId
     ) {
         return ResponseEntity.ok(ApiResponse.success(teamService.getTeam(userId, teamId)));
+    }
+
+    @PatchMapping("/{teamId}")
+    public ResponseEntity<ApiResponse<TeamNameUpdateResponse>> changeName(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long teamId,
+            @Valid @RequestBody TeamNameUpdateRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(teamService.changeName(userId, teamId, request.name())));
     }
 
     @DeleteMapping("/{teamId}")
