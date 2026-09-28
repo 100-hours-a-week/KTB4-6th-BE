@@ -33,6 +33,10 @@ public class Team extends BaseEntity {
         return new Team(name);
     }
 
+    public void changeName(String name) {
+        this.name = name;
+    }
+
     public void delete(LocalDateTime deletedAt) {
         markDeleted(deletedAt);
     }
