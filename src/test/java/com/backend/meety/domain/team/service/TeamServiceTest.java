@@ -20,6 +20,7 @@ import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
 import com.backend.meety.domain.team.dto.TeamDetailResponse;
+import com.backend.meety.domain.team.dto.TeamNameUpdateResponse;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamInvitationCode;
@@ -499,5 +500,74 @@ class TeamServiceTest {
         then(teamCreditRepository).should().save(creditCaptor.capture());
         assertThat(creditCaptor.getValue().getBalance()).isEqualTo(CreditPolicy.TEAM_CREATE_GRANT);
         then(creditLedgerRepository).should().save(any(CreditLedger.class));
+    }
+
+    @Test
+    @DisplayName("팀장은 팀 이름을 변경한다")
+    void changeName() {
+        Team team = Team.create("Meety Team");
+        TeamMember leader = TeamMember.createLeader(User.create(), team, "jay");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(leader));
+
+        TeamNameUpdateResponse response = teamService.changeName(1L, 7L, "NewTeam");
+
+        assertThat(team.getName()).isEqualTo("NewTeam");
+        assertThat(response.name()).isEqualTo("NewTeam");
+        then(teamRepository).should().flush();
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 팀의 이름은 변경할 수 없다")
+    void changeNameFailOnUnknownTeam() {
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamService.changeName(1L, 7L, "NewTeam"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("삭제된 팀의 이름은 변경할 수 없다")
+    void changeNameFailOnDeletedTeam() {
+        Team team = Team.create("Meety Team");
+        ReflectionTestUtils.setField(team, "deletedAt", LocalDateTime.of(2026, 9, 16, 10, 0));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+
+        assertThatThrownBy(() -> teamService.changeName(1L, 7L, "NewTeam"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_NOT_FOUND));
+        assertThat(team.getName()).isEqualTo("Meety Team");
+    }
+
+    @Test
+    @DisplayName("팀원이 아니면 팀 이름을 변경할 수 없다")
+    void changeNameFailOnNonMember() {
+        Team team = Team.create("Meety Team");
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamService.changeName(1L, 7L, "NewTeam"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_LEADER_REQUIRED));
+        assertThat(team.getName()).isEqualTo("Meety Team");
+    }
+
+    @Test
+    @DisplayName("팀장이 아닌 팀원은 팀 이름을 변경할 수 없다")
+    void changeNameFailOnNonLeader() {
+        Team team = Team.create("Meety Team");
+        TeamMember member = TeamMember.createLeader(User.create(), team, "jay");
+        ReflectionTestUtils.setField(member, "role", TeamMemberRole.MEMBER);
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
+                .willReturn(Optional.of(member));
+
+        assertThatThrownBy(() -> teamService.changeName(1L, 7L, "NewTeam"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_LEADER_REQUIRED));
+        assertThat(team.getName()).isEqualTo("Meety Team");
     }
 }
