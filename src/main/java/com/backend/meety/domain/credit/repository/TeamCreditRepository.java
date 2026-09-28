@@ -2,6 +2,7 @@ package com.backend.meety.domain.credit.repository;
 
 import com.backend.meety.domain.credit.entity.TeamCredit;
 import jakarta.persistence.LockModeType;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -15,4 +16,7 @@ public interface TeamCreditRepository extends JpaRepository<TeamCredit, Long> {
     Optional<TeamCredit> findByTeamIdForUpdate(@Param("teamId") Long teamId);
 
     Optional<TeamCredit> findByTeamIdAndDeletedAtIsNull(Long teamId);
+
+    @Query("select c.team.id from TeamCredit c where c.deletedAt is null and c.team.deletedAt is null")
+    List<Long> findActiveTeamIds();
 }

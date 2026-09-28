@@ -92,6 +92,15 @@ public class CreditLedger extends BaseEntity {
         return type + ":" + sourceType + ":" + sourceId;
     }
 
+    public static String scheduleKeyOf(Long teamId, String weekKey) {
+        return CreditTransactionType.EARN + ":" + CreditSourceType.SCHEDULE + ":" + teamId + ":" + weekKey;
+    }
+
+    public static CreditLedger earnForSchedule(Team team, String weekKey, long amount, long balanceAfter) {
+        return create(team, scheduleKeyOf(team.getId(), weekKey), CreditTransactionType.EARN,
+                CreditSourceType.SCHEDULE, null, amount, balanceAfter);
+    }
+
     public static CreditLedger restoreForSummary(Team team, Long aiRequestId, long amount, long balanceAfter) {
         return create(team, CreditTransactionType.RESTORE, CreditSourceType.AI_SUMMARY,
                 aiRequestId, amount, balanceAfter);
