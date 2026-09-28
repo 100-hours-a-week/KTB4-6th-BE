@@ -92,6 +92,18 @@ public class CreditLedger extends BaseEntity {
         return type + ":" + sourceType + ":" + sourceId;
     }
 
+    /**
+     * 정기 적립은 원본 레코드가 없어 팀과 주차로 멱등키를 만든다. 예: EARN:SCHEDULE:42:2026-W40
+     */
+    public static String scheduleKeyOf(Long teamId, String weekKey) {
+        return CreditTransactionType.EARN + ":" + CreditSourceType.SCHEDULE + ":" + teamId + ":" + weekKey;
+    }
+
+    public static CreditLedger earnForSchedule(Team team, String weekKey, long amount, long balanceAfter) {
+        return create(team, scheduleKeyOf(team.getId(), weekKey), CreditTransactionType.EARN,
+                CreditSourceType.SCHEDULE, null, amount, balanceAfter);
+    }
+
     public static CreditLedger restoreForSummary(Team team, Long aiRequestId, long amount, long balanceAfter) {
         return create(team, CreditTransactionType.RESTORE, CreditSourceType.AI_SUMMARY,
                 aiRequestId, amount, balanceAfter);
