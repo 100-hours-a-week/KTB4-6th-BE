@@ -11,6 +11,7 @@ public record RecordingSessionResponse(
         RecordingSessionStatus status,
         LocalDateTime startedAt,
         LocalDateTime pausedAt,
+        Long totalPausedDurationMs,
         LocalDateTime endedAt,
         LocalDateTime autoEndAt
 ) {
@@ -18,8 +19,8 @@ public record RecordingSessionResponse(
     public static RecordingSessionResponse from(RecordingSession session) {
         return new RecordingSessionResponse(
                 session.getId(), session.getMeeting().getId(), session.getStartedByTeamMember().getId(),
-                session.getStatus(), session.getStartedAt(), session.getPausedAt(), session.getEndedAt(),
-                session.getAutoEndAt()
+                session.getStatus(), session.getStartedAt(), session.getPausedAt(),
+                session.getTotalPausedDurationMs(), session.getEndedAt(), session.getAutoEndAt()
         );
     }
 }

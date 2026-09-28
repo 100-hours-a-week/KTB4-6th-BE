@@ -228,6 +228,55 @@ class RecordingServiceTest {
     }
 
     @Test
+    @DisplayName("활성 녹음 조회는 PAUSED 상태의 현재 일시정지 시각과 누적 일시정지 시간을 반환한다")
+    void getActiveReturnsPausedAtAndTotalPausedDurationWhenPaused() {
+        // 테스트 목적:
+        // 활성 녹음이 PAUSED 상태인 경우 중간 입장 사용자가 진행 시간을 계산할 수 있도록
+        // 현재 pausedAt과 이미 종료된 일시정지 누적 시간이 응답에 포함되는지 검증한다.
+
+        // given
+        RecordingSession session = session(meeting, member);
+        session.pause(NOW.plusMinutes(10));
+        session.resume(NOW.plusMinutes(15));
+        session.pause(NOW.plusMinutes(25));
+        allowRead();
+        when(recordings.findByMeetingIdAndStatusInAndDeletedAtIsNull(100L, ACTIVE))
+                .thenReturn(Optional.of(session));
+
+        // when
+        RecordingSessionResponse response = service.getActive(1L, 100L);
+
+        // then
+        assertThat(response.status()).isEqualTo(RecordingSessionStatus.PAUSED);
+        assertThat(response.pausedAt()).isEqualTo(NOW.plusMinutes(25));
+        assertThat(response.totalPausedDurationMs()).isEqualTo(300_000L);
+    }
+
+    @Test
+    @DisplayName("활성 녹음 조회는 RECORDING 상태에서 pausedAt 없이 누적 일시정지 시간을 반환한다")
+    void getActiveReturnsTotalPausedDurationAndNullPausedAtWhenRecording() {
+        // 테스트 목적:
+        // 활성 녹음이 RECORDING 상태인 경우 현재 pausedAt은 null이고
+        // 이전 일시정지 구간의 누적 시간이 응답에 포함되는지 검증한다.
+
+        // given
+        RecordingSession session = session(meeting, member);
+        session.pause(NOW.plusMinutes(10));
+        session.resume(NOW.plusMinutes(15));
+        allowRead();
+        when(recordings.findByMeetingIdAndStatusInAndDeletedAtIsNull(100L, ACTIVE))
+                .thenReturn(Optional.of(session));
+
+        // when
+        RecordingSessionResponse response = service.getActive(1L, 100L);
+
+        // then
+        assertThat(response.status()).isEqualTo(RecordingSessionStatus.RECORDING);
+        assertThat(response.pausedAt()).isNull();
+        assertThat(response.totalPausedDurationMs()).isEqualTo(300_000L);
+    }
+
+    @Test
     void getActiveWithoutSessionReturnsNotFound() {
         allowRead();
         assertCode(() -> service.getActive(1L, 100L), RecordingErrorCode.RECORDING_SESSION_NOT_FOUND);

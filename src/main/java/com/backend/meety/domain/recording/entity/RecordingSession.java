@@ -16,6 +16,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -51,6 +52,9 @@ public class RecordingSession extends BaseEntity {
     @Column(name = "paused_at")
     private LocalDateTime pausedAt;
 
+    @Column(name = "total_paused_duration_ms", nullable = false, columnDefinition = "BIGINT DEFAULT 0")
+    private Long totalPausedDurationMs = 0L;
+
     @Column(name = "ended_at")
     private LocalDateTime endedAt;
 
@@ -63,6 +67,7 @@ public class RecordingSession extends BaseEntity {
         session.startedByTeamMember = startedBy;
         session.status = RecordingSessionStatus.RECORDING;
         session.startedAt = now;
+        session.totalPausedDurationMs = 0L;
         session.autoEndAt = now.plusMinutes(MAX_RECORDING_MINUTES);
         return session;
     }
@@ -78,6 +83,7 @@ public class RecordingSession extends BaseEntity {
         if (!now.isBefore(autoEndAt)) {
             throw new RecordingException(RecordingErrorCode.RECORDING_AUTO_END_REACHED);
         }
+        accumulateCurrentPause(now);
         status = RecordingSessionStatus.RECORDING;
         pausedAt = null;
     }
@@ -86,9 +92,19 @@ public class RecordingSession extends BaseEntity {
         if (status != RecordingSessionStatus.RECORDING && status != RecordingSessionStatus.PAUSED) {
             throw new RecordingException(RecordingErrorCode.INVALID_RECORDING_STATUS_TRANSITION);
         }
+        if (status == RecordingSessionStatus.PAUSED) {
+            accumulateCurrentPause(now);
+        }
         status = RecordingSessionStatus.COMPLETED;
         pausedAt = null;
         endedAt = now;
+    }
+
+    private void accumulateCurrentPause(LocalDateTime now) {
+        if (pausedAt == null || now.isBefore(pausedAt)) {
+            throw new RecordingException(RecordingErrorCode.INVALID_RECORDING_STATUS_TRANSITION);
+        }
+        totalPausedDurationMs += Duration.between(pausedAt, now).toMillis();
     }
 
     private void requireStatus(RecordingSessionStatus expected) {

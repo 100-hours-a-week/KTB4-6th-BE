@@ -26,6 +26,7 @@ import com.backend.meety.global.exception.GlobalExceptionHandler;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -75,16 +76,28 @@ class RecordingControllerTest {
                 .andExpect(jsonPath("$.data.startedAt").value("2026-09-18T14:20:00"))
                 .andExpect(jsonPath("$.data.autoEndAt").value("2026-09-18T15:50:00"))
                 .andExpect(jsonPath("$.data.pausedAt").isEmpty())
+                .andExpect(jsonPath("$.data.totalPausedDurationMs").value(300000))
                 .andExpect(jsonPath("$.data.endedAt").isEmpty())
                 .andExpect(jsonPath("$.data.createdAt").doesNotExist());
         verify(service).start(1L, 100L);
     }
 
     @Test
+    @DisplayName("활성 녹음 조회는 누적 일시정지 시간과 현재 일시정지 시각을 반환한다")
     void getActiveReturnsCommonResponse() throws Exception {
+        // 테스트 목적:
+        // 회의 중간에 입장한 사용자가 실제 진행 시간을 계산할 수 있도록
+        // 활성 녹음 조회 응답에 status, pausedAt, totalPausedDurationMs가 포함되는지 검증한다.
+
+        // given
         when(service.getActive(1L, 100L)).thenReturn(response(RecordingSessionStatus.PAUSED));
+
+        // when, then
         mvc.perform(get("/api/v1/meetings/100/recording"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("PAUSED"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PAUSED"))
+                .andExpect(jsonPath("$.data.pausedAt").value("2026-09-18T14:20:00"))
+                .andExpect(jsonPath("$.data.totalPausedDurationMs").value(300000));
     }
 
     @Test
@@ -166,6 +179,6 @@ class RecordingControllerTest {
     private RecordingSessionResponse response(RecordingSessionStatus state) {
         return new RecordingSessionResponse(700L, 100L, 10L, state, NOW,
                 state == RecordingSessionStatus.PAUSED ? NOW : null,
-                state == RecordingSessionStatus.COMPLETED ? NOW : null, NOW.plusMinutes(90));
+                300_000L, state == RecordingSessionStatus.COMPLETED ? NOW : null, NOW.plusMinutes(90));
     }
 }
