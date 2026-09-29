@@ -10,9 +10,9 @@ public final class CreditPolicy {
 
     public static final long MAX_BALANCE = 1000L;
 
-    public static final long TEAM_CREATE_GRANT = 100L;
+    public static final long TEAM_CREATE_GRANT = 200L;
 
-    public static final long WEEKLY_GRANT = 50L;
+    public static final long WEEKLY_GRANT = 200L;
 
     public static final String WEEKLY_GRANT_CRON = "0 0 0 * * MON";
 
