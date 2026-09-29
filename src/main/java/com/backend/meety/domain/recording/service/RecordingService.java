@@ -1,5 +1,6 @@
 package com.backend.meety.domain.recording.service;
 
+import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.TeamCredit;
 import com.backend.meety.domain.credit.exception.CreditErrorCode;
@@ -47,7 +48,6 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class RecordingService {
 
-    private static final long RECORDING_CREDIT_COST = 20L;
     private static final long SLOW_LOG_THRESHOLD_MS = 1_000L;
     private static final List<RecordingSessionStatus> ACTIVE_STATUSES = List.of(
             RecordingSessionStatus.RECORDING, RecordingSessionStatus.PAUSED
@@ -108,7 +108,7 @@ public class RecordingService {
                 meeting.getTeam().getId(), MeetingStatus.IN_PROGRESS).isPresent()) {
             throw new RecordingException(RecordingErrorCode.RECORDING_ALREADY_ACTIVE);
         }
-        if (!credit.canUse(RECORDING_CREDIT_COST)) {
+        if (!credit.canUse(CreditPolicy.RECORDING_COST)) {
             throw new CreditException(CreditErrorCode.INSUFFICIENT_CREDIT);
         }
         LocalDateTime now = LocalDateTime.now(clock);
@@ -119,9 +119,9 @@ public class RecordingService {
                 elapsedMs(segmentStartedAt), meetingId, userId, session.getId());
 
         segmentStartedAt = System.nanoTime();
-        credit.use(RECORDING_CREDIT_COST);
+        credit.use(CreditPolicy.RECORDING_COST);
         ledgerRepository.save(CreditLedger.useForRecording(
-                meeting.getTeam(), session.getId(), RECORDING_CREDIT_COST, credit.getBalance()));
+                meeting.getTeam(), session.getId(), CreditPolicy.RECORDING_COST, credit.getBalance()));
         logElapsed("[RECORDING_START] credit use and ledger save completed meetingId={}, userId={}, teamId={}, "
                         + "recordingSessionId={}, elapsedMs={}",
                 elapsedMs(segmentStartedAt), meetingId, userId, meeting.getTeam().getId(), session.getId());
