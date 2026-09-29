@@ -42,7 +42,8 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
         }
         byte[] audio = new byte[chunkBytes];
         message.getPayload().get(audio);
-        boolean forwarded = aiConnectionService.forwardAudio(context.recordingSessionId(), audio);
+        boolean forwarded = aiConnectionService.forwardAudio(
+                context.recordingSessionId(), context.streamEpoch(), audio);
 
         AudioChunkStats stats = stats(session);
         stats.record(chunkBytes, forwarded);
