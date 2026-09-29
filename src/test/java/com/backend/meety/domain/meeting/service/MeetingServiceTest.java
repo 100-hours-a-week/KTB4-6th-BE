@@ -42,7 +42,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -230,7 +229,6 @@ class MeetingServiceTest {
         verify(meetingRepository, never()).saveAndFlush(any());
     }
 
-    @Disabled("하루 회의 생성 제한을 임시 해제한 상태다. MeetingService의 TODO와 함께 복구한다.")
     @Test
     @DisplayName("오늘 생성된 회의가 5개이면 회의를 생성할 수 없다")
     void createMeetingWithDailyLimitExceeded() {
@@ -244,7 +242,6 @@ class MeetingServiceTest {
         verify(meetingRepository, never()).saveAndFlush(any());
     }
 
-    @Disabled("하루 회의 생성 제한을 임시 해제한 상태다. MeetingService의 TODO와 함께 복구한다.")
     @Test
     @DisplayName("COMPLETED 회의를 포함해 오늘 생성된 회의가 5개이면 회의를 생성할 수 없다")
     void createMeetingWithCompletedMeetingsIncludedInDailyLimit() {
@@ -259,7 +256,6 @@ class MeetingServiceTest {
         verify(meetingRepository, never()).saveAndFlush(any());
     }
 
-    @Disabled("하루 회의 생성 제한을 임시 해제한 상태다. MeetingService의 TODO와 함께 복구한다.")
     @Test
     @DisplayName("soft deleted 회의를 포함해 오늘 생성된 회의가 5개이면 회의를 생성할 수 없다")
     void createMeetingWithSoftDeletedMeetingsIncludedInDailyLimit() {
@@ -274,7 +270,6 @@ class MeetingServiceTest {
         verify(meetingRepository, never()).saveAndFlush(any());
     }
 
-    @Disabled("하루 회의 생성 제한을 임시 해제한 상태다. MeetingService의 TODO와 함께 복구한다.")
     @Test
     @DisplayName("어제 회의가 5개여도 오늘 생성된 회의가 0개이면 회의를 생성할 수 있다")
     void createMeetingWithFiveMeetingsYesterdayAndZeroToday() {
