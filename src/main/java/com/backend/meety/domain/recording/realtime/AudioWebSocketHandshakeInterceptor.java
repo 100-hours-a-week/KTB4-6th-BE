@@ -67,13 +67,8 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
     @Override
     public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                WebSocketHandler wsHandler, Exception exception) {
-        if (exception == null) {
-            return;
-        }
-        try {
-            aiConnectionService.stop(extractRecordingSessionId(request.getURI()));
-        } catch (RuntimeException e) {
-            log.warn("핸드셰이크 실패 후 AI 연결 정리에 실패했습니다. uri={}", request.getURI().getPath(), e);
+        if (exception != null) {
+            log.warn("Audio WebSocket 업그레이드에 실패했습니다. uri={}", request.getURI().getPath(), exception);
         }
     }
 
