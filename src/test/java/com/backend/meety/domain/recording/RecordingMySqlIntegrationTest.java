@@ -15,6 +15,7 @@ import com.backend.meety.domain.meeting.entity.MeetingParticipant;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.meeting.service.MeetingService;
+import com.backend.meety.domain.meeting.TestMeetingPolicy;
 import com.backend.meety.domain.recording.dto.RecordingSessionResponse;
 import com.backend.meety.domain.recording.entity.RecordingSessionStatus;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
@@ -119,7 +120,7 @@ class RecordingMySqlIntegrationTest {
         @Bean
         MeetingService meetingService(MeetingRepository meetings, TeamRepository teams, TeamMemberRepository members,
                 ApplicationEventPublisher publisher) {
-            return new MeetingService(meetings, teams, members, CLOCK, publisher);
+            return new MeetingService(meetings, teams, members, CLOCK, publisher, TestMeetingPolicy.DEFAULT);
         }
     }
 

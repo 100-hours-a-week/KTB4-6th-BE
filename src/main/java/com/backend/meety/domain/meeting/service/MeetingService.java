@@ -1,5 +1,6 @@
 package com.backend.meety.domain.meeting.service;
 
+import com.backend.meety.domain.meeting.MeetingPolicy;
 import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
 import com.backend.meety.domain.meeting.dto.MeetingCalendarDateResponse;
@@ -48,7 +49,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class MeetingService {
 
     private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
-    private static final long DAILY_MEETING_LIMIT = 5L;
     private static final int DATE_GROUP_LIMIT = 5;
 
     private final MeetingRepository meetingRepository;
@@ -56,6 +56,7 @@ public class MeetingService {
     private final TeamMemberRepository teamMemberRepository;
     private final Clock clock;
     private final ApplicationEventPublisher eventPublisher;
+    private final MeetingPolicy meetingPolicy;
 
     @Transactional
     public MeetingCreateResponse createMeeting(Long userId, Long teamId, MeetingCreateRequest request) {
@@ -98,7 +99,7 @@ public class MeetingService {
                 nextDay
         );
 
-        if (todayMeetingCount >= DAILY_MEETING_LIMIT) {
+        if (todayMeetingCount >= meetingPolicy.dailyCreateLimit()) {
             throw new MeetingException(MeetingErrorCode.DAILY_MEETING_LIMIT_EXCEEDED);
         }
     }

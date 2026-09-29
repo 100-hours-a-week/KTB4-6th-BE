@@ -10,6 +10,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.backend.meety.domain.meeting.MeetingPolicy;
+import com.backend.meety.domain.meeting.TestMeetingPolicy;
 import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
 import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
@@ -78,7 +80,8 @@ class MeetingServiceTest {
                 teamRepository,
                 teamMemberRepository,
                 FIXED_CLOCK,
-                eventPublisher
+                eventPublisher,
+                TestMeetingPolicy.DEFAULT
         );
     }
 
@@ -232,7 +235,7 @@ class MeetingServiceTest {
     @Test
     @DisplayName("오늘 생성된 회의가 5개이면 회의를 생성할 수 없다")
     void createMeetingWithDailyLimitExceeded() {
-        setUpCreatableMemberWithTodayCount(5L);
+        setUpCreatableMemberWithTodayCount(TestMeetingPolicy.DAILY_CREATE_LIMIT);
 
         assertThatThrownBy(() -> meetingService.createMeeting(USER_ID, TEAM_ID, createRequest(30, "API 명세 검토")))
                 .isInstanceOf(MeetingException.class)
@@ -245,7 +248,7 @@ class MeetingServiceTest {
     @Test
     @DisplayName("COMPLETED 회의를 포함해 오늘 생성된 회의가 5개이면 회의를 생성할 수 없다")
     void createMeetingWithCompletedMeetingsIncludedInDailyLimit() {
-        setUpCreatableMemberWithTodayCount(5L);
+        setUpCreatableMemberWithTodayCount(TestMeetingPolicy.DAILY_CREATE_LIMIT);
 
         assertThatThrownBy(() -> meetingService.createMeeting(USER_ID, TEAM_ID, createRequest(30, "API 명세 검토")))
                 .isInstanceOf(MeetingException.class)
@@ -259,7 +262,7 @@ class MeetingServiceTest {
     @Test
     @DisplayName("soft deleted 회의를 포함해 오늘 생성된 회의가 5개이면 회의를 생성할 수 없다")
     void createMeetingWithSoftDeletedMeetingsIncludedInDailyLimit() {
-        setUpCreatableMemberWithTodayCount(5L);
+        setUpCreatableMemberWithTodayCount(TestMeetingPolicy.DAILY_CREATE_LIMIT);
 
         assertThatThrownBy(() -> meetingService.createMeeting(USER_ID, TEAM_ID, createRequest(30, "API 명세 검토")))
                 .isInstanceOf(MeetingException.class)
@@ -282,6 +285,32 @@ class MeetingServiceTest {
                 today.atStartOfDay(),
                 today.plusDays(1).atStartOfDay()
         );
+    }
+
+    @Test
+    @DisplayName("설정한 하루 생성 제한이 10개이면 오늘 5개 생성 후에도 회의를 생성할 수 있다")
+    void createMeetingWithConfiguredDailyLimit() {
+
+        // 테스트 목적:
+        // 하루 회의 생성 제한이 설정값으로 높아진 경우
+        // 기존 기본 제한인 5개를 초과해도 회의를 생성할 수 있는지 검증한다.
+
+        // given
+        meetingService = new MeetingService(
+                meetingRepository,
+                teamRepository,
+                teamMemberRepository,
+                FIXED_CLOCK,
+                eventPublisher,
+                new MeetingPolicy(10L)
+        );
+
+        // when
+        MeetingCreateResponse response = createMeetingWithTodayCount(5L, createRequest(30, "API 명세 검토"));
+
+        // then
+        assertThat(response.meetingId()).isEqualTo(100L);
+        verify(meetingRepository).saveAndFlush(any(Meeting.class));
     }
 
     @Test
