@@ -45,7 +45,7 @@ class WeeklyCreditGrantServiceTest {
         boolean granted = service.grant(team.getId(), WEEK_KEY);
 
         assertThat(granted).isTrue();
-        assertThat(credit.getBalance()).isEqualTo(150L);
+        assertThat(credit.getBalance()).isEqualTo(100L + CreditPolicy.WEEKLY_GRANT);
         ArgumentCaptor<CreditLedger> captor = ArgumentCaptor.forClass(CreditLedger.class);
         verify(ledgers).save(captor.capture());
         CreditLedger ledger = captor.getValue();
@@ -54,7 +54,7 @@ class WeeklyCreditGrantServiceTest {
         assertThat(ledger.getSourceType()).isEqualTo(CreditSourceType.SCHEDULE);
         assertThat(ledger.getSourceId()).isNull();
         assertThat(ledger.getAmount()).isEqualTo(CreditPolicy.WEEKLY_GRANT);
-        assertThat(ledger.getBalanceAfter()).isEqualTo(150L);
+        assertThat(ledger.getBalanceAfter()).isEqualTo(100L + CreditPolicy.WEEKLY_GRANT);
     }
 
     @Test
