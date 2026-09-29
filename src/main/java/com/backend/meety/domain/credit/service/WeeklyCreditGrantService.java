@@ -17,6 +17,7 @@ public class WeeklyCreditGrantService {
 
     private final TeamCreditRepository teamCreditRepository;
     private final CreditLedgerRepository creditLedgerRepository;
+    private final CreditPolicy creditPolicy;
 
     @Transactional
     public boolean grant(Long teamId, String weekKey) {
@@ -28,7 +29,7 @@ public class WeeklyCreditGrantService {
         if (creditLedgerRepository.existsByIdempotencyKey(CreditLedger.scheduleKeyOf(teamId, weekKey))) {
             return false;
         }
-        long earned = credit.earn(CreditPolicy.WEEKLY_GRANT);
+        long earned = credit.earn(creditPolicy.weeklyGrant(), creditPolicy.maxBalance());
         if (earned == 0) {
             return false;
         }

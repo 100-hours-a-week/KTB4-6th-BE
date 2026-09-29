@@ -8,7 +8,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.backend.meety.domain.credit.CreditPolicy;
+import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.CreditSourceType;
 import com.backend.meety.domain.credit.entity.CreditTransactionType;
@@ -27,12 +27,13 @@ class WeeklyCreditGrantServiceTest {
 
     private final TeamCreditRepository credits = mock(TeamCreditRepository.class);
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
-    private final WeeklyCreditGrantService service = new WeeklyCreditGrantService(credits, ledgers);
+    private final WeeklyCreditGrantService service =
+            new WeeklyCreditGrantService(credits, ledgers, TestCreditPolicy.DEFAULT);
 
     private final Team team = team();
 
     private TeamCredit creditWith(long balance) {
-        TeamCredit credit = TeamCredit.create(team, balance);
+        TeamCredit credit = TeamCredit.create(team, balance, TestCreditPolicy.MAX_BALANCE);
         when(credits.findByTeamIdForUpdate(team.getId())).thenReturn(Optional.of(credit));
         return credit;
     }
@@ -45,7 +46,7 @@ class WeeklyCreditGrantServiceTest {
         boolean granted = service.grant(team.getId(), WEEK_KEY);
 
         assertThat(granted).isTrue();
-        assertThat(credit.getBalance()).isEqualTo(100L + CreditPolicy.WEEKLY_GRANT);
+        assertThat(credit.getBalance()).isEqualTo(100L + TestCreditPolicy.WEEKLY_GRANT);
         ArgumentCaptor<CreditLedger> captor = ArgumentCaptor.forClass(CreditLedger.class);
         verify(ledgers).save(captor.capture());
         CreditLedger ledger = captor.getValue();
@@ -53,8 +54,8 @@ class WeeklyCreditGrantServiceTest {
         assertThat(ledger.getType()).isEqualTo(CreditTransactionType.EARN);
         assertThat(ledger.getSourceType()).isEqualTo(CreditSourceType.SCHEDULE);
         assertThat(ledger.getSourceId()).isNull();
-        assertThat(ledger.getAmount()).isEqualTo(CreditPolicy.WEEKLY_GRANT);
-        assertThat(ledger.getBalanceAfter()).isEqualTo(100L + CreditPolicy.WEEKLY_GRANT);
+        assertThat(ledger.getAmount()).isEqualTo(TestCreditPolicy.WEEKLY_GRANT);
+        assertThat(ledger.getBalanceAfter()).isEqualTo(100L + TestCreditPolicy.WEEKLY_GRANT);
     }
 
     @Test
@@ -71,10 +72,10 @@ class WeeklyCreditGrantServiceTest {
     @Test
     @DisplayName("상한을 넘는 만큼은 잘라서 적립하고 실제 적립분을 원장에 남긴다")
     void capsAtMaxBalance() {
-        TeamCredit credit = creditWith(CreditPolicy.MAX_BALANCE - 20L);
+        TeamCredit credit = creditWith(TestCreditPolicy.MAX_BALANCE - 20L);
 
         assertThat(service.grant(team.getId(), WEEK_KEY)).isTrue();
-        assertThat(credit.getBalance()).isEqualTo(CreditPolicy.MAX_BALANCE);
+        assertThat(credit.getBalance()).isEqualTo(TestCreditPolicy.MAX_BALANCE);
         ArgumentCaptor<CreditLedger> captor = ArgumentCaptor.forClass(CreditLedger.class);
         verify(ledgers).save(captor.capture());
         assertThat(captor.getValue().getAmount()).isEqualTo(20L);
@@ -83,7 +84,7 @@ class WeeklyCreditGrantServiceTest {
     @Test
     @DisplayName("이미 상한이면 원장을 남기지 않는다")
     void skipsLedgerWhenAtMaxBalance() {
-        creditWith(CreditPolicy.MAX_BALANCE);
+        creditWith(TestCreditPolicy.MAX_BALANCE);
 
         assertThat(service.grant(team.getId(), WEEK_KEY)).isFalse();
         verify(ledgers, never()).save(any());

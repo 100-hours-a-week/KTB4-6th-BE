@@ -1,5 +1,6 @@
 package com.backend.meety.domain.credit.service;
 
+import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.dto.TeamCreditResponse;
 import com.backend.meety.domain.credit.entity.TeamCredit;
 import com.backend.meety.domain.credit.exception.CreditErrorCode;
@@ -24,6 +25,7 @@ public class TeamCreditService {
     private final TeamCreditRepository teamCreditRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
+    private final CreditPolicy creditPolicy;
 
     @Transactional(readOnly = true)
     public TeamCreditResponse getBalance(Long userId, Long teamId) {
@@ -37,7 +39,7 @@ public class TeamCreditService {
                         log.error("팀 크레딧 행이 없습니다. teamId={}", teamId);
                         return new CreditException(CreditErrorCode.TEAM_CREDIT_NOT_FOUND);
                     });
-            return TeamCreditResponse.from(credit);
+            return TeamCreditResponse.from(credit, creditPolicy);
         } catch (DataAccessException e) {
             throw new CreditException(CreditErrorCode.CREDIT_LOOKUP_FAILED);
         }

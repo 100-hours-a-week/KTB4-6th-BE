@@ -1,6 +1,5 @@
 package com.backend.meety.domain.credit.entity;
 
-import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.global.entity.BaseEntity;
 import jakarta.persistence.Column;
@@ -38,12 +37,13 @@ public class TeamCredit extends BaseEntity {
         this.balance = balance;
     }
 
-    public static TeamCredit create(Team team, long initialBalance) {
-        return new TeamCredit(team, Math.min(initialBalance, CreditPolicy.MAX_BALANCE));
+    public static TeamCredit create(Team team, long initialBalance, long maxBalance) {
+        return new TeamCredit(team, Math.min(initialBalance, maxBalance));
     }
 
-    public long earn(long amount) {
-        long earned = Math.min(amount, CreditPolicy.MAX_BALANCE - balance);
+    public long earn(long amount, long maxBalance) {
+        long available = Math.max(0L, maxBalance - balance);
+        long earned = Math.min(amount, available);
         balance += earned;
         return earned;
     }

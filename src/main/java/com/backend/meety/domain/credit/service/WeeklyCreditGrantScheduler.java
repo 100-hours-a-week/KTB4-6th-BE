@@ -22,7 +22,7 @@ public class WeeklyCreditGrantScheduler {
     private final WeeklyCreditGrantService weeklyCreditGrantService;
     private final Clock clock;
 
-    @Scheduled(cron = CreditPolicy.WEEKLY_GRANT_CRON, zone = "Asia/Seoul")
+    @Scheduled(cron = "${credit.weekly-grant-cron}", zone = "Asia/Seoul")
     public void grantWeeklyCredits() {
         String weekKey = CreditPolicy.weekKeyOf(LocalDate.now(clock.withZone(KST_ZONE_ID)));
         List<Long> teamIds = teamCreditRepository.findActiveTeamIds();

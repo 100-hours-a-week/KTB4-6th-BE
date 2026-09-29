@@ -19,7 +19,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
-import com.backend.meety.domain.credit.CreditPolicy;
+import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.CreditSourceType;
 import com.backend.meety.domain.credit.entity.CreditTransactionType;
@@ -32,7 +32,6 @@ import com.backend.meety.domain.meeting.dto.SummaryDetailResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingSummary;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
-import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.meeting.exception.SummaryErrorCode;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.meeting.repository.MeetingSummaryRepository;
@@ -69,7 +68,8 @@ class MeetingSummaryServiceTest {
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
     private final RecordingSessionRepository recordings = mock(RecordingSessionRepository.class);
     private final MeetingSummaryService service = new MeetingSummaryService(
-            meetings, members, transcripts, summaries, aiRequests, credits, ledgers, recordings);
+            meetings, members, transcripts, summaries, aiRequests, credits, ledgers, recordings,
+            TestCreditPolicy.DEFAULT);
 
     private Team team;
     private TeamMember member;
@@ -104,7 +104,7 @@ class MeetingSummaryServiceTest {
         assertThat(response.summaryId()).isEqualTo(502L);
         assertThat(response.version()).isEqualTo(2L);
         assertThat(response.status()).isEqualTo(AiRequestStatus.ACCEPTED);
-        assertThat(response.creditBalance()).isEqualTo(10L - CreditPolicy.SUMMARY_REGENERATE_COST);
+        assertThat(response.creditBalance()).isEqualTo(10L - TestCreditPolicy.SUMMARY_REGENERATE_COST);
     }
 
     @Test
@@ -118,7 +118,7 @@ class MeetingSummaryServiceTest {
         assertThat(ledger.getIdempotencyKey()).isEqualTo("USE:AI_SUMMARY:900");
         assertThat(ledger.getType()).isEqualTo(CreditTransactionType.USE);
         assertThat(ledger.getSourceType()).isEqualTo(CreditSourceType.AI_SUMMARY);
-        assertThat(ledger.getAmount()).isEqualTo(-CreditPolicy.SUMMARY_REGENERATE_COST);
+        assertThat(ledger.getAmount()).isEqualTo(-TestCreditPolicy.SUMMARY_REGENERATE_COST);
     }
 
     @Test
@@ -200,7 +200,7 @@ class MeetingSummaryServiceTest {
     @Test
     @DisplayName("크레딧이 부족하면 409다")
     void rejectsInsufficientCredit() {
-        TeamCredit poor = credit(team, CreditPolicy.SUMMARY_REGENERATE_COST - 1);
+        TeamCredit poor = credit(team, TestCreditPolicy.SUMMARY_REGENERATE_COST - 1);
         when(credits.findByTeamIdForUpdate(2L)).thenReturn(Optional.of(poor));
 
         assertCode(() -> service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null), CreditErrorCode.INSUFFICIENT_CREDIT);

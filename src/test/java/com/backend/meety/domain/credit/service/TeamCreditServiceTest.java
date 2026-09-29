@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 
-import com.backend.meety.domain.credit.CreditPolicy;
+import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.dto.TeamCreditResponse;
 import com.backend.meety.domain.credit.entity.TeamCredit;
 import com.backend.meety.domain.credit.exception.CreditErrorCode;
@@ -18,10 +18,10 @@ import com.backend.meety.domain.team.repository.TeamRepository;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.global.exception.BusinessException;
 import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -38,10 +38,15 @@ class TeamCreditServiceTest {
     @Mock
     private TeamMemberRepository teamMemberRepository;
 
-    @InjectMocks
     private TeamCreditService teamCreditService;
 
     private final Team team = Team.create("Meety Team");
+
+    @BeforeEach
+    void setUp() {
+        teamCreditService = new TeamCreditService(
+                teamCreditRepository, teamRepository, teamMemberRepository, TestCreditPolicy.DEFAULT);
+    }
 
     @Test
     @DisplayName("팀원은 팀 크레딧 잔액과 상한을 조회한다")
@@ -50,12 +55,12 @@ class TeamCreditServiceTest {
         given(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(7L, 1L, MembershipStatus.ACTIVE))
                 .willReturn(Optional.of(TeamMember.createMember(User.create(), team, "hoon")));
         given(teamCreditRepository.findByTeamIdAndDeletedAtIsNull(7L))
-                .willReturn(Optional.of(TeamCredit.create(team, 270L)));
+                .willReturn(Optional.of(TeamCredit.create(team, 270L, TestCreditPolicy.MAX_BALANCE)));
 
         TeamCreditResponse response = teamCreditService.getBalance(1L, 7L);
 
         assertThat(response.balance()).isEqualTo(270L);
-        assertThat(response.maxBalance()).isEqualTo(CreditPolicy.MAX_BALANCE);
+        assertThat(response.maxBalance()).isEqualTo(TestCreditPolicy.MAX_BALANCE);
     }
 
     @Test

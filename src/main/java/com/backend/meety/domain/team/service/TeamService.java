@@ -49,6 +49,7 @@ public class TeamService {
     private final TeamCreditRepository teamCreditRepository;
     private final CreditLedgerRepository creditLedgerRepository;
     private final Clock clock;
+    private final CreditPolicy creditPolicy;
 
     @Transactional
     public TeamCreateResponse create(Long userId, TeamCreateRequest request) {
@@ -136,9 +137,10 @@ public class TeamService {
     }
 
     private void grantInitialCredit(Team team) {
-        TeamCredit credit = teamCreditRepository.save(TeamCredit.create(team, CreditPolicy.TEAM_CREATE_GRANT));
+        TeamCredit credit = teamCreditRepository.save(
+                TeamCredit.create(team, creditPolicy.teamCreateGrant(), creditPolicy.maxBalance()));
         creditLedgerRepository.save(
-                CreditLedger.earnForTeamCreate(team, CreditPolicy.TEAM_CREATE_GRANT, credit.getBalance()));
+                CreditLedger.earnForTeamCreate(team, creditPolicy.teamCreateGrant(), credit.getBalance()));
     }
 
     private Team lockActiveTeam(Long teamId) {

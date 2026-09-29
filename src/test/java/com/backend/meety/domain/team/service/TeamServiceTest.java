@@ -10,12 +10,12 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
-import com.backend.meety.domain.team.dto.InvitationCodeResponse;
-import com.backend.meety.domain.credit.CreditPolicy;
+import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.TeamCredit;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
+import com.backend.meety.domain.team.dto.InvitationCodeResponse;
 import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
 import com.backend.meety.domain.team.dto.TeamCreateResponse;
@@ -83,7 +83,7 @@ class TeamServiceTest {
     void setUp() {
         teamService = new TeamService(teamRepository, teamMemberRepository,
                 teamInvitationCodeRepository, userRepository, teamCreditRepository,
-                creditLedgerRepository, FIXED_CLOCK);
+                creditLedgerRepository, FIXED_CLOCK, TestCreditPolicy.DEFAULT);
     }
 
     /**
@@ -498,7 +498,7 @@ class TeamServiceTest {
 
         ArgumentCaptor<TeamCredit> creditCaptor = ArgumentCaptor.forClass(TeamCredit.class);
         then(teamCreditRepository).should().save(creditCaptor.capture());
-        assertThat(creditCaptor.getValue().getBalance()).isEqualTo(CreditPolicy.TEAM_CREATE_GRANT);
+        assertThat(creditCaptor.getValue().getBalance()).isEqualTo(TestCreditPolicy.TEAM_CREATE_GRANT);
         then(creditLedgerRepository).should().save(any(CreditLedger.class));
     }
 

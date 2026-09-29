@@ -2,27 +2,19 @@ package com.backend.meety.domain.credit;
 
 import java.time.LocalDate;
 import java.time.temporal.IsoFields;
-import lombok.AccessLevel;
-import lombok.NoArgsConstructor;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@NoArgsConstructor(access = AccessLevel.PRIVATE)
-public final class CreditPolicy {
-
-    public static final long MAX_BALANCE = 1000L;
-
-    public static final long TEAM_CREATE_GRANT = 200L;
-
-    public static final long WEEKLY_GRANT = 200L;
-
-    public static final String WEEKLY_GRANT_CRON = "0 0 0 * * MON";
-
-    public static final long RECORDING_COST = 20L;
-
-    public static final long SUMMARY_REGENERATE_COST = 3L;
-
-    public static final long AI_CHAT_MESSAGE_COST = 1L;
-
-    public static final long ANALYSIS_REPORT_COST = 5L;
+@ConfigurationProperties(prefix = "credit")
+public record CreditPolicy(
+        long maxBalance,
+        long teamCreateGrant,
+        long weeklyGrant,
+        String weeklyGrantCron,
+        long recordingCost,
+        long summaryRegenerateCost,
+        long aiChatMessageCost,
+        long analysisReportCost
+) {
 
     public static String weekKeyOf(LocalDate date) {
         return String.format("%d-W%02d",

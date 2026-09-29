@@ -19,7 +19,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
-import com.backend.meety.domain.credit.CreditPolicy;
+import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.CreditTransactionType;
 import com.backend.meety.domain.credit.entity.TeamCredit;
@@ -47,7 +47,8 @@ class SummaryProcessingServiceTest {
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
     private final TranscriptSegmentRepository transcripts = mock(TranscriptSegmentRepository.class);
     private final SummaryProcessingService service = new SummaryProcessingService(
-            aiRequests, summaries, credits, ledgers, new SummaryAiRequestFactory(transcripts));
+            aiRequests, summaries, credits, ledgers, TestCreditPolicy.DEFAULT,
+            new SummaryAiRequestFactory(transcripts));
 
     private Team team;
     private TeamMember member;
@@ -131,7 +132,7 @@ class SummaryProcessingServiceTest {
         verify(ledgers).save(captor.capture());
         assertThat(captor.getValue().getIdempotencyKey()).isEqualTo("RESTORE:AI_SUMMARY:900");
         assertThat(captor.getValue().getType()).isEqualTo(CreditTransactionType.RESTORE);
-        assertThat(captor.getValue().getAmount()).isEqualTo(CreditPolicy.SUMMARY_REGENERATE_COST);
+        assertThat(captor.getValue().getAmount()).isEqualTo(TestCreditPolicy.SUMMARY_REGENERATE_COST);
     }
 
     @Test

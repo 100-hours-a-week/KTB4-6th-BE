@@ -8,7 +8,7 @@ public record TeamCreditResponse(
         long maxBalance
 ) {
 
-    public static TeamCreditResponse from(TeamCredit teamCredit) {
-        return new TeamCreditResponse(teamCredit.getBalance(), CreditPolicy.MAX_BALANCE);
+    public static TeamCreditResponse from(TeamCredit teamCredit, CreditPolicy creditPolicy) {
+        return new TeamCreditResponse(teamCredit.getBalance(), creditPolicy.maxBalance());
     }
 }

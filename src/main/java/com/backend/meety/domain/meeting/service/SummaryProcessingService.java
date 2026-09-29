@@ -29,6 +29,7 @@ public class SummaryProcessingService {
     private final MeetingSummaryRepository meetingSummaryRepository;
     private final TeamCreditRepository teamCreditRepository;
     private final CreditLedgerRepository creditLedgerRepository;
+    private final CreditPolicy creditPolicy;
     private final SummaryAiRequestFactory summaryAiRequestFactory;
 
     @Transactional
@@ -95,7 +96,7 @@ public class SummaryProcessingService {
             log.error("크레딧 복구 대상 팀 크레딧 행이 없습니다. teamId={}", aiRequest.getTeam().getId());
             return;
         }
-        long restored = credit.earn(CreditPolicy.SUMMARY_REGENERATE_COST);
+        long restored = credit.earn(creditPolicy.summaryRegenerateCost(), creditPolicy.maxBalance());
         creditLedgerRepository.save(CreditLedger.restoreForSummary(
                 aiRequest.getTeam(), aiRequest.getId(), restored, credit.getBalance()));
     }

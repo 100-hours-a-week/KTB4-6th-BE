@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.backend.meety.domain.credit.entity.TeamCredit;
+import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
@@ -112,7 +113,7 @@ class RecordingMySqlIntegrationTest {
                 MeetingParticipantRepository participants, RecordingSessionRepository recordings,
                 TeamCreditRepository credits, CreditLedgerRepository ledgers, ApplicationEventPublisher publisher) {
             return new RecordingService(meetings, members, participants, recordings, credits, ledgers, CLOCK,
-                    publisher);
+                    publisher, TestCreditPolicy.DEFAULT);
         }
 
         @Bean

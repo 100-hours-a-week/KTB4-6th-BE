@@ -61,6 +61,7 @@ public class RecordingService {
     private final CreditLedgerRepository ledgerRepository;
     private final Clock clock;
     private final ApplicationEventPublisher eventPublisher;
+    private final CreditPolicy creditPolicy;
     private DataSource dataSource;
 
     @Autowired(required = false)
@@ -108,7 +109,7 @@ public class RecordingService {
                 meeting.getTeam().getId(), MeetingStatus.IN_PROGRESS).isPresent()) {
             throw new RecordingException(RecordingErrorCode.RECORDING_ALREADY_ACTIVE);
         }
-        if (!credit.canUse(CreditPolicy.RECORDING_COST)) {
+        if (!credit.canUse(creditPolicy.recordingCost())) {
             throw new CreditException(CreditErrorCode.INSUFFICIENT_CREDIT);
         }
         LocalDateTime now = LocalDateTime.now(clock);
@@ -119,9 +120,9 @@ public class RecordingService {
                 elapsedMs(segmentStartedAt), meetingId, userId, session.getId());
 
         segmentStartedAt = System.nanoTime();
-        credit.use(CreditPolicy.RECORDING_COST);
+        credit.use(creditPolicy.recordingCost());
         ledgerRepository.save(CreditLedger.useForRecording(
-                meeting.getTeam(), session.getId(), CreditPolicy.RECORDING_COST, credit.getBalance()));
+                meeting.getTeam(), session.getId(), creditPolicy.recordingCost(), credit.getBalance()));
         logElapsed("[RECORDING_START] credit use and ledger save completed meetingId={}, userId={}, teamId={}, "
                         + "recordingSessionId={}, elapsedMs={}",
                 elapsedMs(segmentStartedAt), meetingId, userId, meeting.getTeam().getId(), session.getId());

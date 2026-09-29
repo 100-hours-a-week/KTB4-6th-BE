@@ -56,6 +56,7 @@ public class MeetingSummaryService {
     private final TeamCreditRepository teamCreditRepository;
     private final CreditLedgerRepository creditLedgerRepository;
     private final RecordingSessionRepository recordingSessionRepository;
+    private final CreditPolicy creditPolicy;
 
     @Transactional
     public SummaryCreateResponse requestSummary(
@@ -70,7 +71,7 @@ public class MeetingSummaryService {
         validateSummarizable(meeting);
 
         TeamCredit credit = lockCredit(meeting.getTeam().getId());
-        if (!credit.canUse(CreditPolicy.SUMMARY_REGENERATE_COST)) {
+        if (!credit.canUse(creditPolicy.summaryRegenerateCost())) {
             throw new CreditException(CreditErrorCode.INSUFFICIENT_CREDIT);
         }
 
@@ -156,9 +157,9 @@ public class MeetingSummaryService {
     }
 
     private void useCredit(TeamCredit credit, Team team, Long aiRequestId) {
-        credit.use(CreditPolicy.SUMMARY_REGENERATE_COST);
+        credit.use(creditPolicy.summaryRegenerateCost());
         creditLedgerRepository.save(CreditLedger.useForSummary(
-                team, aiRequestId, CreditPolicy.SUMMARY_REGENERATE_COST, credit.getBalance()));
+                team, aiRequestId, creditPolicy.summaryRegenerateCost(), credit.getBalance()));
     }
 
     private MeetingSummary createNextVersion(AiRequest aiRequest, Meeting meeting, String regenerationReason) {

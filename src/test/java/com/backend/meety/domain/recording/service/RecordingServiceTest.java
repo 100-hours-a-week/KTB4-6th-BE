@@ -18,6 +18,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.CreditSourceType;
 import com.backend.meety.domain.credit.entity.CreditTransactionType;
@@ -70,7 +71,8 @@ class RecordingServiceTest {
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
     private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
     private final RecordingService service = new RecordingService(
-            meetings, members, participants, recordings, credits, ledgers, CLOCK, eventPublisher);
+            meetings, members, participants, recordings, credits, ledgers, CLOCK, eventPublisher,
+            TestCreditPolicy.DEFAULT);
     private Team team;
     private TeamMember member;
     private Meeting meeting;
@@ -111,7 +113,7 @@ class RecordingServiceTest {
 
         ArgumentCaptor<CreditLedger> ledger = ArgumentCaptor.forClass(CreditLedger.class);
         verify(ledgers).save(ledger.capture());
-        assertThat(ledger.getValue().getAmount()).isEqualTo(-20L);
+        assertThat(ledger.getValue().getAmount()).isEqualTo(-TestCreditPolicy.RECORDING_COST);
         assertThat(ledger.getValue().getBalanceAfter()).isZero();
         assertThat(ledger.getValue().getType()).isEqualTo(CreditTransactionType.USE);
         assertThat(ledger.getValue().getSourceType()).isEqualTo(CreditSourceType.RECORDING);
