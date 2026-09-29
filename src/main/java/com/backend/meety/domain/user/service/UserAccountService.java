@@ -13,6 +13,7 @@ import com.backend.meety.domain.user.repository.UserAuthAccountRepository;
 import com.backend.meety.domain.user.repository.UserRepository;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +33,17 @@ public class UserAccountService {
         return userAuthAccountRepository.findByProviderAndProviderUserId(provider, providerUserId)
                 .map(this::restoreIfWithdrawn)
                 .orElseGet(() -> create(provider, providerUserId));
+    }
+
+    public Optional<UserAuthAccount> findAccount(String provider, String providerUserId) {
+        return userAuthAccountRepository.findByProviderAndProviderUserId(provider, providerUserId);
+    }
+
+    @Transactional
+    public User createLocal(String provider, String loginId, String passwordHash) {
+        User user = userRepository.save(User.create());
+        userAuthAccountRepository.saveAndFlush(UserAuthAccount.createLocal(user, provider, loginId, passwordHash));
+        return user;
     }
 
     @Transactional

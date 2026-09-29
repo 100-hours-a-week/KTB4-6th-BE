@@ -25,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -157,5 +158,21 @@ class UserAccountServiceTest {
         userAccountService.withdraw(1L);
 
         assertThat(user.isWithdrawn()).isTrue();
+    }
+
+    @Test
+    @DisplayName("로컬 계정은 아이디를 provider_user_id로, 해시를 password_hash로 저장한다")
+    void createLocal() {
+        User saved = User.create();
+        given(userRepository.save(any(User.class))).willReturn(saved);
+
+        User result = userAccountService.createLocal("local", "loadtest-0001", "$2a$hash");
+
+        ArgumentCaptor<UserAuthAccount> captor = ArgumentCaptor.forClass(UserAuthAccount.class);
+        then(userAuthAccountRepository).should().saveAndFlush(captor.capture());
+        assertThat(result).isSameAs(saved);
+        assertThat(captor.getValue().getProvider()).isEqualTo("local");
+        assertThat(captor.getValue().getProviderUserId()).isEqualTo("loadtest-0001");
+        assertThat(captor.getValue().getPasswordHash()).isEqualTo("$2a$hash");
     }
 }
