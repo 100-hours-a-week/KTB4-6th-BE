@@ -32,6 +32,10 @@ public class AuthService {
         OAuthProviderClient client = findClient(provider);
         OAuthUserInfo userInfo = client.fetchUserInfo(authorizationCode);
         User user = userAccountService.findOrCreate(userInfo.provider(), userInfo.providerUserId());
+        return issueTokens(user);
+    }
+
+    public LoginResponse issueTokens(User user) {
         String accessToken = jwtTokenProvider.createAccessToken(user.getId());
         String refreshToken = refreshTokenService.issue(user.getId());
         return new LoginResponse(user.getId(), accessToken, refreshToken,

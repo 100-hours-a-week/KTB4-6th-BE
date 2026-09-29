@@ -39,6 +39,9 @@ public class UserAuthAccount extends BaseEntity {
     @Column(name = "provider_user_id", nullable = false, length = 100)
     private String providerUserId;
 
+    @Column(name = "password_hash", length = 100)
+    private String passwordHash;
+
     private UserAuthAccount(User user, String provider, String providerUserId) {
         this.user = user;
         this.provider = provider;
@@ -47,6 +50,12 @@ public class UserAuthAccount extends BaseEntity {
 
     public static UserAuthAccount of(User user, String provider, String providerUserId) {
         return new UserAuthAccount(user, provider, providerUserId);
+    }
+
+    public static UserAuthAccount createLocal(User user, String provider, String loginId, String passwordHash) {
+        UserAuthAccount account = new UserAuthAccount(user, provider, loginId);
+        account.passwordHash = passwordHash;
+        return account;
     }
 
     public void withdraw(LocalDateTime withdrawnAt) {
