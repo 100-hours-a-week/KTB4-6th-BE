@@ -1,19 +1,15 @@
-# .github/workflows/ci-main-release.yml
-# (dev merge → 테스트/빌드 → 이미지 push → OIDC로 AWS 인증 → SSM으로 EC2 배포)
-
 name: BE CI/CD
 
 on:
   push:
-    branches: ['dev']
+    branches: [dev, main]
 
-# 기본 권한은 최소화하고, 필요한 job에서만 개별 상향
 permissions:
   contents: read
 
 env:
   IMAGE_NAME: ${{ vars.DOCKERHUB_USERNAME }}/meety-be
-  AWS_REGION: us-east-2   # Meety EC2가 오하이오 리전에 있음
+  AWS_REGION: us-east-2
 
 jobs:
   test:
@@ -39,10 +35,6 @@ jobs:
           java-version: "25"
           cache: gradle
       - run: ./gradlew test --no-daemon
-      - name: Discord 알림 (테스트 실패)
-        if: failure()
-        run: |
-          curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"❌ [테스트 실패] ${{ github.repository }}\nBranch: ${{ github.ref_name }} (${{ github.sha }})\nAuthor: ${{ github.actor }}\nFailed Job: test\nError Message: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" "${{ secrets.DISCORD_WEBHOOK_URL }}"
 
   build:
     needs: test
@@ -55,48 +47,36 @@ jobs:
           java-version: "25"
           cache: gradle
       - run: ./gradlew build -x test --no-daemon
-      - name: Discord 알림 (빌드 실패)
-        if: failure()
-        run: |
-          curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"❌ [빌드 실패] ${{ github.repository }}\nBranch: ${{ github.ref_name }} (${{ github.sha }})\nAuthor: ${{ github.actor }}\nFailed Job: build\nError Message: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" "${{ secrets.DISCORD_WEBHOOK_URL }}"
 
   docker-build:
     needs: build
     runs-on: ubuntu-latest
     outputs:
-      image_tag: ${{ steps.vars.outputs.sha_short }}
+      image_tag: ${{ steps.tag.outputs.value }}
     steps:
       - uses: actions/checkout@v4
-      - id: vars
-        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # 전체 커밋 SHA를 이미지 태그로 사용해 배포 버전을 정확히 식별한다.
+      - id: tag
+        run: echo "value=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-buildx-action@v3
-      - id: login
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Discord 알림 (Docker Hub 인증 실패)
-        if: failure() && steps.login.outcome == 'failure'
-        run: |
-          curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"❌ [Docker Hub 인증 실패] ${{ github.repository }}\nBranch: ${{ github.ref_name }} (${{ github.sha }})\nAuthor: ${{ github.actor }}\nFailed Job: docker-build(login)\nError Message: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" "${{ secrets.DISCORD_WEBHOOK_URL }}"
-      - id: push
-        uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           platforms: linux/amd64
-          tags: ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.sha_short }}
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Discord 알림 (이미지 빌드 실패)
-        if: failure() && steps.push.outcome == 'failure'
-        run: |
-          curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"❌ [이미지 빌드 실패] ${{ github.repository }}\nBranch: ${{ github.ref_name }} (${{ github.sha }})\nAuthor: ${{ github.actor }}\nFailed Job: docker-build(push)\nError Message: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" "${{ secrets.DISCORD_WEBHOOK_URL }}"
 
   check-migration-label:
     needs: docker-build
     runs-on: ubuntu-latest
-    # PR 라벨 조회에 필요한 권한 (top-level 최소 권한 설정 이후 명시 필요)
     permissions:
       contents: read
       pull-requests: read
@@ -107,58 +87,73 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const LABEL = '📊 migration';
+            // 스테이징에는 운영 DB 마이그레이션 승인 절차를 적용하지 않는다.
+            if (context.ref !== 'refs/heads/main') {
+              core.setOutput('is_migration', 'false');
+              return;
+            }
+
+            const label = '📊 migration';
             const { owner, repo } = context.repo;
+            const { data: prs } =
+              await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner,
+                repo,
+                commit_sha: context.sha,
+              });
 
-            // 1) push된 head 커밋과 연결된 PR을 조회 (squash/merge commit 모두 대응)
-            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              owner, repo, commit_sha: context.sha,
-            });
-            let hasLabel = prs.some(pr => pr.labels.some(l => l.name === LABEL));
+            let hasLabel = prs.some(pr =>
+              pr.labels.some(item => item.name === label)
+            );
 
-            // 2) 연결된 PR이 없으면 기존 방식으로 커밋 메시지의 "(#123)"에서 PR 번호 추출
+            // 연결된 PR이 없을 때는 기존 커밋 메시지 방식으로 다시 찾는다.
             if (prs.length === 0) {
-              const msg = context.payload.head_commit?.message || "";
-              const match = msg.match(/\(#(\d+)\)/);
+              const message = context.payload.head_commit?.message ?? '';
+              const match = message.match(/\(#(\d+)\)/);
               if (match) {
-                const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: Number(match[1]) });
-                hasLabel = pr.labels.some(l => l.name === LABEL);
+                const { data: pr } = await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: Number(match[1]),
+                });
+                hasLabel = pr.labels.some(item => item.name === label);
               }
             }
-            core.setOutput('is_migration', hasLabel ? 'true' : 'false');
 
-  # 마이그레이션 라벨 유무에 따라 environment만 달라지므로 하나의 job으로 통합
-  #   - 라벨 없음 → production (승인 없음, 자동 배포)
-  #   - 라벨 있음 → production-migration-approval (Required reviewer 승인 후 배포)
-  # ⚠️ Settings > Environments 에서 production-migration-approval 에 BE 팀원을 Required reviewer로 등록해야 승인 대기가 걸림
+            core.setOutput('is_migration', String(hasLabel));
+
   deploy:
     needs: [docker-build, check-migration-label]
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: ${{ needs.check-migration-label.outputs.is_migration == 'true' && 'production-migration-approval' || 'production' }}
-    # OIDC 토큰 발급(id-token)에 필요한 권한
+
+    # dev는 staging, main은 production으로 배포한다.
+    # main의 migration 라벨 PR은 별도 승인 환경에서 대기한다.
+    environment:
+      name: ${{ github.ref_name == 'dev' && 'staging' || (needs.check-migration-label.outputs.is_migration == 'true' && 'production-migration-approval' || 'production') }}
+
     permissions:
       id-token: write
       contents: read
-    # 동시에 두 배포가 같은 서버에 걸리지 않도록 직렬화 (진행 중인 배포는 취소하지 않음)
+
     concurrency:
-      group: deploy-backend
+      group: deploy-backend-${{ github.ref_name }}
       cancel-in-progress: false
+
     env:
       IMAGE_TAG: ${{ needs.docker-build.outputs.image_tag }}
-      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}     # OIDC로 Assume할 IAM Role ARN
-      INSTANCE_ID: ${{ secrets.APP_INSTANCE_ID }}   # app-v1-meety 의 Instance ID
-      DEPLOY_DIR: ${{ secrets.APP_DEPLOY_DIR }}     # 서버의 docker-compose.yml 디렉터리
-    steps:
-      - name: 배포 시크릿 검증
-        run: |
-          # 시크릿 누락 시 SSM 호출 전에 빠르게 실패 (값은 env로 참조해 스크립트에 직접 치환하지 않음)
-          [ -n "$AWS_ROLE_ARN" ] || { echo "::error::secrets.AWS_ROLE_ARN 이 비어 있습니다"; exit 1; }
-          [ -n "$INSTANCE_ID" ]  || { echo "::error::secrets.APP_INSTANCE_ID 가 비어 있습니다"; exit 1; }
-          [ -n "$DEPLOY_DIR" ]   || { echo "::error::secrets.APP_DEPLOY_DIR 이 비어 있습니다"; exit 1; }
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      INSTANCE_ID: ${{ secrets.APP_INSTANCE_ID }}
+      DEPLOY_DIR: ${{ secrets.APP_DEPLOY_DIR }}
 
-      # GitHub OIDC 토큰으로 IAM Role을 Assume (장기 Access Key 미사용)
-      - name: AWS 인증 (OIDC)
+    steps:
+      - name: 배포 설정 확인
+        run: |
+          [ -n "$AWS_ROLE_ARN" ] || { echo "::error::AWS_ROLE_ARN 누락"; exit 1; }
+          [ -n "$INSTANCE_ID" ] || { echo "::error::APP_INSTANCE_ID 누락"; exit 1; }
+          [ -n "$DEPLOY_DIR" ] || { echo "::error::APP_DEPLOY_DIR 누락"; exit 1; }
+
+      - name: AWS 인증
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
@@ -169,38 +164,33 @@ jobs:
       - name: SSM 배포 명령 전송
         id: send
         run: |
-          # 서버에서 실행할 스크립트 (heredoc이 unquoted 이므로 ${...} 는 러너에서 치환됨)
+          # DEPLOY_DIR과 IMAGE_TAG는 선택된 GitHub Environment와 빌드 결과에서 가져온다.
           cat > remote.sh <<EOF
           #!/bin/bash
           set -euo pipefail
           cd "${DEPLOY_DIR}"
 
-          # .env 의 이미지 태그를 갱신 (이후 다른 compose 명령을 실행해도 같은 태그 유지)
+          # Compose가 다음 실행에서도 같은 이미지 태그를 사용하도록 기록한다.
           if grep -q '^BE_IMAGE_TAG=' .env; then
             sed -i "s|^BE_IMAGE_TAG=.*|BE_IMAGE_TAG=${IMAGE_TAG}|" .env
           else
             echo "BE_IMAGE_TAG=${IMAGE_TAG}" >> .env
           fi
 
-          # backend 서비스만 새 이미지로 교체 (의존 서비스는 건드리지 않음)
+          # BE 서비스만 갱신하고 Compose의 대기 결과를 배포 성공 기준으로 사용한다.
           docker compose pull backend
-          # --wait: 컨테이너가 running(healthcheck 정의 시 healthy)이 될 때까지 대기, 실패 시 non-zero 종료
           docker compose up -d --no-deps --wait --wait-timeout 180 backend
-
-          # 저사양 서버 디스크 확보를 위해 dangling 이미지 정리
           docker image prune -f
           EOF
 
-          # 스크립트를 SSM Run Command 파라미터(JSON)로 변환해 전송
-          #   --timeout-seconds  : 에이전트에 명령이 전달되기까지의 제한
-          #   executionTimeout   : 실제 스크립트 실행 제한(초)
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --comment "deploy backend ${IMAGE_TAG} (run ${{ github.run_id }})" \
             --timeout-seconds 60 \
             --parameters "$(jq -Rs '{commands: split("\n"), executionTimeout: ["600"]}' remote.sh)" \
-            --query "Command.CommandId" --output text)
+            --query "Command.CommandId" \
+            --output text)
 
           echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
           echo "SSM Command ID: $COMMAND_ID"
@@ -209,32 +199,57 @@ jobs:
         env:
           COMMAND_ID: ${{ steps.send.outputs.command_id }}
         run: |
-          # 5초 간격, 최대 10분 폴링 (전송 직후에는 invocation이 없을 수 있어 Pending으로 간주)
           STATUS="Pending"
           for i in $(seq 1 120); do
             STATUS=$(aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
-              --query "Status" --output text 2>/dev/null || echo "Pending")
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query "Status" \
+              --output text 2>/dev/null || echo "Pending")
+
             case "$STATUS" in
               Pending|InProgress|Delayed) sleep 5 ;;
               *) break ;;
             esac
           done
 
-          # 서버 실행 로그를 Actions 로그에 출력
-          echo "::group::서버 stdout"
-          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
-            --query "StandardOutputContent" --output text || true
-          echo "::endgroup::"
-          echo "::group::서버 stderr"
-          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
-            --query "StandardErrorContent" --output text || true
-          echo "::endgroup::"
+          # 실패 시 원인을 Actions 로그에서 확인할 수 있도록 서버 출력을 남긴다.
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query "StandardOutputContent" \
+            --output text || true
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query "StandardErrorContent" \
+            --output text || true
 
           echo "최종 상태: $STATUS"
-          [ "$STATUS" = "Success" ] || { echo "::error::SSM 배포 실패 (status=$STATUS)"; exit 1; }
+          [ "$STATUS" = "Success" ] || {
+            echo "::error::SSM 배포 실패 (status=$STATUS)"
+            exit 1
+          }
 
-      - name: Discord 알림 (배포 실패)
-        if: failure()
+  notify-failure:
+    needs: [test, build, docker-build, check-migration-label, deploy]
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discord 실패 알림
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REPOSITORY: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -H "Content-Type: application/json" -X POST -d "{\"content\": \"❌ [배포 실패] ${{ github.repository }}\nBranch: ${{ github.ref_name }} (${{ github.sha }})\nAuthor: ${{ github.actor }}\nFailed Job: deploy\nImage Tag: ${{ env.IMAGE_TAG }}\nError Message: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" "${{ secrets.DISCORD_WEBHOOK_URL }}"
+          # 웹훅이 설정된 경우에만 알림을 보낸다.
+          [ -n "$WEBHOOK_URL" ] || exit 0
+          jq -n \
+            --arg repo "$REPOSITORY" \
+            --arg branch "$BRANCH" \
+            --arg url "$RUN_URL" \
+            '{content: ("❌ [BE CI/CD 실패] " + $repo + "\nBranch: " + $branch + "\n" + $url)}' \
+            | curl --fail --silent --show-error \
+                -H "Content-Type: application/json" \
+                --data-binary @- "$WEBHOOK_URL"
