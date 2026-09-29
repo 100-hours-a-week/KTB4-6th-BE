@@ -4,9 +4,8 @@ import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import com.backend.meety.domain.transcript.service.TranscriptService;
-import java.net.URI;
 import java.util.Optional;
-import java.util.OptionalLong;
+import java.net.URI;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -90,62 +89,13 @@ public class AiLiveMeetingConnectionService {
         }
     }
 
-    public OptionalLong openStream(AudioWebSocketContext context) {
-        AiLiveMeetingConnection connection = registry.find(context.recordingSessionId())
-                .filter(found -> !found.isClosed())
-                .orElse(null);
-        if (connection == null) {
-            if (!startAndAwaitReady(context)) {
-                return OptionalLong.empty();
-            }
-            connection = registry.find(context.recordingSessionId()).orElse(null);
-            if (connection == null) {
-                return OptionalLong.empty();
-            }
-        }
-        return resetDecoder(connection, context.audioFormat());
-    }
-
-    private OptionalLong resetDecoder(AiLiveMeetingConnection connection, AudioFormat audioFormat) {
-        OptionalLong streamEpoch;
-        try {
-            streamEpoch = connection.sendDecoderReset(
-                    objectMapper, requestIdGenerator.decoderResetRequestId(), audioFormat);
-        } catch (Exception e) {
-            log.warn("AI WebSocket decoder.reset 전송에 실패했습니다. recordingSessionId={}",
-                    connection.recordingSessionId(), e);
-            cleanup(connection);
-            return OptionalLong.empty();
-        }
-        if (streamEpoch.isEmpty()) {
-            log.warn("AI WebSocket decoder.reset을 보낼 수 없는 상태입니다. recordingSessionId={}, state={}",
-                    connection.recordingSessionId(), connection.state());
-            return OptionalLong.empty();
-        }
-        try {
-            if (connection.awaitDecoderReady(AiLiveMeetingPolicy.READY_TIMEOUT)) {
-                return streamEpoch;
-            }
-            log.warn("AI WebSocket decoder.ready를 받지 못했습니다. recordingSessionId={}, state={}",
-                    connection.recordingSessionId(), connection.state());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("AI WebSocket decoder.ready 대기가 중단되었습니다. recordingSessionId={}",
-                    connection.recordingSessionId(), e);
-        }
-        if (connection.state() == AiLiveMeetingConnectionState.RESET_SENT) {
-            cleanup(connection);
-        }
-        return OptionalLong.empty();
-    }
-
-    public boolean forwardAudio(Long recordingSessionId, long streamEpoch, byte[] audio) {
+    public boolean forwardAudio(Long recordingSessionId, byte[] audio) {
         AiLiveMeetingConnection connection = registry.find(recordingSessionId).orElse(null);
         if (connection == null) {
             return false;
         }
         try {
-            return connection.forwardAudio(objectMapper, streamEpoch, audio);
+            return connection.forwardAudio(objectMapper, audio);
         } catch (Exception e) {
             log.warn("AI WebSocket 오디오 전달에 실패했습니다. recordingSessionId={}", recordingSessionId, e);
             return false;
