@@ -15,8 +15,6 @@ import org.springframework.web.socket.handler.BinaryWebSocketHandler;
 @RequiredArgsConstructor
 public class AudioWebSocketHandler extends BinaryWebSocketHandler {
 
-    public static final CloseStatus SUPERSEDED = new CloseStatus(4001, "superseded by new connection");
-
     private static final String STATS_ATTRIBUTE = "audioChunkStats";
 
     private final AudioWebSocketRegistry registry;
@@ -26,8 +24,10 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         AudioWebSocketContext context = context(session);
         session.getAttributes().put(STATS_ATTRIBUTE, new AudioChunkStats());
-        registry.replace(context.recordingSessionId(), session)
-                .ifPresent(previous -> registry.closeAndRemove(context.recordingSessionId(), previous, SUPERSEDED));
+        if (!registry.register(context.recordingSessionId(), session)) {
+            aiConnectionService.stop(context.recordingSessionId());
+            session.close(CloseStatus.POLICY_VIOLATION.withReason("audio websocket already connected"));
+        }
     }
 
     @Override
@@ -42,8 +42,7 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
         }
         byte[] audio = new byte[chunkBytes];
         message.getPayload().get(audio);
-        boolean forwarded = aiConnectionService.forwardAudio(
-                context.recordingSessionId(), context.streamEpoch(), audio);
+        boolean forwarded = aiConnectionService.forwardAudio(context.recordingSessionId(), audio);
 
         AudioChunkStats stats = stats(session);
         stats.record(chunkBytes, forwarded);

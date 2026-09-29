@@ -2,7 +2,6 @@ package com.backend.meety.domain.recording.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -39,34 +38,21 @@ class AudioWebSocketHandlerTest {
     }
 
     @Test
-    @DisplayName("같은 녹음 세션의 이전 소켓이 남아 있으면 새 소켓으로 교체하고 이전 소켓을 닫는다")
-    void replacesPreviousSessionAndClosesIt() throws Exception {
-        WebSocketSession previous = mock(WebSocketSession.class);
-        registry.replace(88L, previous);
+    @DisplayName("이미 연결된 녹음 세션이면 AI 연결을 정리하고 세션을 닫는다")
+    void closesDuplicateSessionAndStopsAiConnection() throws Exception {
+        registry.register(88L, mock(WebSocketSession.class));
         WebSocketSession session = session(context());
 
         handler.afterConnectionEstablished(session);
 
-        assertThat(registry.find(88L)).contains(session);
-        verify(previous).close(AudioWebSocketHandler.SUPERSEDED);
-        verify(session, never()).close(any(CloseStatus.class));
-        verify(aiConnectionService, never()).stop(anyLong());
-    }
-
-    @Test
-    @DisplayName("핸드셰이크에서 받은 스트림 세대로 오디오를 전달한다")
-    void forwardsWithStreamEpochFromContext() throws Exception {
-        WebSocketSession session = session(context().withStreamEpoch(3L));
-
-        handler.handleBinaryMessage(session, chunk(16));
-
-        verify(aiConnectionService).forwardAudio(eq(88L), eq(3L), any(byte[].class));
+        verify(aiConnectionService).stop(88L);
+        verify(session).close(CloseStatus.POLICY_VIOLATION.withReason("audio websocket already connected"));
     }
 
     @Test
     void acceptsAudioChunkWithinAllowedSize() throws Exception {
         WebSocketSession session = session(context());
-        when(aiConnectionService.forwardAudio(eq(88L), eq(0L), any(byte[].class))).thenReturn(true);
+        when(aiConnectionService.forwardAudio(eq(88L), any(byte[].class))).thenReturn(true);
 
         handler.handleBinaryMessage(session, chunk(1_024));
         handler.handleBinaryMessage(session, chunk(2_048));
@@ -82,12 +68,12 @@ class AudioWebSocketHandlerTest {
     @DisplayName("수신한 오디오 청크를 AI WebSocket으로 전달한다")
     void forwardsAudioChunkToAiConnection() throws Exception {
         WebSocketSession session = session(context());
-        when(aiConnectionService.forwardAudio(eq(88L), eq(0L), any(byte[].class))).thenReturn(true);
+        when(aiConnectionService.forwardAudio(eq(88L), any(byte[].class))).thenReturn(true);
 
         handler.handleBinaryMessage(session, chunk(1_024));
 
         ArgumentCaptor<byte[]> audioCaptor = ArgumentCaptor.forClass(byte[].class);
-        verify(aiConnectionService).forwardAudio(eq(88L), eq(0L), audioCaptor.capture());
+        verify(aiConnectionService).forwardAudio(eq(88L), audioCaptor.capture());
         assertThat(audioCaptor.getValue()).hasSize(1_024);
     }
 
@@ -95,7 +81,7 @@ class AudioWebSocketHandlerTest {
     @DisplayName("AI 전달에 실패해도 브라우저 연결은 끊지 않는다")
     void keepsConnectionWhenAiForwardingFails() throws Exception {
         WebSocketSession session = session(context());
-        when(aiConnectionService.forwardAudio(eq(88L), eq(0L), any(byte[].class))).thenReturn(false);
+        when(aiConnectionService.forwardAudio(eq(88L), any(byte[].class))).thenReturn(false);
 
         handler.handleBinaryMessage(session, chunk(1_024));
 
