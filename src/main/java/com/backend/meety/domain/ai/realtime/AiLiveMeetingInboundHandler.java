@@ -18,6 +18,7 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
     private static final String SESSION_PAUSED = "session.paused";
     private static final String SESSION_RESUMED = "session.resumed";
     private static final String SESSION_ENDED = "session.ended";
+    private static final String DECODER_READY = "decoder.ready";
     private static final String ERROR = "error";
     private static final String TRANSCRIPT_SEGMENT_FINAL = AiTranscriptSegmentMessage.TYPE;
     private static final String READY = "READY";
@@ -41,6 +42,10 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
             }
             if (SESSION_ENDED.equals(type)) {
                 handleSessionEnded(root);
+                return;
+            }
+            if (DECODER_READY.equals(type)) {
+                handleDecoderReady(root);
                 return;
             }
             if (SESSION_PAUSED.equals(type)) {
@@ -148,6 +153,20 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
         connection.markResumed();
     }
 
+    private void handleDecoderReady(JsonNode root) {
+        if (!matchesDecoderReset(root)) {
+            log.warn("AI decoder.ready 이벤트가 현재 connection과 일치하지 않습니다. recordingSessionId={}",
+                    connection.recordingSessionId());
+            return;
+        }
+        if (!READY.equals(root.path("payload").path("status").asText())) {
+            log.warn("AI decoder.ready status가 READY가 아닙니다. recordingSessionId={}, status={}",
+                    connection.recordingSessionId(), root.path("payload").path("status").asText());
+            return;
+        }
+        connection.markDecoderReady();
+    }
+
     private void handleSessionEnded(JsonNode root) {
         if (!matchesSessionStop(root)) {
             log.warn("AI session.ended 이벤트가 현재 connection과 일치하지 않습니다. recordingSessionId={}",
@@ -177,6 +196,12 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                 && String.valueOf(connection.meetingId()).equals(root.path("meetingId").asText())
                 && connection.sessionStopRequestId() != null
                 && connection.sessionStopRequestId().equals(root.path("requestId").asText());
+    }
+
+    private boolean matchesDecoderReset(JsonNode root) {
+        return DECODER_READY.equals(root.path("type").asText())
+                && connection.decoderResetRequestId() != null
+                && connection.decoderResetRequestId().equals(root.path("requestId").asText());
     }
 
     private boolean matchesSessionPause(JsonNode root) {

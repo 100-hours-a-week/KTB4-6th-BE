@@ -6,6 +6,7 @@ import com.backend.meety.global.security.WebSocketCookieAuthentication;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.OptionalLong;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -34,20 +35,17 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
             Long recordingSessionId = extractRecordingSessionId(request.getURI());
             AudioFormat audioFormat = extractAudioFormat(request.getURI());
             Long userId = authentication.authenticate(request);
-            if (registry.exists(recordingSessionId)) {
-                log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. recordingSessionId={}, reason=already connected",
-                        recordingSessionId);
-                response.setStatusCode(HttpStatus.CONFLICT);
-                return false;
-            }
             AudioWebSocketContext context = accessService.validate(userId, recordingSessionId, audioFormat);
-            if (!aiConnectionService.startAndAwaitReady(context)) {
+            registry.find(recordingSessionId).ifPresent(previous ->
+                    registry.closeAndRemove(recordingSessionId, previous, AudioWebSocketHandler.SUPERSEDED));
+            OptionalLong streamEpoch = aiConnectionService.openStream(context);
+            if (streamEpoch.isEmpty()) {
                 log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. recordingSessionId={}, reason=ai not ready",
                         recordingSessionId);
                 response.setStatusCode(HttpStatus.SERVICE_UNAVAILABLE);
                 return false;
             }
-            attributes.put(CONTEXT_ATTRIBUTE, context);
+            attributes.put(CONTEXT_ATTRIBUTE, context.withStreamEpoch(streamEpoch.getAsLong()));
             log.info("Audio WebSocket 핸드셰이크를 승인했습니다. recordingSessionId={}, meetingId={}, openSessions={}",
                     recordingSessionId, context.meetingId(), registry.count());
             return true;
@@ -67,13 +65,8 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
     @Override
     public void afterHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                WebSocketHandler wsHandler, Exception exception) {
-        if (exception == null) {
-            return;
-        }
-        try {
-            aiConnectionService.stop(extractRecordingSessionId(request.getURI()));
-        } catch (RuntimeException e) {
-            log.warn("핸드셰이크 실패 후 AI 연결 정리에 실패했습니다. uri={}", request.getURI().getPath(), e);
+        if (exception != null) {
+            log.warn("Audio WebSocket 업그레이드에 실패했습니다. uri={}", request.getURI().getPath(), exception);
         }
     }
 

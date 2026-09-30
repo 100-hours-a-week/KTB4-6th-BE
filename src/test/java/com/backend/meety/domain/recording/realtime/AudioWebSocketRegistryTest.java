@@ -1,9 +1,14 @@
 package com.backend.meety.domain.recording.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
+import java.io.IOException;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 
 class AudioWebSocketRegistryTest {
@@ -13,7 +18,7 @@ class AudioWebSocketRegistryTest {
         AudioWebSocketRegistry registry = new AudioWebSocketRegistry();
         WebSocketSession session = mock(WebSocketSession.class);
 
-        assertThat(registry.register(700L, session)).isTrue();
+        assertThat(registry.replace(700L, session)).isEmpty();
 
         registry.remove(700L, session);
         registry.remove(700L, session);
@@ -28,11 +33,35 @@ class AudioWebSocketRegistryTest {
         WebSocketSession stale = mock(WebSocketSession.class);
         WebSocketSession current = mock(WebSocketSession.class);
 
-        assertThat(registry.register(700L, current)).isTrue();
+        assertThat(registry.replace(700L, current)).isEmpty();
 
         registry.remove(700L, stale);
 
         assertThat(registry.find(700L)).contains(current);
         assertThat(registry.count()).isOne();
+    }
+
+    @Test
+    void replaceReturnsPreviousSessionAndKeepsNewOne() {
+        AudioWebSocketRegistry registry = new AudioWebSocketRegistry();
+        WebSocketSession previous = mock(WebSocketSession.class);
+        WebSocketSession current = mock(WebSocketSession.class);
+        registry.replace(700L, previous);
+
+        assertThat(registry.replace(700L, current)).contains(previous);
+        assertThat(registry.find(700L)).contains(current);
+    }
+
+    @Test
+    void closeAndRemoveClosesSessionAndRemovesItEvenWhenCloseFails() throws Exception {
+        AudioWebSocketRegistry registry = new AudioWebSocketRegistry();
+        WebSocketSession session = mock(WebSocketSession.class);
+        doThrow(new IOException("already closed")).when(session).close(any(CloseStatus.class));
+        registry.replace(700L, session);
+
+        registry.closeAndRemove(700L, session, AudioWebSocketHandler.SUPERSEDED);
+
+        verify(session).close(AudioWebSocketHandler.SUPERSEDED);
+        assertThat(registry.find(700L)).isEmpty();
     }
 }
