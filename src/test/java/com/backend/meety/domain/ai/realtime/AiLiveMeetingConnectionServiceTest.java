@@ -63,7 +63,7 @@ class AiLiveMeetingConnectionServiceTest {
         AiLiveMeetingConnection connection = registry.find(88L).orElseThrow();
         assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.START_SENT);
         assertThat(client.connectCount).isOne();
-        assertSessionStart(client.session.sentMessages.getFirst(), "webm_opus");
+        assertSessionStart(client.session.sentMessages.getFirst());
 
         client.receive("""
                 {
@@ -89,14 +89,14 @@ class AiLiveMeetingConnectionServiceTest {
     void webmOpusSessionStartSucceeds() throws Exception {
         assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isTrue();
 
-        assertSessionStart(client.session.sentMessages.getFirst(), "webm_opus");
+        assertSessionStart(client.session.sentMessages.getFirst());
     }
 
     @Test
     void mp4AacSessionStartSucceeds() throws Exception {
         assertThat(service.start(context(AudioFormat.MP4_AAC))).isTrue();
 
-        assertSessionStart(client.session.sentMessages.getFirst(), "mp4_aac");
+        assertSessionStart(client.session.sentMessages.getFirst());
     }
 
     @Test
@@ -973,17 +973,16 @@ class AiLiveMeetingConnectionServiceTest {
         return new AudioWebSocketContext(7L, 42L, 88L, audioFormat);
     }
 
-    private void assertSessionStart(String json, String audioFormat) throws Exception {
+    private void assertSessionStart(String json) throws Exception {
         JsonNode root = objectMapper.readTree(json);
-        assertThat(root.size()).isEqualTo(5);
+        assertThat(root.size()).isEqualTo(4);
         assertThat(root.path("type").asText()).isEqualTo("session.start");
         assertThat(root.path("requestId").asText()).isEqualTo("start-test");
         assertThat(root.path("meetingId").isTextual()).isTrue();
         assertThat(root.path("meetingId").asText()).isEqualTo("42");
         assertThat(root.path("recordingSessionId").isTextual()).isTrue();
         assertThat(root.path("recordingSessionId").asText()).isEqualTo("88");
-        assertThat(root.path("payload").size()).isOne();
-        assertThat(root.path("payload").path("audioFormat").asText()).isEqualTo(audioFormat);
+        assertThat(root.has("payload")).isFalse();
     }
 
     private void assertSessionStop(String json) throws Exception {
