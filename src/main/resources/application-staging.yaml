@@ -26,14 +26,14 @@ jwt:
   secret: ${JWT_SECRET}
 
 credit:
-  max-balance: 1000
-  team-create-grant: 200
-  weekly-grant: 200
-  weekly-grant-cron: "0 0 0 * * MON"
-  recording-cost: 20
-  summary-regenerate-cost: 3
-  ai-chat-message-cost: 1
-  analysis-report-cost: 5
+  max-balance: ${CREDIT_MAX_BALANCE:1000}
+  team-create-grant: ${CREDIT_TEAM_CREATE_GRANT:200}
+  weekly-grant: ${CREDIT_WEEKLY_GRANT:200}
+  weekly-grant-cron: "${CREDIT_WEEKLY_GRANT_CRON:0 0 0 * * MON}"
+  recording-cost: ${CREDIT_RECORDING_COST:20}
+  summary-regenerate-cost: ${CREDIT_SUMMARY_REGENERATE_COST:3}
+  ai-chat-message-cost: ${CREDIT_AI_CHAT_MESSAGE_COST:1}
+  analysis-report-cost: ${CREDIT_ANALYSIS_REPORT_COST:5}
 
 meeting:
   daily-create-limit: ${MEETING_DAILY_CREATE_LIMIT:5}
