@@ -2,6 +2,7 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '4.0.8'
 	id 'io.spring.dependency-management' version '1.1.7'
+	id 'io.sentry.jvm.gradle' version '6.23.0'
 }
 
 group = 'com.backend'
@@ -19,6 +20,7 @@ repositories {
 
 dependencies {
 	implementation 'software.amazon.awssdk:s3:2.35.11'
+	implementation 'io.sentry:sentry-async-profiler:8.59.0'
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
@@ -44,4 +46,12 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+sentry {
+	includeSourceContext = System.getenv("SENTRY_AUTH_TOKEN") != null
+
+	org = "meety-2i"
+	projectName = "meety-backend"
+	authToken = System.getenv("SENTRY_AUTH_TOKEN")
 }

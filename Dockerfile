@@ -21,9 +21,12 @@ WORKDIR /app
 RUN groupadd -r spring && useradd -r -g spring spring
 
 COPY --from=build /app/build/libs/*.jar app.jar
+ADD https://repo1.maven.org/maven2/io/sentry/sentry-opentelemetry-agent/8.59.0/sentry-opentelemetry-agent-8.59.0.jar sentry-opentelemetry-agent.jar
 
 USER spring
 EXPOSE 8080
 
+ENV SENTRY_AUTO_INIT=false
+
 # 컨테이너 메모리 제한(cgroup)을 인식하도록 설정 (Fargate 등에서 OOM 방지)
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-javaagent:sentry-opentelemetry-agent.jar", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
