@@ -21,7 +21,8 @@ WORKDIR /app
 RUN groupadd -r spring && useradd -r -g spring spring
 
 COPY --from=build /app/build/libs/*.jar app.jar
-ADD https://repo1.maven.org/maven2/io/sentry/sentry-opentelemetry-agent/8.59.0/sentry-opentelemetry-agent-8.59.0.jar sentry-opentelemetry-agent.jar
+# URL ADD의 기본 권한(600) 대신 spring도 읽을 수 있는 644를 지정한다. 수정 권한은 root만 유지한다.
+ADD --chmod=644 https://repo1.maven.org/maven2/io/sentry/sentry-opentelemetry-agent/8.59.0/sentry-opentelemetry-agent-8.59.0.jar sentry-opentelemetry-agent.jar
 
 USER spring
 EXPOSE 8080
