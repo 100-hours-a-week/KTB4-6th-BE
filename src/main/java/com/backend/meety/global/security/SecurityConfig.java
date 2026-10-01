@@ -4,6 +4,7 @@ import com.backend.meety.global.config.CorsProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.autoconfigure.web.server.ManagementServerProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -31,7 +32,7 @@ public class SecurityConfig {
     private final AccessTokenBlacklist accessTokenBlacklist;
     private final CustomAuthenticationEntryPoint authenticationEntryPoint;
     private final CorsProperties corsProperties;
-    private final ManagementServerProperties managementServerProperties;
+    private final ObjectProvider<ManagementServerProperties> managementServerProperties;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -58,7 +59,8 @@ public class SecurityConfig {
     }
 
     private boolean isManagementPortMetricsRequest(HttpServletRequest request) {
-        Integer managementPort = managementServerProperties.getPort();
+        ManagementServerProperties properties = managementServerProperties.getIfAvailable();
+        Integer managementPort = properties == null ? null : properties.getPort();
         return managementPort != null
                 && request.getLocalPort() == managementPort
                 && PROMETHEUS_ENDPOINT.equals(request.getRequestURI());
