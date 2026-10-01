@@ -8,6 +8,7 @@ public enum AiLiveMeetingConnectionState {
     PAUSE_SENT,
     PAUSED,
     RESUME_SENT,
+    RESET_SENT,
     STOP_SENT,
     ENDED,
     CLOSED

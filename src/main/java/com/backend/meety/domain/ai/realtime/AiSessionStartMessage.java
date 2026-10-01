@@ -4,8 +4,7 @@ public record AiSessionStartMessage(
         String type,
         String requestId,
         String meetingId,
-        String recordingSessionId,
-        AiSessionStartPayload payload
+        String recordingSessionId
 ) {
 
     private static final String TYPE = "session.start";
@@ -15,8 +14,7 @@ public record AiSessionStartMessage(
                 TYPE,
                 connection.sessionStartRequestId(),
                 String.valueOf(connection.meetingId()),
-                String.valueOf(connection.recordingSessionId()),
-                new AiSessionStartPayload(connection.audioFormat().value())
+                String.valueOf(connection.recordingSessionId())
         );
     }
 }
