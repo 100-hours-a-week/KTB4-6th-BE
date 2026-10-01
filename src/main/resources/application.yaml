@@ -35,7 +35,7 @@ sentry:
   send-default-pii: ${SENTRY_SEND_DEFAULT_PII:false}
   logs:
     enabled: ${BE_SENTRY_LOGS_ENABLED:false}
-  traces-sample-rate: ${SENTRY_TRACES_SAMPLE_RATE:0.0}
+  traces-sample-rate: ${BE_SENTRY_TRACES_SAMPLE_RATE:0.0}
   profile-session-sample-rate: ${SENTRY_PROFILE_SESSION_SAMPLE_RATE:0.0}
   profile-lifecycle: ${SENTRY_PROFILE_LIFECYCLE:TRACE}
 
