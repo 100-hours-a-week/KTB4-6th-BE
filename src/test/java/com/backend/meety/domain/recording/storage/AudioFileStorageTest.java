@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 
 import com.backend.meety.global.config.S3Properties;
 import java.net.URL;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -50,6 +52,19 @@ class AudioFileStorageTest {
         assertThat(url.toString())
                 .startsWith("https://meety-audio.s3.us-east-2.amazonaws.com/" + STORAGE_KEY)
                 .contains("X-Amz-Expires=600")
+                .contains("X-Amz-Signature=");
+    }
+
+    @Test
+    @DisplayName("사용자 다운로드 URL은 첨부 파일로 내려받도록 Content-Disposition을 서명에 포함한다")
+    void presignsAttachmentDownloadUrl() {
+        URL url = storage(presigner())
+                .createDownloadUrl(STORAGE_KEY, "회의-음성.mp4", Duration.ofMinutes(10));
+
+        assertThat(URLDecoder.decode(url.toString(), StandardCharsets.UTF_8))
+                .startsWith("https://meety-audio.s3.us-east-2.amazonaws.com/" + STORAGE_KEY)
+                .contains("response-content-disposition=attachment;")
+                .contains("filename*=UTF-8''%ED%9A%8C%EC%9D%98-%EC%9D%8C%EC%84%B1.mp4")
                 .contains("X-Amz-Signature=");
     }
 

@@ -2,9 +2,11 @@ package com.backend.meety.domain.recording.storage;
 
 import com.backend.meety.global.config.S3Properties;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ContentDisposition;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
@@ -38,15 +40,21 @@ public class AudioFileStorage {
     }
 
     public URL createDownloadUrl(String storageKey, Duration validity) {
-        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+        return presignDownload(GetObjectRequest.builder()
                 .bucket(properties.bucket())
                 .key(storageKey)
-                .build();
-        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(validity)
-                .getObjectRequest(getObjectRequest)
-                .build();
-        return presigner.presignGetObject(presignRequest).url();
+                .build(), validity);
+    }
+
+    public URL createDownloadUrl(String storageKey, String filename, Duration validity) {
+        return presignDownload(GetObjectRequest.builder()
+                .bucket(properties.bucket())
+                .key(storageKey)
+                .responseContentDisposition(ContentDisposition.attachment()
+                        .filename(filename, StandardCharsets.UTF_8)
+                        .build()
+                        .toString())
+                .build(), validity);
     }
 
     public void deleteObject(String storageKey) {
@@ -66,5 +74,13 @@ public class AudioFileStorage {
         } catch (NoSuchKeyException e) {
             return Optional.empty();
         }
+    }
+
+    private URL presignDownload(GetObjectRequest getObjectRequest, Duration validity) {
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(validity)
+                .getObjectRequest(getObjectRequest)
+                .build();
+        return presigner.presignGetObject(presignRequest).url();
     }
 }

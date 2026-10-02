@@ -341,7 +341,7 @@ class AudioFileServiceTest {
             when(audioFiles.findByIdAndDeletedAtIsNull(800L)).thenReturn(Optional.of(audioFile));
             when(members.existsByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE))
                     .thenReturn(true);
-            when(storage.createDownloadUrl(eq(STORAGE_KEY), any())).thenReturn(URI.create(DOWNLOAD_URL).toURL());
+            when(storage.createDownloadUrl(eq(STORAGE_KEY), any(), any())).thenReturn(URI.create(DOWNLOAD_URL).toURL());
         }
 
         @Test
@@ -352,7 +352,7 @@ class AudioFileServiceTest {
             assertThat(response.downloadUrl()).isEqualTo(DOWNLOAD_URL);
             assertThat(response.downloadUrlExpiresAt())
                     .isEqualTo(NOW.plus(AudioFilePolicy.DOWNLOAD_URL_VALIDITY));
-            verify(storage).createDownloadUrl(STORAGE_KEY, AudioFilePolicy.DOWNLOAD_URL_VALIDITY);
+            verify(storage).createDownloadUrl(STORAGE_KEY, "회의-음성.mp4", AudioFilePolicy.DOWNLOAD_URL_VALIDITY);
         }
 
         @Test
@@ -404,7 +404,7 @@ class AudioFileServiceTest {
         @Test
         @DisplayName("presign에 실패하면 500으로 변환한다")
         void translatesPresignFailure() {
-            when(storage.createDownloadUrl(eq(STORAGE_KEY), any())).thenThrow(new RuntimeException("presign failed"));
+            when(storage.createDownloadUrl(eq(STORAGE_KEY), any(), any())).thenThrow(new RuntimeException("presign failed"));
 
             assertCode(() -> service.createDownloadUrl(1L, 800L),
                     AudioFileErrorCode.AUDIO_DOWNLOAD_URL_CREATE_FAILED);
