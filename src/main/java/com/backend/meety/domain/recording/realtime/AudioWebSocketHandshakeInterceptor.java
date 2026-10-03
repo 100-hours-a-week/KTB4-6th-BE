@@ -38,7 +38,7 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
             AudioWebSocketContext context = accessService.validate(userId, recordingSessionId, audioFormat);
             registry.find(recordingSessionId).ifPresent(previous ->
                     registry.closeAndRemove(recordingSessionId, previous, AudioWebSocketHandler.SUPERSEDED));
-            OptionalLong streamEpoch = aiConnectionService.openStream(context);
+            OptionalLong streamEpoch = aiConnectionService.prepareStream(context);
             if (streamEpoch.isEmpty()) {
                 log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. recordingSessionId={}, reason=ai not ready",
                         recordingSessionId);

@@ -90,10 +90,8 @@ public class AiLiveMeetingConnectionService {
         }
     }
 
-    public OptionalLong openStream(AudioWebSocketContext context) {
-        AiLiveMeetingConnection connection = registry.find(context.recordingSessionId())
-                .filter(found -> !found.isClosed())
-                .orElse(null);
+    public OptionalLong prepareStream(AudioWebSocketContext context) {
+        AiLiveMeetingConnection connection = openConnection(context.recordingSessionId()).orElse(null);
         if (connection == null) {
             if (!startAndAwaitReady(context)) {
                 return OptionalLong.empty();
@@ -103,7 +101,30 @@ public class AiLiveMeetingConnectionService {
                 return OptionalLong.empty();
             }
         }
-        return resetDecoder(connection, context.audioFormat());
+        return OptionalLong.of(connection.streamEpoch());
+    }
+
+    public boolean awaitStreamable(Long recordingSessionId) {
+        AiLiveMeetingConnection connection = openConnection(recordingSessionId).orElse(null);
+        if (connection == null) {
+            return false;
+        }
+        try {
+            return connection.awaitState(AiLiveMeetingConnectionState.READY, AiLiveMeetingPolicy.READY_TIMEOUT);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    public OptionalLong resetStream(Long recordingSessionId, AudioFormat audioFormat) {
+        return openConnection(recordingSessionId)
+                .map(connection -> resetDecoder(connection, audioFormat))
+                .orElse(OptionalLong.empty());
+    }
+
+    private Optional<AiLiveMeetingConnection> openConnection(Long recordingSessionId) {
+        return registry.find(recordingSessionId).filter(found -> !found.isClosed());
     }
 
     private OptionalLong resetDecoder(AiLiveMeetingConnection connection, AudioFormat audioFormat) {
