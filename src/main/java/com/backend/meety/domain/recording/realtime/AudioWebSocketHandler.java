@@ -11,7 +11,6 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
-import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -26,10 +25,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
 
     private static final String RECOVERY_FINISHED = "recovery.finished";
     private static final String STATS_ATTRIBUTE = "audioChunkStats";
-    private static final String SENDER_ATTRIBUTE = "audioMessageSender";
     private static final String PHASE_ATTRIBUTE = "audioSocketPhase";
-    private static final int SEND_TIME_LIMIT_MILLIS = 1_000;
-    private static final int SEND_BUFFER_LIMIT_BYTES = 64 * 1024;
 
     private final AudioWebSocketRegistry registry;
     private final AiLiveMeetingConnectionService aiConnectionService;
@@ -190,7 +186,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
 
     private void send(WebSocketSession session, Long recordingSessionId, Object message) {
         try {
-            sender(session).sendMessage(new TextMessage(objectMapper.writeValueAsString(message)));
+            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(message)));
         } catch (Exception e) {
             log.warn("Audio WebSocket 메시지 전송에 실패했습니다. recordingSessionId={}, message={}",
                     recordingSessionId, message, e);
@@ -216,11 +212,5 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
     private AudioChunkStats stats(WebSocketSession session) {
         return (AudioChunkStats) session.getAttributes()
                 .computeIfAbsent(STATS_ATTRIBUTE, ignored -> new AudioChunkStats());
-    }
-
-    private WebSocketSession sender(WebSocketSession session) {
-        return (WebSocketSession) session.getAttributes().computeIfAbsent(SENDER_ATTRIBUTE,
-                ignored -> new ConcurrentWebSocketSessionDecorator(
-                        session, SEND_TIME_LIMIT_MILLIS, SEND_BUFFER_LIMIT_BYTES));
     }
 }
