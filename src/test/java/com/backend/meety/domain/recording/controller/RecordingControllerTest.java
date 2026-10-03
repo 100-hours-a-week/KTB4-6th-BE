@@ -179,6 +179,6 @@ class RecordingControllerTest {
     private RecordingSessionResponse response(RecordingSessionStatus state) {
         return new RecordingSessionResponse(700L, 100L, 10L, state, NOW,
                 state == RecordingSessionStatus.PAUSED ? NOW : null,
-                300_000L, state == RecordingSessionStatus.COMPLETED ? NOW : null, NOW.plusMinutes(90));
+                300_000L, state == RecordingSessionStatus.COMPLETED ? NOW : null, NOW.plusMinutes(90), null);
     }
 }

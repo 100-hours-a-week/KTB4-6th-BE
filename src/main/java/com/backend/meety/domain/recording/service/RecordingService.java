@@ -24,6 +24,7 @@ import com.backend.meety.domain.recording.event.RecordingResumedEvent;
 import com.backend.meety.domain.recording.event.RecordingStartedEvent;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
 import com.backend.meety.domain.recording.exception.RecordingException;
+import com.backend.meety.domain.recording.realtime.AudioWebSocketRegistry;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.TeamMember;
@@ -62,6 +63,7 @@ public class RecordingService {
     private final Clock clock;
     private final ApplicationEventPublisher eventPublisher;
     private final CreditPolicy creditPolicy;
+    private final AudioWebSocketRegistry audioWebSocketRegistry;
     private DataSource dataSource;
 
     @Autowired(required = false)
@@ -211,6 +213,9 @@ public class RecordingService {
         logElapsed("[RECORDING_STATUS] end meetingId={}, recordingSessionId={}, userId={}, requestedStatus={}, "
                         + "totalElapsedMs={}",
                 elapsedMs(totalStartedAt), meetingId, sessionId, userId, status);
+        if (status == RecordingSessionStatus.COMPLETED) {
+            return RecordingSessionResponse.from(session, audioWebSocketRegistry.removeReceivedChunkCount(sessionId));
+        }
         return RecordingSessionResponse.from(session);
     }
 

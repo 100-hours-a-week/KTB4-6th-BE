@@ -13,14 +13,20 @@ public record RecordingSessionResponse(
         LocalDateTime pausedAt,
         Long totalPausedDurationMs,
         LocalDateTime endedAt,
-        LocalDateTime autoEndAt
+        LocalDateTime autoEndAt,
+        Long receivedChunkCount
 ) {
 
     public static RecordingSessionResponse from(RecordingSession session) {
+        return from(session, null);
+    }
+
+    public static RecordingSessionResponse from(RecordingSession session, Long receivedChunkCount) {
         return new RecordingSessionResponse(
                 session.getId(), session.getMeeting().getId(), session.getStartedByTeamMember().getId(),
                 session.getStatus(), session.getStartedAt(), session.getPausedAt(),
-                session.getTotalPausedDurationMs(), session.getEndedAt(), session.getAutoEndAt()
+                session.getTotalPausedDurationMs(), session.getEndedAt(), session.getAutoEndAt(),
+                receivedChunkCount
         );
     }
 }

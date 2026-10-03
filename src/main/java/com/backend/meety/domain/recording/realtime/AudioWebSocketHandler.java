@@ -26,6 +26,7 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         AudioWebSocketContext context = context(session);
         session.getAttributes().put(STATS_ATTRIBUTE, new AudioChunkStats());
+        registry.startCountingChunks(context.recordingSessionId());
         registry.replace(context.recordingSessionId(), session)
                 .ifPresent(previous -> registry.closeAndRemove(context.recordingSessionId(), previous, SUPERSEDED));
     }
@@ -40,6 +41,7 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
             session.close(CloseStatus.NOT_ACCEPTABLE.withReason("audio chunk size not allowed"));
             return;
         }
+        registry.recordReceivedChunk(context.recordingSessionId());
         byte[] audio = new byte[chunkBytes];
         message.getPayload().get(audio);
         boolean forwarded = aiConnectionService.forwardAudio(

@@ -106,6 +106,31 @@ class AudioWebSocketHandlerTest {
     }
 
     @Test
+    @DisplayName("소켓이 바뀌어도 녹음 단위로 수신 청크 수를 이어서 센다")
+    void countsReceivedChunksAcrossReconnectedSockets() throws Exception {
+        WebSocketSession first = session(context());
+        handler.afterConnectionEstablished(first);
+        handler.handleBinaryMessage(first, chunk(16));
+        handler.handleBinaryMessage(first, chunk(16));
+        WebSocketSession second = session(context());
+        handler.afterConnectionEstablished(second);
+        handler.handleBinaryMessage(second, chunk(16));
+
+        assertThat(registry.removeReceivedChunkCount(88L)).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("크기 제한을 벗어난 청크는 수신 청크 수에 포함하지 않는다")
+    void doesNotCountRejectedChunk() throws Exception {
+        WebSocketSession session = session(context());
+        handler.afterConnectionEstablished(session);
+
+        handler.handleBinaryMessage(session, chunk(AudioChunkPolicy.MAX_CHUNK_BYTES + 1));
+
+        assertThat(registry.removeReceivedChunkCount(88L)).isZero();
+    }
+
+    @Test
     void closesSessionWhenChunkExceedsMaxSize() throws Exception {
         WebSocketSession session = session(context());
 
