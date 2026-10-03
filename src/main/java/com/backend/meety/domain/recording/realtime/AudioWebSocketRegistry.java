@@ -12,6 +12,7 @@ import org.springframework.web.socket.WebSocketSession;
 public class AudioWebSocketRegistry {
 
     private final ConcurrentHashMap<Long, WebSocketSession> sessions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, AudioStreamState> streamStates = new ConcurrentHashMap<>();
 
     public Optional<WebSocketSession> replace(Long recordingSessionId, WebSocketSession session) {
         return Optional.ofNullable(sessions.put(recordingSessionId, session));
@@ -37,5 +38,13 @@ public class AudioWebSocketRegistry {
 
     public int count() {
         return sessions.size();
+    }
+
+    public AudioStreamState streamState(Long recordingSessionId) {
+        return streamStates.computeIfAbsent(recordingSessionId, ignored -> new AudioStreamState());
+    }
+
+    public void removeStreamState(Long recordingSessionId) {
+        streamStates.remove(recordingSessionId);
     }
 }

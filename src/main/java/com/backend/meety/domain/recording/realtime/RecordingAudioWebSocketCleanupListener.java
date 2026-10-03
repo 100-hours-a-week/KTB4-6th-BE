@@ -20,6 +20,7 @@ public class RecordingAudioWebSocketCleanupListener {
     public void closeAudioWebSocket(RecordingCompletedEvent event) {
         registry.find(event.recordingSessionId())
                 .ifPresent(session -> closeAndRemove(event.recordingSessionId(), session));
+        registry.removeStreamState(event.recordingSessionId());
     }
 
     private void closeAndRemove(Long recordingSessionId, WebSocketSession session) {

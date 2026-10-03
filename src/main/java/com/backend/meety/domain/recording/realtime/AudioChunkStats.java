@@ -7,6 +7,7 @@ public class AudioChunkStats {
     private final AtomicLong chunkCount = new AtomicLong();
     private final AtomicLong forwardedCount = new AtomicLong();
     private final AtomicLong totalBytes = new AtomicLong();
+    private final AtomicLong duplicateCount = new AtomicLong();
 
     public void record(int chunkBytes, boolean forwarded) {
         chunkCount.incrementAndGet();
@@ -14,6 +15,10 @@ public class AudioChunkStats {
         if (forwarded) {
             forwardedCount.incrementAndGet();
         }
+    }
+
+    public void recordDuplicate() {
+        duplicateCount.incrementAndGet();
     }
 
     public long chunkCount() {
@@ -26,5 +31,9 @@ public class AudioChunkStats {
 
     public long totalBytes() {
         return totalBytes.get();
+    }
+
+    public long duplicateCount() {
+        return duplicateCount.get();
     }
 }
