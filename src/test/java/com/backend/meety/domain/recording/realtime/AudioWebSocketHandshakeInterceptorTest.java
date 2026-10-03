@@ -46,13 +46,13 @@ class AudioWebSocketHandshakeInterceptorTest {
     }
 
     @Test
-    @DisplayName("같은 녹음 세션의 이전 소켓을 닫고 AI 스트림을 연 뒤 스트림 세대를 컨텍스트에 담는다")
+    @DisplayName("같은 녹음 세션의 이전 소켓을 닫고 AI 연결을 준비한 뒤 현재 스트림 세대를 컨텍스트에 담는다")
     void supersedesPreviousSocketAndStoresStreamEpoch() throws Exception {
         ServerHttpRequest request = request("ws://localhost/ws/v1/recordings/88/audio?audioFormat=webm_opus");
         AudioWebSocketContext context = new AudioWebSocketContext(7L, 42L, 88L, AudioFormat.WEBM_OPUS);
         org.mockito.Mockito.when(authentication.authenticate(request)).thenReturn(7L);
         org.mockito.Mockito.when(accessService.validate(7L, 88L, AudioFormat.WEBM_OPUS)).thenReturn(context);
-        org.mockito.Mockito.when(aiConnectionService.openStream(context)).thenReturn(OptionalLong.of(2L));
+        org.mockito.Mockito.when(aiConnectionService.prepareStream(context)).thenReturn(OptionalLong.of(2L));
         WebSocketSession previous = mock(WebSocketSession.class);
         registry.replace(88L, previous);
         Map<String, Object> attributes = new HashMap<>();
@@ -69,13 +69,13 @@ class AudioWebSocketHandshakeInterceptorTest {
     }
 
     @Test
-    @DisplayName("AI 스트림을 열지 못하면 503으로 거절한다")
+    @DisplayName("AI 연결을 준비하지 못하면 503으로 거절한다")
     void rejectsWithServiceUnavailableWhenStreamCannotOpen() {
         ServerHttpRequest request = request("ws://localhost/ws/v1/recordings/88/audio?audioFormat=webm_opus");
         AudioWebSocketContext context = new AudioWebSocketContext(7L, 42L, 88L, AudioFormat.WEBM_OPUS);
         org.mockito.Mockito.when(authentication.authenticate(request)).thenReturn(7L);
         org.mockito.Mockito.when(accessService.validate(7L, 88L, AudioFormat.WEBM_OPUS)).thenReturn(context);
-        org.mockito.Mockito.when(aiConnectionService.openStream(context)).thenReturn(OptionalLong.empty());
+        org.mockito.Mockito.when(aiConnectionService.prepareStream(context)).thenReturn(OptionalLong.empty());
         TestServerHttpResponse response = new TestServerHttpResponse();
 
         boolean result = interceptor.beforeHandshake(
