@@ -31,6 +31,7 @@ class RecordingAudioWebSocketCleanupListenerTest {
 
         verify(session).close(CloseStatus.NORMAL);
         verify(registry).remove(700L, session);
+        verify(registry).removeStreamState(700L);
     }
 
     @Test
@@ -40,6 +41,7 @@ class RecordingAudioWebSocketCleanupListenerTest {
         listener.closeAudioWebSocket(new RecordingCompletedEvent(100L, 700L));
 
         verify(registry).find(700L);
+        verify(registry).removeStreamState(700L);
     }
 
     @Test

@@ -14,6 +14,19 @@ import org.springframework.web.socket.WebSocketSession;
 class AudioWebSocketRegistryTest {
 
     @Test
+    void streamStateIsSharedPerRecordingUntilRemoved() {
+        AudioWebSocketRegistry registry = new AudioWebSocketRegistry();
+        registry.streamState(700L).markProcessed(3L);
+
+        assertThat(registry.streamState(700L).lastProcessedSequence()).isEqualTo(3L);
+        assertThat(registry.streamState(701L).lastProcessedSequence()).isZero();
+
+        registry.removeStreamState(700L);
+
+        assertThat(registry.streamState(700L).lastProcessedSequence()).isZero();
+    }
+
+    @Test
     void removeIsSafeWhenCalledRepeatedlyForSameSession() {
         AudioWebSocketRegistry registry = new AudioWebSocketRegistry();
         WebSocketSession session = mock(WebSocketSession.class);
