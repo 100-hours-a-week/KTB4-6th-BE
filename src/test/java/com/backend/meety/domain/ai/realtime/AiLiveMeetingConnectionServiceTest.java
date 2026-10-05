@@ -823,10 +823,10 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     @Test
-    @DisplayName("AI 연결이 없으면 session.start 후 decoder.reset까지 마치고 새 스트림 세대를 돌려준다")
-    void openStreamStartsConnectionThenResetsDecoder() throws Exception {
+    @DisplayName("AI 연결이 없으면 session.start만 하고 decoder.reset 없이 현재 스트림 세대를 돌려준다")
+    void prepareStreamStartsConnectionWithoutReset() throws Exception {
         AtomicReference<OptionalLong> result = new AtomicReference<>();
-        Thread waiting = new Thread(() -> result.set(service.openStream(context(AudioFormat.WEBM_OPUS))));
+        Thread waiting = new Thread(() -> result.set(service.prepareStream(context(AudioFormat.WEBM_OPUS))));
         waiting.start();
         awaitSentType("session.start");
         client.receive("""
@@ -838,21 +838,32 @@ class AiLiveMeetingConnectionServiceTest {
                   "payload": {"status": "READY"}
                 }
                 """);
-        awaitSentType("decoder.reset");
-        client.receive(decoderReady("reset-test"));
         waiting.join(3_000);
 
-        assertThat(result.get()).hasValue(1L);
+        assertThat(result.get()).hasValue(0L);
         assertThat(client.connectCount).isOne();
+        assertThat(client.session.sentFrameTypes).containsExactly("session.start");
         assertThat(registry.find(88L).orElseThrow().state()).isEqualTo(AiLiveMeetingConnectionState.READY);
     }
 
     @Test
-    @DisplayName("READY인 AI 연결이 있으면 새로 연결하지 않고 새 녹음 형식으로 decoder.reset만 보낸다")
-    void openStreamReusesReadyConnection() throws Exception {
+    @DisplayName("AI 연결이 있으면 새로 연결하지 않고 현재 스트림 세대를 그대로 돌려준다")
+    void prepareStreamReusesConnectionWithoutReset() throws Exception {
         readyConnection();
 
-        OptionalLong streamEpoch = openStreamWithDecoderReady(AudioFormat.MP4_AAC);
+        OptionalLong streamEpoch = service.prepareStream(context(AudioFormat.MP4_AAC));
+
+        assertThat(streamEpoch).hasValue(0L);
+        assertThat(client.connectCount).isOne();
+        assertThat(client.session.sentFrameTypes).doesNotContain("decoder.reset");
+    }
+
+    @Test
+    @DisplayName("resetStream은 새 녹음 형식으로 decoder.reset을 보내고 새 스트림 세대를 돌려준다")
+    void resetStreamSendsDecoderReset() throws Exception {
+        readyConnection();
+
+        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.MP4_AAC);
 
         assertThat(streamEpoch).hasValue(1L);
         assertThat(client.connectCount).isOne();
@@ -863,11 +874,49 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     @Test
+    @DisplayName("AI 연결이 없으면 resetStream은 실패한다")
+    void resetStreamFailsWithoutConnection() {
+        assertThat(service.resetStream(88L, AudioFormat.WEBM_OPUS)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("READY인 AI 연결은 바로 스트림을 받을 수 있다")
+    void awaitStreamableReturnsImmediatelyWhenReady() throws Exception {
+        readyConnection();
+
+        assertThat(service.awaitStreamable(88L)).isTrue();
+    }
+
+    @Test
+    @DisplayName("재개 응답을 기다리는 중이면 session.resumed를 받은 뒤 스트림을 받을 수 있다")
+    void awaitStreamableWaitsForResumed() throws Exception {
+        pausedConnection();
+        service.resume(88L);
+        AtomicReference<Boolean> result = new AtomicReference<>();
+        Thread waiting = new Thread(() -> result.set(service.awaitStreamable(88L)));
+        waiting.start();
+        awaitSentType("session.resume");
+
+        client.receive("""
+                {"type":"session.resumed","requestId":"resume-test","payload":{"status":"READY"}}
+                """);
+        waiting.join(3_000);
+
+        assertThat(result.get()).isTrue();
+    }
+
+    @Test
+    @DisplayName("AI 연결이 없으면 스트림을 받을 수 없다")
+    void awaitStreamableFailsWithoutConnection() {
+        assertThat(service.awaitStreamable(88L)).isFalse();
+    }
+
+    @Test
     @DisplayName("reset 이후 옛 세대 청크는 버리고 새 세대 청크만 전달하며 시퀀스는 이어진다")
     void oldStreamChunksAreDroppedAfterReset() throws Exception {
         readyConnection();
         assertThat(service.forwardAudio(88L, 0L, new byte[]{1})).isTrue();
-        OptionalLong streamEpoch = openStreamWithDecoderReady(AudioFormat.WEBM_OPUS);
+        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.WEBM_OPUS);
 
         boolean oldForwarded = service.forwardAudio(88L, 0L, new byte[]{2});
         boolean newForwarded = service.forwardAudio(88L, streamEpoch.getAsLong(), new byte[]{3});
@@ -884,7 +933,7 @@ class AiLiveMeetingConnectionServiceTest {
     void resetFromPausedReturnsToPaused() throws Exception {
         AiLiveMeetingConnection connection = pausedConnection();
 
-        OptionalLong streamEpoch = openStreamWithDecoderReady(AudioFormat.WEBM_OPUS);
+        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.WEBM_OPUS);
 
         assertThat(streamEpoch).hasValue(1L);
         assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.PAUSED);
@@ -892,10 +941,10 @@ class AiLiveMeetingConnectionServiceTest {
 
     @Test
     @DisplayName("decoder.reset에 error가 오면 AI 연결을 정리하고 실패한다")
-    void openStreamFailsAndCleansUpWhenResetErrors() throws Exception {
+    void resetStreamFailsAndCleansUpWhenResetErrors() throws Exception {
         readyConnection();
         AtomicReference<OptionalLong> result = new AtomicReference<>();
-        Thread waiting = new Thread(() -> result.set(service.openStream(context(AudioFormat.WEBM_OPUS))));
+        Thread waiting = new Thread(() -> result.set(service.resetStream(88L, AudioFormat.WEBM_OPUS)));
         waiting.start();
         awaitSentType("decoder.reset");
 
@@ -931,9 +980,9 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(client.session.sentFrameTypes).contains("session.stop");
     }
 
-    private OptionalLong openStreamWithDecoderReady(AudioFormat audioFormat) throws Exception {
+    private OptionalLong resetStreamWithDecoderReady(AudioFormat audioFormat) throws Exception {
         AtomicReference<OptionalLong> result = new AtomicReference<>();
-        Thread waiting = new Thread(() -> result.set(service.openStream(context(audioFormat))));
+        Thread waiting = new Thread(() -> result.set(service.resetStream(88L, audioFormat)));
         waiting.start();
         awaitSentType("decoder.reset");
         client.receive(decoderReady("reset-test"));

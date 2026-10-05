@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -13,19 +15,31 @@ import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionService;
 import com.backend.meety.domain.ai.realtime.AudioFormat;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
+import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketMessage;
 import org.springframework.web.socket.WebSocketSession;
+import tools.jackson.databind.ObjectMapper;
 
 class AudioWebSocketHandlerTest {
 
     private final AudioWebSocketRegistry registry = new AudioWebSocketRegistry();
     private final AiLiveMeetingConnectionService aiConnectionService = mock(AiLiveMeetingConnectionService.class);
-    private final AudioWebSocketHandler handler = new AudioWebSocketHandler(registry, aiConnectionService);
+    private final AudioWebSocketHandler handler =
+            new AudioWebSocketHandler(registry, aiConnectionService, new ObjectMapper());
+
+    @BeforeEach
+    void aiConnectionIsStreamable() {
+        when(aiConnectionService.awaitStreamable(88L)).thenReturn(true);
+    }
 
     @Test
     @DisplayName("연결이 성립하면 세션을 레지스트리에 등록한다")
@@ -58,73 +72,279 @@ class AudioWebSocketHandlerTest {
     void forwardsWithStreamEpochFromContext() throws Exception {
         WebSocketSession session = session(context().withStreamEpoch(3L));
 
-        handler.handleBinaryMessage(session, chunk(16));
+        handler.handleBinaryMessage(session, frame(1, 16));
 
         verify(aiConnectionService).forwardAudio(eq(88L), eq(3L), any(byte[].class));
     }
 
     @Test
-    void acceptsAudioChunkWithinAllowedSize() throws Exception {
+    @DisplayName("순번 헤더를 떼고 오디오만 AI로 전달한다")
+    void forwardsAudioWithoutSequenceHeader() throws Exception {
         WebSocketSession session = session(context());
-        when(aiConnectionService.forwardAudio(eq(88L), eq(0L), any(byte[].class))).thenReturn(true);
+        forwardSucceeds();
 
-        handler.handleBinaryMessage(session, chunk(1_024));
-        handler.handleBinaryMessage(session, chunk(2_048));
+        handler.handleBinaryMessage(session, frame(1, 1_024));
+
+        ArgumentCaptor<byte[]> audioCaptor = ArgumentCaptor.forClass(byte[].class);
+        verify(aiConnectionService).forwardAudio(eq(88L), eq(0L), audioCaptor.capture());
+        assertThat(audioCaptor.getValue()).hasSize(1_024);
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isEqualTo(1L);
+    }
+
+    @Test
+    void recordsStatsWithAudioBytesOnly() throws Exception {
+        WebSocketSession session = session(context());
+        forwardSucceeds();
+
+        handler.handleBinaryMessage(session, frame(1, 1_024));
+        handler.handleBinaryMessage(session, frame(2, 2_048));
 
         verify(session, never()).close(any(CloseStatus.class));
-        AudioChunkStats stats = (AudioChunkStats) session.getAttributes().get("audioChunkStats");
+        AudioChunkStats stats = stats(session);
         assertThat(stats.chunkCount()).isEqualTo(2L);
         assertThat(stats.forwardedCount()).isEqualTo(2L);
         assertThat(stats.totalBytes()).isEqualTo(3_072L);
     }
 
     @Test
-    @DisplayName("수신한 오디오 청크를 AI WebSocket으로 전달한다")
-    void forwardsAudioChunkToAiConnection() throws Exception {
+    @DisplayName("이미 처리한 순번은 AI로 다시 보내지 않는다")
+    void skipsAlreadyProcessedSequence() throws Exception {
         WebSocketSession session = session(context());
-        when(aiConnectionService.forwardAudio(eq(88L), eq(0L), any(byte[].class))).thenReturn(true);
+        forwardSucceeds();
 
-        handler.handleBinaryMessage(session, chunk(1_024));
+        handler.handleBinaryMessage(session, frame(1, 16));
+        handler.handleBinaryMessage(session, frame(2, 16));
+        handler.handleBinaryMessage(session, frame(2, 16));
+        handler.handleBinaryMessage(session, frame(1, 16));
 
-        ArgumentCaptor<byte[]> audioCaptor = ArgumentCaptor.forClass(byte[].class);
-        verify(aiConnectionService).forwardAudio(eq(88L), eq(0L), audioCaptor.capture());
-        assertThat(audioCaptor.getValue()).hasSize(1_024);
+        verify(aiConnectionService, times(2)).forwardAudio(eq(88L), eq(0L), any(byte[].class));
+        assertThat(stats(session).duplicateCount()).isEqualTo(2L);
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isEqualTo(2L);
     }
 
     @Test
-    @DisplayName("AI 전달에 실패해도 브라우저 연결은 끊지 않는다")
-    void keepsConnectionWhenAiForwardingFails() throws Exception {
+    @DisplayName("순번이 건너뛰면 빠진 구간은 무시하고 들어온 순번부터 이어서 처리한다")
+    void continuesFromReceivedSequenceWhenGap() throws Exception {
         WebSocketSession session = session(context());
-        when(aiConnectionService.forwardAudio(eq(88L), eq(0L), any(byte[].class))).thenReturn(false);
+        forwardSucceeds();
 
-        handler.handleBinaryMessage(session, chunk(1_024));
+        handler.handleBinaryMessage(session, frame(1, 16));
+        handler.handleBinaryMessage(session, frame(5, 16));
+        handler.handleBinaryMessage(session, frame(3, 16));
+
+        verify(aiConnectionService, times(2)).forwardAudio(eq(88L), eq(0L), any(byte[].class));
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isEqualTo(5L);
+    }
+
+    @Test
+    @DisplayName("AI 전달에 실패하면 처리 순번을 올리지 않아 같은 순번을 다시 받을 수 있다")
+    void doesNotAdvanceSequenceWhenForwardFails() throws Exception {
+        WebSocketSession session = session(context());
+        when(aiConnectionService.forwardAudio(eq(88L), eq(0L), any(byte[].class))).thenReturn(false, true);
+
+        handler.handleBinaryMessage(session, frame(1, 16));
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isZero();
+
+        handler.handleBinaryMessage(session, frame(1, 16));
+
+        verify(aiConnectionService, times(2)).forwardAudio(eq(88L), eq(0L), any(byte[].class));
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isEqualTo(1L);
+        verify(session, never()).close(any(CloseStatus.class));
+    }
+
+    @Test
+    @DisplayName("10개를 처리할 때마다 마지막 처리 순번으로 누적 ACK를 보낸다")
+    void sendsCumulativeAckEveryTenChunks() throws Exception {
+        WebSocketSession session = session(context());
+        forwardSucceeds();
+
+        for (long sequence = 1; sequence <= 25; sequence++) {
+            handler.handleBinaryMessage(session, frame(sequence, 16));
+        }
+
+        ArgumentCaptor<WebSocketMessage<?>> messages = ArgumentCaptor.forClass(WebSocketMessage.class);
+        verify(session, times(2)).sendMessage(messages.capture());
+        assertThat(messages.getAllValues()).extracting(message -> (String) message.getPayload())
+                .containsExactly("{\"type\":\"ack\",\"seq\":10}", "{\"type\":\"ack\",\"seq\":20}");
+    }
+
+    @Test
+    @DisplayName("소켓이 바뀌어도 녹음 단위 처리 순번을 이어서 쓴다")
+    void keepsProcessedSequenceAcrossSockets() throws Exception {
+        forwardSucceeds();
+        WebSocketSession first = session(context());
+        handler.afterConnectionEstablished(first);
+        handler.handleBinaryMessage(first, frame(1, 16));
+        handler.handleBinaryMessage(first, frame(2, 16));
+
+        WebSocketSession second = session(context());
+        handler.afterConnectionEstablished(second);
+        handler.handleBinaryMessage(second, frame(2, 16));
+        handler.handleBinaryMessage(second, frame(3, 16));
+
+        verify(aiConnectionService, times(3)).forwardAudio(eq(88L), eq(0L), any(byte[].class));
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("연결되면 AI가 준비된 뒤 마지막 처리 순번과 함께 복구 시작을 알린다")
+    void sendsRecoveryStartAfterAiIsReady() throws Exception {
+        registry.streamState(88L).markProcessed(104L);
+        WebSocketSession session = session(context());
+
+        handler.afterConnectionEstablished(session);
+
+        assertThat(sentTexts(session)).containsExactly(
+                "{\"type\":\"recovery.start\",\"lastProcessedSequence\":104}");
+        verify(session, never()).close(any(CloseStatus.class));
+    }
+
+    @Test
+    @DisplayName("AI가 준비되지 않으면 복구를 시작하지 않고 연결을 닫는다")
+    void closesWhenAiIsNotReady() throws Exception {
+        when(aiConnectionService.awaitStreamable(88L)).thenReturn(false);
+        WebSocketSession session = session(context());
+
+        handler.afterConnectionEstablished(session);
+
+        verify(session).close(AudioWebSocketHandler.AI_NOT_READY);
+        assertThat(sentTexts(session)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("복구가 끝나면 남은 ACK를 보내고 새 스트림으로 전환한 뒤 stream.ready를 보낸다")
+    void switchesStreamAfterRecoveryFinished() throws Exception {
+        forwardSucceeds();
+        WebSocketSession session = connected();
+        handler.handleBinaryMessage(session, frame(1, 16));
+        handler.handleBinaryMessage(session, frame(2, 16));
+        when(aiConnectionService.resetStream(88L, AudioFormat.WEBM_OPUS)).thenReturn(OptionalLong.of(1L));
+        when(aiConnectionService.forwardAudio(eq(88L), eq(1L), any(byte[].class))).thenReturn(true);
+
+        handler.handleTextMessage(session, recoveryFinished(2));
+        handler.handleBinaryMessage(session, frame(3, 16));
+
+        assertThat(sentTexts(session)).containsExactly(
+                "{\"type\":\"recovery.start\",\"lastProcessedSequence\":0}",
+                "{\"type\":\"ack\",\"seq\":2}",
+                "{\"type\":\"stream.ready\"}");
+        verify(aiConnectionService).forwardAudio(eq(88L), eq(1L), any(byte[].class));
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("FE가 보낸 마지막 순번까지 처리되지 않았으면 전환하지 않고 복구를 다시 요청한다")
+    void requestsRecoveryAgainWhenChunksRemain() throws Exception {
+        forwardSucceeds();
+        WebSocketSession session = connected();
+        handler.handleBinaryMessage(session, frame(1, 16));
+
+        handler.handleTextMessage(session, recoveryFinished(3));
+
+        assertThat(sentTexts(session)).containsExactly(
+                "{\"type\":\"recovery.start\",\"lastProcessedSequence\":0}",
+                "{\"type\":\"recovery.start\",\"lastProcessedSequence\":1}");
+        verify(aiConnectionService, never()).resetStream(anyLong(), any());
+    }
+
+    @Test
+    @DisplayName("새 스트림으로 전환하지 못하면 연결을 닫는다")
+    void closesWhenStreamResetFails() throws Exception {
+        WebSocketSession session = connected();
+        when(aiConnectionService.resetStream(88L, AudioFormat.WEBM_OPUS)).thenReturn(OptionalLong.empty());
+
+        handler.handleTextMessage(session, recoveryFinished(0));
+
+        verify(session).close(AudioWebSocketHandler.STREAM_RESET_FAILED);
+        assertThat(sentTexts(session)).doesNotContain("{\"type\":\"stream.ready\"}");
+    }
+
+    @Test
+    @DisplayName("이미 스트리밍 중인 소켓의 recovery.finished는 무시한다")
+    void ignoresRecoveryFinishedWhenStreaming() throws Exception {
+        WebSocketSession session = connected();
+        when(aiConnectionService.resetStream(88L, AudioFormat.WEBM_OPUS)).thenReturn(OptionalLong.of(1L));
+        handler.handleTextMessage(session, recoveryFinished(0));
+
+        handler.handleTextMessage(session, recoveryFinished(0));
+
+        verify(aiConnectionService).resetStream(88L, AudioFormat.WEBM_OPUS);
+    }
+
+    @Test
+    @DisplayName("스트림 전환 중에 들어온 청크는 처리하지 않는다")
+    void dropsChunksWhileResetting() throws Exception {
+        WebSocketSession session = session(context());
+        session.getAttributes().put("audioSocketPhase", AudioSocketPhase.RESETTING);
+
+        handler.handleBinaryMessage(session, frame(1, 16));
+
+        verify(aiConnectionService, never()).forwardAudio(anyLong(), anyLong(), any(byte[].class));
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isZero();
+    }
+
+    @Test
+    @DisplayName("알 수 없는 텍스트 메시지는 처리하지 않고 연결도 유지한다")
+    void ignoresUnknownTextMessage() throws Exception {
+        WebSocketSession session = session(context());
+
+        handler.handleTextMessage(session, new TextMessage("{\"type\":\"unknown\"}"));
+        handler.handleTextMessage(session, new TextMessage("not json"));
 
         verify(session, never()).close(any(CloseStatus.class));
-        AudioChunkStats stats = (AudioChunkStats) session.getAttributes().get("audioChunkStats");
-        assertThat(stats.chunkCount()).isEqualTo(1L);
-        assertThat(stats.forwardedCount()).isZero();
+        verify(aiConnectionService, never()).forwardAudio(anyLong(), anyLong(), any(byte[].class));
+        verify(aiConnectionService, never()).resetStream(anyLong(), any());
     }
 
     @Test
-    void closesSessionWhenChunkExceedsMaxSize() throws Exception {
+    void closesSessionWhenFrameExceedsMaxSize() throws Exception {
         WebSocketSession session = session(context());
 
-        handler.handleBinaryMessage(session, chunk(AudioChunkPolicy.MAX_CHUNK_BYTES + 1));
+        handler.handleBinaryMessage(session, frame(1, AudioChunkPolicy.MAX_CHUNK_BYTES + 1));
 
-        verify(session).close(CloseStatus.NOT_ACCEPTABLE.withReason("audio chunk size not allowed"));
+        verify(session).close(CloseStatus.NOT_ACCEPTABLE.withReason("audio frame size not allowed"));
     }
 
     @Test
-    void closesSessionWhenChunkIsEmpty() throws Exception {
+    @DisplayName("순번 헤더만 있고 오디오가 없으면 연결을 닫는다")
+    void closesSessionWhenFrameHasNoAudio() throws Exception {
         WebSocketSession session = session(context());
 
-        handler.handleBinaryMessage(session, chunk(0));
+        handler.handleBinaryMessage(session, frame(1, 0));
 
-        verify(session).close(CloseStatus.NOT_ACCEPTABLE.withReason("audio chunk size not allowed"));
+        verify(session).close(CloseStatus.NOT_ACCEPTABLE.withReason("audio frame size not allowed"));
+        verify(aiConnectionService, never()).forwardAudio(anyLong(), anyLong(), any(byte[].class));
     }
 
-    private BinaryMessage chunk(int bytes) {
-        return new BinaryMessage(ByteBuffer.wrap(new byte[bytes]));
+    private WebSocketSession connected() throws Exception {
+        WebSocketSession session = session(context());
+        handler.afterConnectionEstablished(session);
+        return session;
+    }
+
+    private TextMessage recoveryFinished(long lastSequence) {
+        return new TextMessage("{\"type\":\"recovery.finished\",\"lastSequence\":" + lastSequence + "}");
+    }
+
+    private List<String> sentTexts(WebSocketSession session) throws Exception {
+        ArgumentCaptor<WebSocketMessage<?>> messages = ArgumentCaptor.forClass(WebSocketMessage.class);
+        verify(session, atLeast(0)).sendMessage(messages.capture());
+        return messages.getAllValues().stream().map(message -> (String) message.getPayload()).toList();
+    }
+
+    private void forwardSucceeds() {
+        when(aiConnectionService.forwardAudio(eq(88L), eq(0L), any(byte[].class))).thenReturn(true);
+    }
+
+    private BinaryMessage frame(long sequence, int audioBytes) {
+        ByteBuffer buffer = ByteBuffer.allocate(AudioChunkPolicy.SEQUENCE_BYTES + audioBytes);
+        buffer.putLong(sequence);
+        buffer.flip();
+        return new BinaryMessage(buffer.limit(buffer.capacity()));
+    }
+
+    private AudioChunkStats stats(WebSocketSession session) {
+        return (AudioChunkStats) session.getAttributes().get("audioChunkStats");
     }
 
     private AudioWebSocketContext context() {
@@ -136,6 +356,7 @@ class AudioWebSocketHandlerTest {
         Map<String, Object> attributes = new HashMap<>();
         attributes.put(AudioWebSocketHandshakeInterceptor.CONTEXT_ATTRIBUTE, context);
         when(session.getAttributes()).thenReturn(attributes);
+        when(session.isOpen()).thenReturn(true);
         return session;
     }
 }

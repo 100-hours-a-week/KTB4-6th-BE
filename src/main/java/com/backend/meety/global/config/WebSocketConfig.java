@@ -33,7 +33,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Bean
     public ServletServerContainerFactoryBean createWebSocketContainer() {
         ServletServerContainerFactoryBean container = new ServletServerContainerFactoryBean();
-        container.setMaxBinaryMessageBufferSize(AudioChunkPolicy.MAX_CHUNK_BYTES);
+        container.setMaxBinaryMessageBufferSize(AudioChunkPolicy.MAX_FRAME_BYTES);
         return container;
     }
 }
