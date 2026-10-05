@@ -36,6 +36,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
         AudioWebSocketContext context = context(session);
         session.getAttributes().put(STATS_ATTRIBUTE, new AudioChunkStats());
         registry.streamState(context.recordingSessionId());
+        registry.startCountingChunks(context.recordingSessionId());
         registry.replace(context.recordingSessionId(), session)
                 .ifPresent(previous -> registry.closeAndRemove(context.recordingSessionId(), previous, SUPERSEDED));
         session.getAttributes().put(PHASE_ATTRIBUTE, AudioSocketPhase.RECOVERING);
@@ -101,6 +102,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
             }
             forwarded = aiConnectionService.forwardAudio(recordingSessionId, context.streamEpoch(), frame.audio());
             if (forwarded) {
+                registry.recordReceivedChunk(recordingSessionId);
                 ackDue = state.markProcessed(frame.sequence());
                 ackSequence = state.lastProcessedSequence();
             }

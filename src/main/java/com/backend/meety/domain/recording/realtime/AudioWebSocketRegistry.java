@@ -2,6 +2,7 @@ package com.backend.meety.domain.recording.realtime;
 
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -13,6 +14,7 @@ public class AudioWebSocketRegistry {
 
     private final ConcurrentHashMap<Long, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, AudioStreamState> streamStates = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, AtomicLong> receivedChunkCounts = new ConcurrentHashMap<>();
 
     public Optional<WebSocketSession> replace(Long recordingSessionId, WebSocketSession session) {
         return Optional.ofNullable(sessions.put(recordingSessionId, session));
@@ -46,5 +48,21 @@ public class AudioWebSocketRegistry {
 
     public void removeStreamState(Long recordingSessionId) {
         streamStates.remove(recordingSessionId);
+    }
+
+    public void startCountingChunks(Long recordingSessionId) {
+        receivedChunkCounts.putIfAbsent(recordingSessionId, new AtomicLong());
+    }
+
+    public void recordReceivedChunk(Long recordingSessionId) {
+        AtomicLong count = receivedChunkCounts.get(recordingSessionId);
+        if (count != null) {
+            count.incrementAndGet();
+        }
+    }
+
+    public long removeReceivedChunkCount(Long recordingSessionId) {
+        AtomicLong count = receivedChunkCounts.remove(recordingSessionId);
+        return count == null ? 0L : count.get();
     }
 }

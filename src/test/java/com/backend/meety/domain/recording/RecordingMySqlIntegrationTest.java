@@ -19,6 +19,7 @@ import com.backend.meety.domain.meeting.TestMeetingPolicy;
 import com.backend.meety.domain.recording.dto.RecordingSessionResponse;
 import com.backend.meety.domain.recording.entity.RecordingSessionStatus;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
+import com.backend.meety.domain.recording.realtime.AudioWebSocketRegistry;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.recording.service.RecordingService;
 import com.backend.meety.domain.team.entity.Team;
@@ -114,7 +115,7 @@ class RecordingMySqlIntegrationTest {
                 MeetingParticipantRepository participants, RecordingSessionRepository recordings,
                 TeamCreditRepository credits, CreditLedgerRepository ledgers, ApplicationEventPublisher publisher) {
             return new RecordingService(meetings, members, participants, recordings, credits, ledgers, CLOCK,
-                    publisher, TestCreditPolicy.DEFAULT);
+                    publisher, TestCreditPolicy.DEFAULT, new AudioWebSocketRegistry());
         }
 
         @Bean

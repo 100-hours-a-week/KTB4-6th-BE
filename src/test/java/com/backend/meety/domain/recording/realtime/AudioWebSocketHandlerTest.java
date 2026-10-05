@@ -297,6 +297,43 @@ class AudioWebSocketHandlerTest {
     }
 
     @Test
+    @DisplayName("소켓이 바뀌어도 녹음 단위로 수신 청크 수를 이어서 센다")
+    void countsReceivedChunksAcrossReconnectedSockets() throws Exception {
+        forwardSucceeds();
+        WebSocketSession first = connected();
+        handler.handleBinaryMessage(first, frame(1, 16));
+        handler.handleBinaryMessage(first, frame(2, 16));
+        WebSocketSession second = connected();
+        handler.handleBinaryMessage(second, frame(3, 16));
+
+        assertThat(registry.removeReceivedChunkCount(88L)).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("중복 청크와 AI 전달에 실패한 청크는 수신 청크 수에 포함하지 않는다")
+    void countsOnlyForwardedChunks() throws Exception {
+        WebSocketSession session = connected();
+        when(aiConnectionService.forwardAudio(eq(88L), eq(0L), any(byte[].class))).thenReturn(true, false, true);
+
+        handler.handleBinaryMessage(session, frame(1, 16));
+        handler.handleBinaryMessage(session, frame(2, 16));
+        handler.handleBinaryMessage(session, frame(2, 16));
+        handler.handleBinaryMessage(session, frame(1, 16));
+
+        assertThat(registry.removeReceivedChunkCount(88L)).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("크기 제한을 벗어난 청크는 수신 청크 수에 포함하지 않는다")
+    void doesNotCountRejectedChunk() throws Exception {
+        WebSocketSession session = connected();
+
+        handler.handleBinaryMessage(session, frame(1, AudioChunkPolicy.MAX_CHUNK_BYTES + 1));
+
+        assertThat(registry.removeReceivedChunkCount(88L)).isZero();
+    }
+
+    @Test
     void closesSessionWhenFrameExceedsMaxSize() throws Exception {
         WebSocketSession session = session(context());
 

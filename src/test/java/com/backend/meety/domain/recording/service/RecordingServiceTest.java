@@ -41,6 +41,7 @@ import com.backend.meety.domain.recording.event.RecordingPausedEvent;
 import com.backend.meety.domain.recording.event.RecordingResumedEvent;
 import com.backend.meety.domain.recording.event.RecordingStartedEvent;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
+import com.backend.meety.domain.recording.realtime.AudioWebSocketRegistry;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
@@ -70,9 +71,10 @@ class RecordingServiceTest {
     private final TeamCreditRepository credits = mock(TeamCreditRepository.class);
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
     private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+    private final AudioWebSocketRegistry audioRegistry = new AudioWebSocketRegistry();
     private final RecordingService service = new RecordingService(
             meetings, members, participants, recordings, credits, ledgers, CLOCK, eventPublisher,
-            TestCreditPolicy.DEFAULT);
+            TestCreditPolicy.DEFAULT, audioRegistry);
     private Team team;
     private TeamMember member;
     private Meeting meeting;
@@ -303,6 +305,7 @@ class RecordingServiceTest {
         RecordingSessionResponse response = service.updateStatus(1L, 700L, RecordingSessionStatus.PAUSED);
         assertThat(response.status()).isEqualTo(RecordingSessionStatus.PAUSED);
         assertThat(response.pausedAt()).isEqualTo(NOW);
+        assertThat(response.receivedChunkCount()).isNull();
         assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.IN_PROGRESS);
         assertThat(session.getEndedAt()).isNull();
         InOrder order = inOrder(recordings, meetings, members);
@@ -336,6 +339,16 @@ class RecordingServiceTest {
         assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.IN_PROGRESS);
     }
 
+    @Test
+    @DisplayName("오디오 소켓이 한 번도 연결되지 않았으면 종료 응답의 수신 청크 수는 0이다")
+    void completeReturnsZeroReceivedChunksWithoutAudioSocket() {
+        allowPatch();
+
+        RecordingSessionResponse response = service.updateStatus(1L, 700L, RecordingSessionStatus.COMPLETED);
+
+        assertThat(response.receivedChunkCount()).isZero();
+    }
+
     @ParameterizedTest
     @EnumSource(value = RecordingSessionStatus.class, names = {"RECORDING", "PAUSED"})
     void completeEndsMeetingAndSessionAtSameInstant(RecordingSessionStatus initial) {
@@ -343,9 +356,14 @@ class RecordingServiceTest {
         if (initial == RecordingSessionStatus.PAUSED) {
             session.pause(NOW);
         }
+        audioRegistry.startCountingChunks(700L);
+        for (int i = 0; i < 2_300; i++) {
+            audioRegistry.recordReceivedChunk(700L);
+        }
         RecordingSessionResponse response = service.updateStatus(1L, 700L, RecordingSessionStatus.COMPLETED);
         assertThat(response.status()).isEqualTo(RecordingSessionStatus.COMPLETED);
         assertThat(response.endedAt()).isEqualTo(NOW);
+        assertThat(response.receivedChunkCount()).isEqualTo(2_300L);
         assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.COMPLETED);
         assertThat(meeting.getEndedAt()).isEqualTo(response.endedAt());
         ArgumentCaptor<RecordingCompletedEvent> event = ArgumentCaptor.forClass(RecordingCompletedEvent.class);
