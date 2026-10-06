@@ -8,6 +8,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.autoconfigure.web.server.ManagementServerProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -27,12 +28,20 @@ public class SecurityConfig {
             List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
     private static final long PREFLIGHT_CACHE_SECONDS = 3600L;
     private static final String PROMETHEUS_ENDPOINT = "/actuator/prometheus";
+    private static final String[] API_DOCS_URLS = {"/v3/api-docs/**"};
+    private static final String[] SWAGGER_UI_URLS = {
+            "/swagger-ui/**",
+            "/swagger-ui.html"
+    };
+    private static final String SPRINGDOC_API_DOCS_ENABLED = "springdoc.api-docs.enabled";
+    private static final String SPRINGDOC_SWAGGER_UI_ENABLED = "springdoc.swagger-ui.enabled";
 
     private final JwtTokenProvider jwtTokenProvider;
     private final AccessTokenBlacklist accessTokenBlacklist;
     private final CustomAuthenticationEntryPoint authenticationEntryPoint;
     private final CorsProperties corsProperties;
     private final ObjectProvider<ManagementServerProperties> managementServerProperties;
+    private final Environment environment;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -43,10 +52,21 @@ public class SecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(PermitAllUrls.URLS).permitAll()
-                        .requestMatchers(this::isManagementPortMetricsRequest).permitAll()
-                        .anyRequest().authenticated())
+                .authorizeHttpRequests(auth -> {
+                    if (isApiDocsEnabled()) {
+                        auth.requestMatchers(API_DOCS_URLS).permitAll();
+                    } else {
+                        auth.requestMatchers(API_DOCS_URLS).denyAll();
+                    }
+                    if (isSwaggerUiEnabled()) {
+                        auth.requestMatchers(SWAGGER_UI_URLS).permitAll();
+                    } else {
+                        auth.requestMatchers(SWAGGER_UI_URLS).denyAll();
+                    }
+                    auth.requestMatchers(PermitAllUrls.URLS).permitAll()
+                            .requestMatchers(this::isManagementPortMetricsRequest).permitAll()
+                            .anyRequest().authenticated();
+                })
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(authenticationEntryPoint))
                 .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider, accessTokenBlacklist),
                         UsernamePasswordAuthenticationFilter.class);
@@ -64,6 +84,14 @@ public class SecurityConfig {
         return managementPort != null
                 && request.getLocalPort() == managementPort
                 && PROMETHEUS_ENDPOINT.equals(request.getRequestURI());
+    }
+
+    private boolean isApiDocsEnabled() {
+        return environment.getProperty(SPRINGDOC_API_DOCS_ENABLED, Boolean.class, false);
+    }
+
+    private boolean isSwaggerUiEnabled() {
+        return environment.getProperty(SPRINGDOC_SWAGGER_UI_ENABLED, Boolean.class, false);
     }
 
     private CorsConfigurationSource corsConfigurationSource() {

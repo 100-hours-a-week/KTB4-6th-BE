@@ -49,3 +49,9 @@ aws:
   s3:
     bucket: ${AWS_S3_BUCKET}
     region: ${AWS_S3_REGION}
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
