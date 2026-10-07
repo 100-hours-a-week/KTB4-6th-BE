@@ -62,6 +62,12 @@ public class AiLiveMeetingConnection {
         return webSocketSession;
     }
 
+    public long streamEpoch() {
+        synchronized (sendLock) {
+            return streamEpoch;
+        }
+    }
+
     public synchronized AiLiveMeetingConnectionState state() {
         return state;
     }
@@ -171,6 +177,7 @@ public class AiLiveMeetingConnection {
     public synchronized void markReady() {
         this.state = AiLiveMeetingConnectionState.READY;
         readyLatch.countDown();
+        notifyAll();
     }
 
     public synchronized void markPaused() {
@@ -182,6 +189,7 @@ public class AiLiveMeetingConnection {
     public synchronized void markResumed() {
         if (state == AiLiveMeetingConnectionState.RESUME_SENT) {
             this.state = AiLiveMeetingConnectionState.READY;
+            notifyAll();
         }
     }
 
@@ -189,6 +197,7 @@ public class AiLiveMeetingConnection {
         if (state == AiLiveMeetingConnectionState.RESET_SENT) {
             this.state = stateBeforeReset;
             decoderReadyLatch.countDown();
+            notifyAll();
         }
     }
 
@@ -198,6 +207,19 @@ public class AiLiveMeetingConnection {
         }
         AiLiveMeetingConnectionState current = state();
         return current == AiLiveMeetingConnectionState.READY || current == AiLiveMeetingConnectionState.PAUSED;
+    }
+
+    public synchronized boolean awaitState(AiLiveMeetingConnectionState expected, Duration timeout)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (state != expected && state != AiLiveMeetingConnectionState.CLOSED) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) {
+                return false;
+            }
+            TimeUnit.NANOSECONDS.timedWait(this, remaining);
+        }
+        return state == expected;
     }
 
     public boolean awaitReady(Duration timeout) throws InterruptedException {
@@ -255,5 +277,6 @@ public class AiLiveMeetingConnection {
         this.state = AiLiveMeetingConnectionState.CLOSED;
         readyLatch.countDown();
         decoderReadyLatch.countDown();
+        notifyAll();
     }
 }

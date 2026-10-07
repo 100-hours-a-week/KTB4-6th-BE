@@ -222,12 +222,18 @@ public class AudioFileService {
     private String downloadUrl(AudioFile audioFile) {
         try {
             return audioFileStorage
-                    .createDownloadUrl(audioFile.getStorageKey(), AudioFilePolicy.DOWNLOAD_URL_VALIDITY)
+                    .createDownloadUrl(audioFile.getStorageKey(), downloadFilename(audioFile),
+                            AudioFilePolicy.DOWNLOAD_URL_VALIDITY)
                     .toString();
         } catch (Exception e) {
             log.error("S3 presigned 다운로드 URL 발급에 실패했습니다. audioFileId={}", audioFile.getId(), e);
             throw new AudioFileException(AudioFileErrorCode.AUDIO_DOWNLOAD_URL_CREATE_FAILED);
         }
+    }
+
+    private String downloadFilename(AudioFile audioFile) {
+        return "%s-음성.%s".formatted(
+                audioFile.getRecordingSession().getMeeting().getTitle(), AudioFilePolicy.EXTENSION);
     }
 
     private long storedObjectSize(AudioFile audioFile) {
