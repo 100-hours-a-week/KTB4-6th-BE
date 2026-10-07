@@ -13,8 +13,8 @@ spring:
     password: ${DB_PASSWORD}
   data:
     redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT}
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
   jpa:
     hibernate:
@@ -60,3 +60,8 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+management:
+  health:
+    redis:
+      enabled: false
