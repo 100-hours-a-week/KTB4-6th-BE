@@ -15,6 +15,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -50,4 +51,24 @@ public class AiChatbotMessage extends BaseEntity {
 
     @Column(name = "answer", columnDefinition = "TEXT")
     private String answer;
+
+    @Column(name = "citations", columnDefinition = "JSON")
+    private String citations;
+
+    @Column(name = "answered_at")
+    private LocalDateTime answeredAt;
+
+    private AiChatbotMessage(AiRequest aiRequest, Meeting meeting, TeamMember teamMember,
+                             ChatInputType inputType, String question) {
+        this.aiRequest = aiRequest;
+        this.meeting = meeting;
+        this.teamMember = teamMember;
+        this.inputType = inputType;
+        this.question = question;
+    }
+
+    public static AiChatbotMessage create(AiRequest aiRequest, Meeting meeting, TeamMember teamMember,
+                                          ChatInputType inputType, String question) {
+        return new AiChatbotMessage(aiRequest, meeting, teamMember, inputType, question);
+    }
 }
