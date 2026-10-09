@@ -13,6 +13,8 @@ import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.CreditSourceType;
 import com.backend.meety.domain.credit.entity.CreditTransactionType;
 import com.backend.meety.domain.credit.entity.TeamCredit;
+import com.backend.meety.domain.credit.event.CreditEarnedEvent;
+import com.backend.meety.domain.credit.event.CreditEarnedReason;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import com.backend.meety.domain.team.entity.Team;
@@ -20,6 +22,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 class WeeklyCreditGrantServiceTest {
 
@@ -27,14 +30,16 @@ class WeeklyCreditGrantServiceTest {
 
     private final TeamCreditRepository credits = mock(TeamCreditRepository.class);
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
+    private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
     private final WeeklyCreditGrantService service =
-            new WeeklyCreditGrantService(credits, ledgers, TestCreditPolicy.DEFAULT);
+            new WeeklyCreditGrantService(credits, ledgers, TestCreditPolicy.DEFAULT, eventPublisher);
 
     private final Team team = team();
 
     private TeamCredit creditWith(long balance) {
         TeamCredit credit = TeamCredit.create(team, balance, TestCreditPolicy.MAX_BALANCE);
         when(credits.findByTeamIdForUpdate(team.getId())).thenReturn(Optional.of(credit));
+        when(ledgers.save(any(CreditLedger.class))).thenAnswer(invocation -> invocation.getArgument(0));
         return credit;
     }
 
@@ -88,6 +93,44 @@ class WeeklyCreditGrantServiceTest {
 
         assertThat(service.grant(team.getId(), WEEK_KEY)).isFalse();
         verify(ledgers, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("실제 적립이 발생하면 크레딧 적립 이벤트를 발행한다")
+    void publishesEventWhenCreditEarned() {
+        // 테스트 목적:
+        // 주간 크레딧이 실제로 증가하고 원장 저장까지 성공한 경우
+        // 적립 알림 생성을 위한 이벤트가 발행되는지 검증한다.
+
+        // given
+        creditWith(100L);
+
+        // when
+        boolean granted = service.grant(team.getId(), WEEK_KEY);
+
+        // then
+        assertThat(granted).isTrue();
+        verify(eventPublisher).publishEvent(new CreditEarnedEvent(
+                team.getId(), "EARN:SCHEDULE:2:2026-W40", TestCreditPolicy.WEEKLY_GRANT,
+                CreditEarnedReason.SCHEDULE));
+    }
+
+    @Test
+    @DisplayName("실제 적립량이 0이면 크레딧 적립 이벤트를 발행하지 않는다")
+    void doesNotPublishEventWhenEarnedAmountIsZero() {
+        // 테스트 목적:
+        // 팀 크레딧이 이미 최대 잔액이라 실제 적립량이 0인 경우
+        // 알림 생성 이벤트가 발행되지 않는지 검증한다.
+
+        // given
+        creditWith(TestCreditPolicy.MAX_BALANCE);
+
+        // when
+        boolean granted = service.grant(team.getId(), WEEK_KEY);
+
+        // then
+        assertThat(granted).isFalse();
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test

@@ -75,6 +75,21 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
 
     List<TeamMember> findAllByTeamIdAndUserIdIn(Long teamId, List<Long> userIds);
 
+    @Query("""
+            select tm
+            from TeamMember tm
+            join fetch tm.team
+            join fetch tm.user
+            where tm.team.id = :teamId
+              and tm.membershipStatus = :membershipStatus
+              and tm.deletedAt is null
+            order by tm.id asc
+            """)
+    List<TeamMember> findAllByTeamIdAndMembershipStatusWithUserAndTeam(
+            @Param("teamId") Long teamId,
+            @Param("membershipStatus") MembershipStatus membershipStatus
+    );
+
     @Modifying
     @Query("update TeamMember tm "
             + "set tm.membershipStatus = com.backend.meety.domain.team.entity.MembershipStatus.TEAM_DELETED, "
