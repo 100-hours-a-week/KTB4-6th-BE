@@ -25,7 +25,7 @@ class MeetingSseCleanupEventListenerTest {
         TestSseEmitter user20 = new TestSseEmitter();
         registry.register(100L, 10L, user10);
         registry.register(100L, 20L, user20);
-        MeetingSseCleanupEventListener listener = new MeetingSseCleanupEventListener(registry);
+        MeetingSseCleanupEventListener listener = new MeetingSseCleanupEventListener(MeetingSseLoopback.publisher(registry));
 
         listener.closeParticipantSse(new MeetingParticipantLeftEvent(100L, 10L));
 
@@ -42,7 +42,7 @@ class MeetingSseCleanupEventListenerTest {
         TestSseEmitter user20 = new TestSseEmitter();
         registry.register(100L, 10L, user10);
         registry.register(100L, 20L, user20);
-        MeetingSseCleanupEventListener listener = new MeetingSseCleanupEventListener(registry);
+        MeetingSseCleanupEventListener listener = new MeetingSseCleanupEventListener(MeetingSseLoopback.publisher(registry));
 
         listener.closeMeetingSse(new MeetingCompletedEvent(100L));
 
@@ -58,17 +58,17 @@ class MeetingSseCleanupEventListenerTest {
         TestSseEmitter user20 = new TestSseEmitter();
         registry.register(100L, 10L, user10);
         registry.register(100L, 20L, user20);
-        MeetingSseCleanupEventListener listener = new MeetingSseCleanupEventListener(registry);
+        MeetingSseCleanupEventListener listener = new MeetingSseCleanupEventListener(MeetingSseLoopback.publisher(registry));
 
         listener.sendDeletedEventAndCloseMeetingSse(new MeetingDeletedEvent(100L));
 
         assertThat(user10.sentData)
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
-                .contains(MeetingSseDeletedEvent.deleted(100L))
+                .contains(MeetingSseLoopback.json(MeetingSseDeletedEvent.deleted(100L)))
                 .anyMatch(data -> data instanceof String value && value.startsWith("event:MEETING_DELETED\n"));
         assertThat(user20.sentData)
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
-                .contains(MeetingSseDeletedEvent.deleted(100L));
+                .contains(MeetingSseLoopback.json(MeetingSseDeletedEvent.deleted(100L)));
         assertThat(user10.completed).isTrue();
         assertThat(user20.completed).isTrue();
         assertThat(registry.count(100L)).isZero();
@@ -77,7 +77,7 @@ class MeetingSseCleanupEventListenerTest {
     @Test
     void deletedEventWithNoEmitterIsNoop() {
         MeetingSseRegistry registry = new MeetingSseRegistry();
-        MeetingSseCleanupEventListener listener = new MeetingSseCleanupEventListener(registry);
+        MeetingSseCleanupEventListener listener = new MeetingSseCleanupEventListener(MeetingSseLoopback.publisher(registry));
 
         listener.sendDeletedEventAndCloseMeetingSse(new MeetingDeletedEvent(100L));
 

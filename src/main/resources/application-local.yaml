@@ -46,6 +46,9 @@ meeting:
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
 
+internal-api:
+  key: ${INTERNAL_API_KEY:local-internal-api-key}
+
 ai:
   websocket-url: ${AI_WEBSOCKET_URL:ws://localhost:8000/v1/live-meeting}
   http-url: ${AI_HTTP_URL:http://localhost:8001}

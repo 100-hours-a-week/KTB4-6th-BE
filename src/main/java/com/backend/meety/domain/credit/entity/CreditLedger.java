@@ -73,9 +73,7 @@ public class CreditLedger extends BaseEntity {
         return ledger;
     }
 
-    /**
-     * 원본 레코드가 있는 거래의 원장 행을 만든다. 멱등키는 {행위}:{원본타입}:{원본ID}로 유도한다.
-     */
+    // 원본 레코드가 있는 거래의 원장 행을 만든다. 멱등키는 {행위}:{원본타입}:{원본ID}로 유도한다.
     private static CreditLedger create(Team team, CreditTransactionType type, CreditSourceType sourceType,
             Long sourceId, long amount, long balanceAfter) {
         Objects.requireNonNull(sourceId, "원본 식별자 없이는 멱등키를 유도할 수 없습니다.");
@@ -108,6 +106,16 @@ public class CreditLedger extends BaseEntity {
 
     public static CreditLedger useForSummary(Team team, Long aiRequestId, long amount, long balanceAfter) {
         return create(team, CreditTransactionType.USE, CreditSourceType.AI_SUMMARY,
+                aiRequestId, amount, balanceAfter);
+    }
+
+    public static CreditLedger useForChat(Team team, Long aiRequestId, long amount, long balanceAfter) {
+        return create(team, CreditTransactionType.USE, CreditSourceType.AI_CHAT,
+                aiRequestId, amount, balanceAfter);
+    }
+
+    public static CreditLedger restoreForChat(Team team, Long aiRequestId, long amount, long balanceAfter) {
+        return create(team, CreditTransactionType.RESTORE, CreditSourceType.AI_CHAT,
                 aiRequestId, amount, balanceAfter);
     }
 

@@ -110,7 +110,12 @@ public class TranscriptService {
         Meeting meeting = meetingRepository.findByIdAndDeletedAtIsNull(meetingId)
                 .orElseThrow(() -> new MeetingException(MeetingErrorCode.MEETING_NOT_FOUND));
         meetingService.validateMeetingAccess(userId, meeting.getTeam().getId());
+        return findTranscripts(meetingId, normalizedKeyword);
+    }
 
+    @Transactional(readOnly = true)
+    public TranscriptSegmentListResponse findTranscripts(Long meetingId, String keyword) {
+        String normalizedKeyword = normalizeKeyword(keyword);
         List<TranscriptSegment> segments = normalizedKeyword == null
                 ? transcriptSegmentRepository.findAllByMeetingIdOrderBySequence(meetingId)
                 : transcriptSegmentRepository.searchByMeetingIdAndContent(meetingId, normalizedKeyword);
