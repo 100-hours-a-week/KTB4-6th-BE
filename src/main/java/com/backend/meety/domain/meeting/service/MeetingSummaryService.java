@@ -32,6 +32,7 @@ import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
 import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -86,9 +87,14 @@ public class MeetingSummaryService {
     public SummaryDetailResponse getLatestSummary(Long userId, Long meetingId) {
         Meeting meeting = findMeeting(meetingId);
         findActiveMember(userId, meeting);
-        MeetingSummary summary = meetingSummaryRepository.findLatestByMeetingId(meetingId)
+        return findLatestSummary(meetingId)
                 .orElseThrow(() -> new SummaryException(SummaryErrorCode.SUMMARY_NOT_FOUND));
-        return SummaryDetailResponse.from(summary);
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<SummaryDetailResponse> findLatestSummary(Long meetingId) {
+        return meetingSummaryRepository.findLatestByMeetingId(meetingId)
+                .map(SummaryDetailResponse::from);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
