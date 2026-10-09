@@ -6,6 +6,7 @@ import com.backend.meety.domain.ai.client.ChatAiResponse;
 import com.backend.meety.domain.ai.event.ChatRequestedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.task.TaskExecutionAutoConfiguration;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
@@ -19,7 +20,7 @@ public class ChatAnswerRequestListener {
     private final ChatProcessingService chatProcessingService;
     private final ChatAiClient chatAiClient;
 
-    @Async
+    @Async(TaskExecutionAutoConfiguration.APPLICATION_TASK_EXECUTOR_BEAN_NAME)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void requestAnswer(ChatRequestedEvent event) {
         chatProcessingService.startProcessing(event.aiRequestId())
