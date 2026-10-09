@@ -2,6 +2,7 @@ package com.backend.meety.domain.ai.service;
 
 import com.backend.meety.domain.ai.ChatPolicy;
 import com.backend.meety.domain.ai.dto.ChatCreateResponse;
+import com.backend.meety.domain.ai.dto.ChatListResponse;
 import com.backend.meety.domain.ai.entity.AiChatbotMessage;
 import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
@@ -39,6 +40,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -70,6 +72,18 @@ public class AiChatService {
                 .orElseGet(() -> acceptQuestion(userId, meeting, credit, idempotencyKey, inputType, question));
     }
 
+    @Transactional(readOnly = true)
+    public ChatListResponse getChats(Long userId, Long meetingId, Long cursor, Integer size) {
+        long afterMessageId = resolveCursor(cursor);
+        int pageSize = resolvePageSize(size);
+        Meeting meeting = findMeeting(meetingId);
+        findParticipant(userId, meeting);
+        validateInProgress(meeting);
+        List<AiChatbotMessage> fetched = chatbotMessageRepository.findPageByMeetingId(
+                meetingId, afterMessageId, Limit.of(pageSize + 1));
+        return ChatListResponse.of(fetched, pageSize);
+    }
+
     private ChatCreateResponse acceptQuestion(Long userId, Meeting meeting, TeamCredit credit,
                                               String idempotencyKey, ChatInputType inputType, String question) {
         TeamMember asker = findParticipant(userId, meeting);
@@ -93,6 +107,26 @@ public class AiChatService {
                 || idempotencyKey.length() > ChatPolicy.IDEMPOTENCY_KEY_MAX_LENGTH) {
             throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
         }
+    }
+
+    private long resolveCursor(Long cursor) {
+        if (cursor == null) {
+            return 0L;
+        }
+        if (cursor < 1) {
+            throw new MeetingException(MeetingErrorCode.INVALID_CURSOR);
+        }
+        return cursor;
+    }
+
+    private int resolvePageSize(Integer size) {
+        if (size == null) {
+            return ChatPolicy.DEFAULT_PAGE_SIZE;
+        }
+        if (size < 1 || size > ChatPolicy.MAX_PAGE_SIZE) {
+            throw new MeetingException(MeetingErrorCode.INVALID_PAGE_SIZE);
+        }
+        return size;
     }
 
     private Meeting findMeeting(Long meetingId) {

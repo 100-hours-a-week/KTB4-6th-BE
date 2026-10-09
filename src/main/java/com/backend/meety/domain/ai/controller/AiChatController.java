@@ -2,6 +2,7 @@ package com.backend.meety.domain.ai.controller;
 
 import com.backend.meety.domain.ai.dto.ChatCreateRequest;
 import com.backend.meety.domain.ai.dto.ChatCreateResponse;
+import com.backend.meety.domain.ai.dto.ChatListResponse;
 import com.backend.meety.domain.ai.service.AiChatService;
 import com.backend.meety.global.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -9,11 +10,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -22,6 +25,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class AiChatController {
 
     private final AiChatService aiChatService;
+
+    @GetMapping("/meetings/{meetingId}/chats")
+    public ResponseEntity<ApiResponse<ChatListResponse>> getChats(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long meetingId,
+            @RequestParam(required = false) Long cursor,
+            @RequestParam(required = false) Integer size
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(aiChatService.getChats(userId, meetingId, cursor, size)));
+    }
 
     @PostMapping("/meetings/{meetingId}/chats")
     public ResponseEntity<ApiResponse<ChatCreateResponse>> requestChat(
