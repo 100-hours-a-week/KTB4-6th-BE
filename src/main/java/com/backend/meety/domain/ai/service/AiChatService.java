@@ -98,7 +98,8 @@ public class AiChatService {
         AiChatbotMessage message = chatbotMessageRepository.save(
                 AiChatbotMessage.create(aiRequest, meeting, asker, inputType, question));
 
-        eventPublisher.publishEvent(new ChatRequestedEvent(aiRequest.getId(), meeting.getId()));
+        eventPublisher.publishEvent(new ChatRequestedEvent(
+                aiRequest.getId(), meeting.getId(), message.getId(), credit.getBalance()));
         return ChatCreateResponse.of(message, credit.getBalance());
     }
 

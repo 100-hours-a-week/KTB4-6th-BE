@@ -37,4 +37,34 @@ public interface AiChatbotMessageRepository extends JpaRepository<AiChatbotMessa
             """)
     List<AiChatbotMessage> findByMeetingIdAndAiRequestStatusIn(
             @Param("meetingId") Long meetingId, @Param("statuses") Collection<AiRequestStatus> statuses);
+
+    @Query("""
+            select m
+            from AiChatbotMessage m
+            join fetch m.aiRequest
+            join fetch m.teamMember
+            where m.id = :messageId
+            """)
+    Optional<AiChatbotMessage> findWithAskerById(@Param("messageId") Long messageId);
+
+    @Query("""
+            select m
+            from AiChatbotMessage m
+            join fetch m.aiRequest r
+            join fetch r.team
+            join fetch m.meeting
+            where r.id = :aiRequestId
+            """)
+    Optional<AiChatbotMessage> findWithRequestByAiRequestId(@Param("aiRequestId") Long aiRequestId);
+
+    @Query("""
+            select m
+            from AiChatbotMessage m
+            where m.meeting.id = :meetingId
+              and m.id < :messageId
+              and m.deletedAt is null
+            order by m.id asc
+            """)
+    List<AiChatbotMessage> findPreviousByMeetingId(
+            @Param("meetingId") Long meetingId, @Param("messageId") Long messageId);
 }
