@@ -26,6 +26,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.entity.ChatInputType;
+import com.backend.meety.domain.ai.event.ChatFailedEvent;
 import com.backend.meety.domain.ai.event.ChatRequestedEvent;
 import com.backend.meety.domain.ai.exception.AiChatErrorCode;
 import com.backend.meety.domain.ai.repository.AiChatbotMessageRepository;
@@ -75,7 +76,7 @@ class AiChatServiceTest {
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final AiChatService service = new AiChatService(
             meetings, members, participants, aiRequests, messages, credits, ledgers,
-            TestCreditPolicy.DEFAULT, events, CLOCK);
+            TestCreditPolicy.DEFAULT, new ChatFailureHandler(ledgers, TestCreditPolicy.DEFAULT), events, CLOCK);
 
     private Team team;
     private TeamMember member;
@@ -201,6 +202,7 @@ class AiChatServiceTest {
         verify(ledgers, times(2)).save(ledger.capture());
         CreditLedger restore = ledger.getAllValues().getFirst();
         assertThat(restore.getIdempotencyKey()).isEqualTo("RESTORE:AI_CHAT:800");
+        verify(events).publishEvent(new ChatFailedEvent(100L, null, 11L));
         assertThat(restore.getType()).isEqualTo(CreditTransactionType.RESTORE);
         assertThat(restore.getAmount()).isEqualTo(1L);
     }

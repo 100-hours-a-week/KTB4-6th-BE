@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.web.client.RestClientResponseException;
 
 @Slf4j
 @Component
@@ -28,12 +29,32 @@ public class ChatAnswerRequestListener {
     }
 
     private void callAi(ChatAiRequest request) {
+        ChatAiResponse response;
         try {
-            ChatAiResponse response = chatAiClient.requestAnswer(request);
-            log.info("AI 챗봇 답변을 받았습니다. aiRequestId={}, citationCount={}",
-                    request.aiRequestId(), response.citations() == null ? 0 : response.citations().size());
+            response = chatAiClient.requestAnswer(request);
         } catch (Exception e) {
-            log.warn("AI 챗봇 호출에 실패했습니다. aiRequestId={}", request.aiRequestId(), e);
+            logFailure(request.aiRequestId(), e);
+            chatProcessingService.fail(request.teamId(), request.aiRequestId());
+            return;
         }
+        if (!hasAnswer(response)) {
+            log.warn("AI 챗봇 응답에 답변이 없습니다. aiRequestId={}", request.aiRequestId());
+            chatProcessingService.fail(request.teamId(), request.aiRequestId());
+            return;
+        }
+        chatProcessingService.complete(request.teamId(), request.aiRequestId(), response.answer());
+    }
+
+    private boolean hasAnswer(ChatAiResponse response) {
+        return response != null && response.answer() != null && !response.answer().isBlank();
+    }
+
+    private void logFailure(Long aiRequestId, Exception e) {
+        if (e instanceof RestClientResponseException responseError) {
+            log.warn("AI 챗봇이 실패 응답을 보냈습니다. aiRequestId={}, status={}, body={}",
+                    aiRequestId, responseError.getStatusCode(), responseError.getResponseBodyAsString());
+            return;
+        }
+        log.warn("AI 챗봇 호출에 실패했습니다. aiRequestId={}", aiRequestId, e);
     }
 }
