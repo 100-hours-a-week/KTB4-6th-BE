@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.backend.meety.domain.notification.entity.NotificationReferenceType;
 import com.backend.meety.domain.notification.entity.NotificationType;
-import com.backend.meety.domain.notification.event.NotificationCreatedEvent;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
@@ -143,17 +142,34 @@ class NotificationSseServiceTest {
         TestSseEmitter secondTab = connect("conn-2", 1L);
         TestSseEmitter otherUser = connect("conn-3", 2L);
         clearSent(firstTab, secondTab, otherUser);
-        NotificationCreatedEvent event = notificationCreatedEvent(15L, 1L);
+        NotificationCreatedSseEvent event = notificationCreatedSseEvent(15L);
 
         // when
-        int targetCount = service.sendNotificationCreated(event);
+        int targetCount = service.sendNotificationCreated(1L, event);
 
         // then
-        NotificationCreatedSseEvent expected = NotificationCreatedSseEvent.from(event);
         assertThat(targetCount).isEqualTo(2);
-        assertReceived(firstTab, "NOTIFICATION_CREATED", expected);
-        assertReceived(secondTab, "NOTIFICATION_CREATED", expected);
+        assertReceived(firstTab, "NOTIFICATION_CREATED", event);
+        assertReceived(secondTab, "NOTIFICATION_CREATED", event);
         assertThat(otherUser.sentData).isNull();
+    }
+
+    @Test
+    @DisplayName("현재 인스턴스에 수신자 연결이 없으면 0건 전송으로 종료한다")
+    void sendNotificationCreatedWithoutLocalEmitter() {
+        // 테스트 목적:
+        // Redis Subscriber가 현재 서버에 연결되지 않은 사용자 알림을 처리해도
+        // 정상 상황으로 보고 오류 없이 0건 전송으로 종료되는지 검증한다.
+
+        // given
+        NotificationCreatedSseEvent event = notificationCreatedSseEvent(15L);
+
+        // when
+        int targetCount = service.sendNotificationCreated(1L, event);
+
+        // then
+        assertThat(targetCount).isZero();
+        assertThat(registry.countAll()).isZero();
     }
 
     @Test
@@ -169,17 +185,16 @@ class NotificationSseServiceTest {
         TestSseEmitter thirdTab = connect("conn-3", 1L);
         clearSent(firstTab, failedTab, thirdTab);
         failedTab.sendFailure = new IOException("closed");
-        NotificationCreatedEvent event = notificationCreatedEvent(15L, 1L);
+        NotificationCreatedSseEvent event = notificationCreatedSseEvent(15L);
 
         // when
-        service.sendNotificationCreated(event);
+        service.sendNotificationCreated(1L, event);
 
         // then
-        NotificationCreatedSseEvent expected = NotificationCreatedSseEvent.from(event);
-        assertReceived(firstTab, "NOTIFICATION_CREATED", expected);
+        assertReceived(firstTab, "NOTIFICATION_CREATED", event);
         assertThat(failedTab.sendAttempted).isTrue();
         assertThat(failedTab.completed).isTrue();
-        assertReceived(thirdTab, "NOTIFICATION_CREATED", expected);
+        assertReceived(thirdTab, "NOTIFICATION_CREATED", event);
         assertThat(registry.find(1L, "conn-2")).isEmpty();
         assertThat(registry.count(1L)).isEqualTo(2);
     }
@@ -240,10 +255,10 @@ class NotificationSseServiceTest {
         return emitter;
     }
 
-    private NotificationCreatedEvent notificationCreatedEvent(Long notificationId, Long recipientUserId) {
-        return new NotificationCreatedEvent(
+    private NotificationCreatedSseEvent notificationCreatedSseEvent(Long notificationId) {
+        return new NotificationCreatedSseEvent(
+                "NOTIFICATION_CREATED",
                 notificationId,
-                recipientUserId,
                 NotificationType.MEMBER_JOINED,
                 "test2 님이 팀에 합류했습니다",
                 NotificationReferenceType.TEAM,

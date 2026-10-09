@@ -10,16 +10,16 @@ import org.springframework.transaction.event.TransactionalEventListener;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class NotificationCreatedSseEventListener {
+public class NotificationCreatedRedisEventListener {
 
-    private final NotificationSseService notificationSseService;
+    private final NotificationRedisPublisher notificationRedisPublisher;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void sendNotificationCreated(NotificationCreatedEvent event) {
+    public void publishNotificationCreated(NotificationCreatedEvent event) {
         try {
-            notificationSseService.sendNotificationCreated(event);
+            notificationRedisPublisher.publish(event);
         } catch (RuntimeException e) {
-            log.warn("알림 생성 SSE 이벤트 전송에 실패했습니다. notificationId={}, recipientUserId={}",
+            log.warn("알림 생성 Redis 이벤트 발행에 실패했습니다. notificationId={}, recipientUserId={}",
                     event.notificationId(), event.recipientUserId(), e);
         }
     }

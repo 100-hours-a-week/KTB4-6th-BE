@@ -1,6 +1,5 @@
 package com.backend.meety.domain.notification.realtime;
 
-import com.backend.meety.domain.notification.event.NotificationCreatedEvent;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -44,11 +43,11 @@ public class NotificationSseService {
         return emitter;
     }
 
-    public int sendNotificationCreated(NotificationCreatedEvent event) {
+    public int sendNotificationCreated(Long recipientUserId, NotificationCreatedSseEvent event) {
         return registry.sendToUser(
-                event.recipientUserId(),
+                recipientUserId,
                 NOTIFICATION_CREATED_EVENT_NAME,
-                NotificationCreatedSseEvent.from(event)
+                event
         );
     }
 
