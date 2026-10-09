@@ -15,6 +15,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.ChatPolicy;
+import com.backend.meety.domain.ai.client.ChatAiCitation;
 import com.backend.meety.domain.ai.client.ChatAiRequest;
 import com.backend.meety.domain.ai.entity.AiChatbotMessage;
 import com.backend.meety.domain.ai.entity.AiFailureReason;
@@ -50,9 +51,10 @@ class ChatProcessingServiceTest {
     private final TeamCreditRepository credits = mock(TeamCreditRepository.class);
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    private final ChatCitationResolver citationResolver = mock(ChatCitationResolver.class);
     private final ChatProcessingService service = new ChatProcessingService(
             messages, factory, meetings, credits, new ChatFailureHandler(ledgers, TestCreditPolicy.DEFAULT),
-            events, CLOCK);
+            citationResolver, events, CLOCK);
 
     private final Team team = team();
     private final TeamMember member = member(team);
@@ -95,12 +97,14 @@ class ChatProcessingServiceTest {
     @DisplayName("처리 중 질문에 답변이 오면 답변·답변 시각·빈 근거를 저장하고 COMPLETED로 바꾼다")
     void completesProcessingQuestion() {
         aiRequest.markProcessing();
+        List<ChatAiCitation> citations = List.of(new ChatAiCitation("transcript", 100L, 801L, null));
+        when(citationResolver.resolve(2L, 900L, citations)).thenReturn("[{\"segmentId\":801}]");
 
-        service.complete(2L, 900L, "**금요일 배포**로 결정했습니다.");
+        service.complete(2L, 900L, "**금요일 배포**로 결정했습니다.", citations);
 
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.COMPLETED);
         assertThat(message.getAnswer()).isEqualTo("**금요일 배포**로 결정했습니다.");
-        assertThat(message.getCitations()).isEqualTo(ChatPolicy.EMPTY_CITATIONS);
+        assertThat(message.getCitations()).isEqualTo("[{\"segmentId\":801}]");
         assertThat(message.getAnsweredAt()).isEqualTo(NOW);
         verify(events).publishEvent(new ChatCompletedEvent(100L, 8801L));
     }
@@ -110,7 +114,7 @@ class ChatProcessingServiceTest {
     void ignoresLateAnswer() {
         aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
 
-        service.complete(2L, 900L, "늦은 답변");
+        service.complete(2L, 900L, "늦은 답변", List.of());
 
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
         assertThat(message.getAnswer()).isNull();
