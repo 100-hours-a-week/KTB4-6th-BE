@@ -42,7 +42,8 @@ public class ChatAnswerRequestListener {
             chatProcessingService.fail(request.teamId(), request.aiRequestId());
             return;
         }
-        chatProcessingService.complete(request.teamId(), request.aiRequestId(), response.answer());
+        chatProcessingService.complete(
+                request.teamId(), request.aiRequestId(), response.answer(), response.citations());
     }
 
     private boolean hasAnswer(ChatAiResponse response) {

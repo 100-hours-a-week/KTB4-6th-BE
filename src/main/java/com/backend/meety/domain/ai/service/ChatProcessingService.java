@@ -1,6 +1,7 @@
 package com.backend.meety.domain.ai.service;
 
 import com.backend.meety.domain.ai.ChatPolicy;
+import com.backend.meety.domain.ai.client.ChatAiCitation;
 import com.backend.meety.domain.ai.client.ChatAiRequest;
 import com.backend.meety.domain.ai.entity.AiChatbotMessage;
 import com.backend.meety.domain.ai.entity.AiRequest;
@@ -15,6 +16,7 @@ import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +36,7 @@ public class ChatProcessingService {
     private final MeetingRepository meetingRepository;
     private final TeamCreditRepository teamCreditRepository;
     private final ChatFailureHandler chatFailureHandler;
+    private final ChatCitationResolver chatCitationResolver;
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
@@ -45,10 +48,10 @@ public class ChatProcessingService {
     }
 
     @Transactional
-    public void complete(Long teamId, Long aiRequestId, String answer) {
+    public void complete(Long teamId, Long aiRequestId, String answer, List<ChatAiCitation> citations) {
         lockCredit(teamId);
         findProcessingMessage(aiRequestId, ChatResultType.ANSWER)
-                .ifPresent(message -> completeMessage(message, answer));
+                .ifPresent(message -> completeMessage(message, answer, citations));
     }
 
     @Transactional
@@ -84,8 +87,10 @@ public class ChatProcessingService {
         return message;
     }
 
-    private void completeMessage(AiChatbotMessage message, String answer) {
-        message.complete(answer, ChatPolicy.EMPTY_CITATIONS, LocalDateTime.now(clock));
+    private void completeMessage(AiChatbotMessage message, String answer, List<ChatAiCitation> citations) {
+        AiRequest request = message.getAiRequest();
+        String resolvedCitations = chatCitationResolver.resolve(request.getTeam().getId(), request.getId(), citations);
+        message.complete(answer, resolvedCitations, LocalDateTime.now(clock));
         message.getAiRequest().markCompleted();
         eventPublisher.publishEvent(new ChatCompletedEvent(message.getMeeting().getId(), message.getId()));
     }

@@ -38,7 +38,7 @@ class ChatAnswerRequestListenerTest {
 
         listener.requestAnswer(EVENT);
 
-        verify(processingService).complete(2L, 900L, "답변");
+        verify(processingService).complete(2L, 900L, "답변", List.of());
         verify(processingService, never()).fail(anyLong(), anyLong());
     }
 
@@ -84,6 +84,6 @@ class ChatAnswerRequestListenerTest {
         listener.requestAnswer(EVENT);
 
         verify(processingService).fail(2L, 900L);
-        verify(processingService, never()).complete(anyLong(), anyLong(), any());
+        verify(processingService, never()).complete(anyLong(), anyLong(), any(), any());
     }
 }
