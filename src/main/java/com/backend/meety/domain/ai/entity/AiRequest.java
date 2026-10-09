@@ -74,6 +74,10 @@ public class AiRequest extends BaseEntity {
         return status == AiRequestStatus.ACCEPTED;
     }
 
+    public boolean isProcessing() {
+        return status == AiRequestStatus.PROCESSING;
+    }
+
     public void markProcessing() {
         this.status = AiRequestStatus.PROCESSING;
     }

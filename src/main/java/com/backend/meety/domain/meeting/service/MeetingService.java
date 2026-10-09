@@ -168,6 +168,17 @@ public class MeetingService {
     ) {
         validateTeamExists(teamId);
         validateTeamMembership(userId, teamId, MeetingErrorCode.TEAM_MEMBERSHIP_REQUIRED);
+        return findMeetings(teamId, keyword, from, to, cursor);
+    }
+
+    @Transactional(readOnly = true)
+    public MeetingListResponse findMeetings(
+            Long teamId,
+            String keyword,
+            LocalDate from,
+            LocalDate to,
+            String cursor
+    ) {
         validateDateRange(from, to);
 
         MeetingCursor meetingCursor = MeetingCursor.decode(cursor);

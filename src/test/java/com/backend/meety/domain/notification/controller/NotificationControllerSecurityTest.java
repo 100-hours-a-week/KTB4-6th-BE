@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.backend.meety.domain.notification.realtime.NotificationSseService;
 import com.backend.meety.domain.notification.service.NotificationService;
 import com.backend.meety.global.config.CorsProperties;
+import com.backend.meety.global.config.InternalApiProperties;
 import com.backend.meety.global.security.AccessTokenBlacklist;
 import com.backend.meety.global.security.CustomAuthenticationEntryPoint;
 import com.backend.meety.global.security.JwtTokenProvider;
@@ -50,6 +51,9 @@ class NotificationControllerSecurityTest {
 
     @MockitoBean
     private CorsProperties corsProperties;
+
+    @MockitoBean
+    private InternalApiProperties internalApiProperties;
 
     @Test
     @DisplayName("미인증 사용자는 전역 알림 SSE에 연결할 수 없다")
