@@ -48,7 +48,7 @@ public class AiInternalQueryService {
     @Transactional(readOnly = true)
     public InternalSummaryResponse getLatestSummary(Long aiRequestId, Long meetingId) {
         validateTeamMeeting(aiRequestId, meetingId);
-        return new InternalSummaryResponse(meetingSummaryService.findLatestSummary(meetingId).orElse(null));
+        return new InternalSummaryResponse(meetingSummaryService.findLatestCompletedSummary(meetingId).orElse(null));
     }
 
     private Long findProcessingChatTeamId(Long aiRequestId) {

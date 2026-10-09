@@ -97,6 +97,12 @@ public class MeetingSummaryService {
                 .map(SummaryDetailResponse::from);
     }
 
+    @Transactional(readOnly = true)
+    public Optional<SummaryDetailResponse> findLatestCompletedSummary(Long meetingId) {
+        return meetingSummaryRepository.findLatestCompletedByMeetingId(meetingId)
+                .map(SummaryDetailResponse::from);
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void registerFirstSummary(Long meetingId, Long recordingSessionId) {
         String idempotencyKey = SummaryPolicy.firstSummaryIdempotencyKey(meetingId);

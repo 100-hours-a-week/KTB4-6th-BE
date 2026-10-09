@@ -78,14 +78,14 @@ class AiInternalQueryServiceTest {
     }
 
     @Test
-    @DisplayName("요약이 없으면 오류가 아니라 summary가 비어 있는 응답을 준다")
+    @DisplayName("완료된 요약이 없으면 오류가 아니라 summary가 비어 있는 응답을 준다")
     void returnsEmptySummaryWhenNone() {
-        when(summaryService.findLatestSummary(100L)).thenReturn(Optional.empty());
+        when(summaryService.findLatestCompletedSummary(100L)).thenReturn(Optional.empty());
 
         InternalSummaryResponse response = service.getLatestSummary(900L, 100L);
 
         assertThat(response.summary()).isNull();
-        verify(summaryService).findLatestSummary(100L);
+        verify(summaryService).findLatestCompletedSummary(100L);
     }
 
     @Test
