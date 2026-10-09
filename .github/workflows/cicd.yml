@@ -28,6 +28,16 @@ jobs:
           --health-interval=5s
           --health-timeout=5s
           --health-retries=10
+      # local 프로필의 localhost:6379에 테스트 전용 Redis를 제공한다.
+      redis:
+        image: redis:7.4
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
     steps:
       - name: 소스 코드 체크아웃
         uses: actions/checkout@v4

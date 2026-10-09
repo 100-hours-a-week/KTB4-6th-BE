@@ -23,8 +23,11 @@ import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.CreditTransactionType;
 import com.backend.meety.domain.credit.entity.TeamCredit;
+import com.backend.meety.domain.credit.event.CreditEarnedEvent;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
+import com.backend.meety.domain.meeting.SummaryPolicy;
+import com.backend.meety.domain.meeting.event.SummaryReadyEvent;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingSummary;
 import com.backend.meety.domain.meeting.repository.MeetingSummaryRepository;
@@ -38,6 +41,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 class SummaryProcessingServiceTest {
 
@@ -46,9 +50,10 @@ class SummaryProcessingServiceTest {
     private final TeamCreditRepository credits = mock(TeamCreditRepository.class);
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
     private final TranscriptSegmentRepository transcripts = mock(TranscriptSegmentRepository.class);
+    private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
     private final SummaryProcessingService service = new SummaryProcessingService(
             aiRequests, summaries, credits, ledgers, TestCreditPolicy.DEFAULT,
-            new SummaryAiRequestFactory(transcripts));
+            new SummaryAiRequestFactory(transcripts), eventPublisher);
 
     private Team team;
     private TeamMember member;
@@ -102,6 +107,65 @@ class SummaryProcessingServiceTest {
     }
 
     @Test
+    @DisplayName("최초 자동 요약 완료는 알림 이벤트를 발행하지 않는다")
+    void completeProcessingSkipsNotificationForFirstSummary() {
+        // 테스트 목적:
+        // 최초 자동 요약의 서버 유도 멱등키로 완료된 요약은
+        // SUMMARY_READY 알림 이벤트 발행 대상에서 제외되는지 검증한다.
+
+        // given
+        AiRequest firstRequest = withId(AiRequest.create(
+                team, member, SummaryPolicy.firstSummaryIdempotencyKey(meeting.getId()), AiRequestType.SUMMARY), 901L);
+        MeetingSummary firstSummary = withId(
+                MeetingSummary.createPending(firstRequest, team, meeting, 1L, null), 503L);
+        firstRequest.markProcessing();
+        when(aiRequests.findById(901L)).thenReturn(Optional.of(firstRequest));
+        when(summaries.findByAiRequestId(901L)).thenReturn(Optional.of(firstSummary));
+
+        // when
+        service.completeProcessing(901L, "## 최초 요약");
+
+        // then
+        assertThat(firstSummary.getContent()).isEqualTo("## 최초 요약");
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("수동 재생성 요약 완료는 알림 이벤트를 발행한다")
+    void completeProcessingPublishesNotificationForRegeneratedSummary() {
+        // 테스트 목적:
+        // 최초 자동 요약 멱등키가 아닌 수동 재생성 요청이 정상 완료된 경우
+        // SUMMARY_READY 알림 생성을 위한 이벤트가 발행되는지 검증한다.
+
+        // given
+        aiRequest.markProcessing();
+
+        // when
+        service.completeProcessing(900L, "## 재생성 요약");
+
+        // then
+        verify(eventPublisher).publishEvent(new SummaryReadyEvent(2L, 100L, 900L, "회의"));
+    }
+
+    @Test
+    @DisplayName("요약 재생성이 실패하면 알림 이벤트를 발행하지 않는다")
+    void summaryFailureDoesNotPublishNotification() {
+        // 테스트 목적:
+        // 수동 재생성 요청이 완료 흐름에 도달하지 못하고 실패 처리되는 경우
+        // SUMMARY_READY 알림 이벤트가 발행되지 않는지 검증한다.
+
+        // given
+        aiRequest.markProcessing();
+
+        // when
+        service.handlePermanentFailure(900L);
+
+        // then
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
     @DisplayName("재시도 한도 미만 실패면 ACCEPTED로 되돌린다")
     void handleFailureRetries() {
         aiRequest.markProcessing();
@@ -133,6 +197,7 @@ class SummaryProcessingServiceTest {
         assertThat(captor.getValue().getIdempotencyKey()).isEqualTo("RESTORE:AI_SUMMARY:900");
         assertThat(captor.getValue().getType()).isEqualTo(CreditTransactionType.RESTORE);
         assertThat(captor.getValue().getAmount()).isEqualTo(TestCreditPolicy.SUMMARY_REGENERATE_COST);
+        verify(eventPublisher, never()).publishEvent(any(CreditEarnedEvent.class));
     }
 
     @Test
