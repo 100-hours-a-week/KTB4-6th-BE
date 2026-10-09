@@ -25,6 +25,17 @@ public interface MeetingSummaryRepository extends JpaRepository<MeetingSummary, 
     Optional<MeetingSummary> findLatestByMeetingId(@Param("meetingId") Long meetingId);
 
     @Query("""
+            select ms
+            from MeetingSummary ms
+            join fetch ms.aiRequest r
+            where ms.meeting.id = :meetingId
+              and r.status = com.backend.meety.domain.ai.entity.AiRequestStatus.COMPLETED
+            order by ms.version desc
+            limit 1
+            """)
+    Optional<MeetingSummary> findLatestCompletedByMeetingId(@Param("meetingId") Long meetingId);
+
+    @Query("""
             select count(ms) > 0
             from MeetingSummary ms
             where ms.meeting.id = :meetingId
