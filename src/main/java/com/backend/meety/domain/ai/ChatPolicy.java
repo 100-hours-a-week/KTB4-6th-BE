@@ -14,4 +14,6 @@ public final class ChatPolicy {
     public static final List<AiRequestStatus> PROCESSING_STATUSES = List.of(
             AiRequestStatus.ACCEPTED, AiRequestStatus.PROCESSING
     );
+    public static final int DEFAULT_PAGE_SIZE = 10;
+    public static final int MAX_PAGE_SIZE = 50;
 }

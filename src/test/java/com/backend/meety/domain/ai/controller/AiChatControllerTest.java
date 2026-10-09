@@ -7,15 +7,19 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.backend.meety.domain.ai.dto.ChatCreateResponse;
+import com.backend.meety.domain.ai.dto.ChatListResponse;
+import com.backend.meety.domain.ai.dto.ChatMessageResponse;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.ChatInputType;
 import com.backend.meety.domain.ai.service.AiChatService;
 import com.backend.meety.global.exception.GlobalExceptionHandler;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,6 +53,26 @@ class AiChatControllerTest {
     @AfterEach
     void clearAuthentication() {
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    @DisplayName("채팅 목록은 근거를 JSON 배열 그대로 내려준다")
+    void listsChats() throws Exception {
+        ChatMessageResponse message = new ChatMessageResponse(8801L, 77L, "진혁", ChatInputType.TEXT, "질문", "답변",
+                AiRequestStatus.COMPLETED,
+                "[{\"sourceType\":\"transcript\",\"meetingId\":42,\"segmentId\":801}]",
+                LocalDateTime.of(2026, 8, 26, 14, 32, 10), LocalDateTime.of(2026, 8, 26, 14, 32, 30));
+        when(service.getChats(1L, 100L, null, null))
+                .thenReturn(new ChatListResponse(List.of(message), null, false));
+
+        mvc.perform(get("/api/v1/meetings/100/chats"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.messages[0].messageId").value(8801))
+                .andExpect(jsonPath("$.data.messages[0].askerDisplayName").value("진혁"))
+                .andExpect(jsonPath("$.data.messages[0].status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.messages[0].citations[0].segmentId").value(801))
+                .andExpect(jsonPath("$.data.nextCursor").isEmpty())
+                .andExpect(jsonPath("$.data.hasNext").value(false));
     }
 
     @Test

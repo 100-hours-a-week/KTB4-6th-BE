@@ -18,6 +18,8 @@ import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.ChatPolicy;
 import com.backend.meety.domain.ai.dto.ChatCreateResponse;
+import com.backend.meety.domain.ai.dto.ChatListResponse;
+import com.backend.meety.domain.ai.dto.ChatMessageResponse;
 import com.backend.meety.domain.ai.entity.AiChatbotMessage;
 import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
@@ -55,6 +57,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Limit;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class AiChatServiceTest {
@@ -209,6 +212,63 @@ class AiChatServiceTest {
 
         assertCode(this::request, CreditErrorCode.INSUFFICIENT_CREDIT);
         verify(aiRequests, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("목록은 size보다 하나 더 조회해 다음 페이지가 있으면 마지막 메시지 ID를 커서로 준다")
+    void listsFirstPageWithNextCursor() {
+        when(messages.findPageByMeetingId(100L, 0L, Limit.of(3)))
+                .thenReturn(List.of(chatMessage(8801L), chatMessage(8802L), chatMessage(8803L)));
+
+        ChatListResponse response = service.getChats(1L, 100L, null, 2);
+
+        assertThat(response.messages()).extracting(ChatMessageResponse::messageId).containsExactly(8801L, 8802L);
+        assertThat(response.hasNext()).isTrue();
+        assertThat(response.nextCursor()).isEqualTo(8802L);
+    }
+
+    @Test
+    @DisplayName("마지막 페이지와 빈 목록은 다음 커서 없이 반환한다")
+    void listsLastPageAndEmptyPage() {
+        when(messages.findPageByMeetingId(100L, 8802L, Limit.of(ChatPolicy.DEFAULT_PAGE_SIZE + 1)))
+                .thenReturn(List.of(chatMessage(8803L)));
+        when(messages.findPageByMeetingId(100L, 8803L, Limit.of(ChatPolicy.DEFAULT_PAGE_SIZE + 1)))
+                .thenReturn(List.of());
+
+        ChatListResponse last = service.getChats(1L, 100L, 8802L, null);
+        ChatListResponse empty = service.getChats(1L, 100L, 8803L, null);
+
+        assertThat(last.messages()).hasSize(1);
+        assertThat(last.hasNext()).isFalse();
+        assertThat(last.nextCursor()).isNull();
+        assertThat(empty.messages()).isEmpty();
+        assertThat(empty.nextCursor()).isNull();
+    }
+
+    @Test
+    @DisplayName("커서가 1보다 작거나 페이지 크기가 1~50 밖이면 거절한다")
+    void rejectsInvalidCursorAndPageSize() {
+        assertCode(() -> service.getChats(1L, 100L, 0L, null), MeetingErrorCode.INVALID_CURSOR);
+        assertCode(() -> service.getChats(1L, 100L, null, 0), MeetingErrorCode.INVALID_PAGE_SIZE);
+        assertCode(() -> service.getChats(1L, 100L, null, 51), MeetingErrorCode.INVALID_PAGE_SIZE);
+    }
+
+    @Test
+    @DisplayName("회의 참여자가 아니거나 진행 중인 회의가 아니면 목록을 조회할 수 없다")
+    void rejectsListForNonParticipantOrNotInProgress() {
+        when(participants.existsByMeetingIdAndTeamMemberIdAndParticipationStatusAndDeletedAtIsNull(
+                100L, 10L, ParticipationStatus.JOINED)).thenReturn(false);
+        assertCode(() -> service.getChats(1L, 100L, null, null), MeetingErrorCode.MEETING_ACCESS_DENIED);
+
+        when(participants.existsByMeetingIdAndTeamMemberIdAndParticipationStatusAndDeletedAtIsNull(
+                100L, 10L, ParticipationStatus.JOINED)).thenReturn(true);
+        when(meetings.findByIdAndDeletedAtIsNull(100L)).thenReturn(Optional.of(meeting(team, member)));
+        assertCode(() -> service.getChats(1L, 100L, null, null), AiChatErrorCode.MEETING_NOT_IN_PROGRESS);
+    }
+
+    private AiChatbotMessage chatMessage(long messageId) {
+        AiRequest request = withId(AiRequest.create(team, member, "key-" + messageId, AiRequestType.CHAT), messageId);
+        return withId(AiChatbotMessage.create(request, meeting, member, ChatInputType.TEXT, "질문"), messageId);
     }
 
     private ChatCreateResponse request() {
