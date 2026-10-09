@@ -7,17 +7,17 @@ import org.springframework.web.client.RestClient;
 
 @Component
 @RequiredArgsConstructor
-public class RestSummaryAiClient implements SummaryAiClient {
+public class RestChatAiClient implements ChatAiClient {
 
     private final RestClient aiRestClient;
 
     @Override
-    public String requestSummary(SummaryAiRequest request) {
+    public ChatAiResponse requestAnswer(ChatAiRequest request) {
         return aiRestClient.post()
-                .uri(AiApiPath.SUMMARY)
+                .uri(AiApiPath.CHAT)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)
                 .retrieve()
-                .body(String.class);
+                .body(ChatAiResponse.class);
     }
 }

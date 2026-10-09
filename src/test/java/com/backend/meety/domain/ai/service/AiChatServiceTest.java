@@ -121,7 +121,7 @@ class AiChatServiceTest {
         assertThat(ledger.getValue().getAmount()).isEqualTo(-1L);
         assertThat(ledger.getValue().getBalanceAfter()).isEqualTo(9L);
 
-        verify(events).publishEvent(new ChatRequestedEvent(900L, 100L));
+        verify(events).publishEvent(new ChatRequestedEvent(900L, 100L, 8801L, 9L));
     }
 
     @Test
