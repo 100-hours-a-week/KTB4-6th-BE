@@ -4,10 +4,10 @@ import com.backend.meety.domain.ai.ChatPolicy;
 import com.backend.meety.domain.ai.dto.ChatCreateResponse;
 import com.backend.meety.domain.ai.dto.ChatListResponse;
 import com.backend.meety.domain.ai.entity.AiChatbotMessage;
-import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.entity.ChatInputType;
+import com.backend.meety.domain.ai.event.ChatFailedEvent;
 import com.backend.meety.domain.ai.event.ChatRequestedEvent;
 import com.backend.meety.domain.ai.exception.AiChatErrorCode;
 import com.backend.meety.domain.ai.exception.AiChatException;
@@ -15,8 +15,6 @@ import com.backend.meety.domain.ai.repository.AiChatbotMessageRepository;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
-import com.backend.meety.domain.credit.entity.CreditSourceType;
-import com.backend.meety.domain.credit.entity.CreditTransactionType;
 import com.backend.meety.domain.credit.entity.TeamCredit;
 import com.backend.meety.domain.credit.exception.CreditErrorCode;
 import com.backend.meety.domain.credit.exception.CreditException;
@@ -58,6 +56,7 @@ public class AiChatService {
     private final TeamCreditRepository teamCreditRepository;
     private final CreditLedgerRepository creditLedgerRepository;
     private final CreditPolicy creditPolicy;
+    private final ChatFailureHandler chatFailureHandler;
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
@@ -88,9 +87,9 @@ public class AiChatService {
                                               String idempotencyKey, ChatInputType inputType, String question) {
         TeamMember asker = findParticipant(userId, meeting);
         validateInProgress(meeting);
-        List<AiRequest> processingRequests = findProcessingRequests(meeting.getId());
-        rejectIfProcessing(processingRequests);
-        expireStaleRequests(processingRequests, credit, meeting.getId());
+        List<AiChatbotMessage> processingMessages = findProcessingMessages(meeting.getId());
+        rejectIfProcessing(processingMessages);
+        expireStaleMessages(processingMessages, credit);
         validateEnoughCredit(credit);
         AiRequest aiRequest = aiRequestRepository.save(
                 AiRequest.create(meeting.getTeam(), asker, idempotencyKey, AiRequestType.CHAT));
@@ -172,37 +171,26 @@ public class AiChatService {
                 });
     }
 
-    private List<AiRequest> findProcessingRequests(Long meetingId) {
-        return chatbotMessageRepository
-                .findByMeetingIdAndAiRequestStatusIn(meetingId, ChatPolicy.PROCESSING_STATUSES).stream()
-                .map(AiChatbotMessage::getAiRequest)
-                .toList();
+    private List<AiChatbotMessage> findProcessingMessages(Long meetingId) {
+        return chatbotMessageRepository.findByMeetingIdAndAiRequestStatusIn(meetingId, ChatPolicy.PROCESSING_STATUSES);
     }
 
-    private void rejectIfProcessing(List<AiRequest> processingRequests) {
+    private void rejectIfProcessing(List<AiChatbotMessage> processingMessages) {
         LocalDateTime timeoutDeadline = LocalDateTime.now(clock).minus(ChatPolicy.PROCESSING_TIMEOUT);
-        if (processingRequests.stream().anyMatch(request -> request.getCreatedAt().isAfter(timeoutDeadline))) {
+        if (processingMessages.stream()
+                .anyMatch(message -> message.getAiRequest().getCreatedAt().isAfter(timeoutDeadline))) {
             throw new AiChatException(AiChatErrorCode.AI_MESSAGE_ALREADY_PROCESSING);
         }
     }
 
-    private void expireStaleRequests(List<AiRequest> staleRequests, TeamCredit credit, Long meetingId) {
-        for (AiRequest request : staleRequests) {
-            request.markFailed(AiFailureReason.AI_CALL_FAILED);
-            restoreCreditIfCharged(credit, request);
+    private void expireStaleMessages(List<AiChatbotMessage> staleMessages, TeamCredit credit) {
+        for (AiChatbotMessage message : staleMessages) {
+            chatFailureHandler.fail(message.getAiRequest(), credit);
+            eventPublisher.publishEvent(new ChatFailedEvent(
+                    message.getMeeting().getId(), message.getId(), credit.getBalance()));
             log.warn("응답 기한이 지난 AI 질문을 실패 처리합니다. aiRequestId={}, meetingId={}",
-                    request.getId(), meetingId);
+                    message.getAiRequest().getId(), message.getMeeting().getId());
         }
-    }
-
-    private void restoreCreditIfCharged(TeamCredit credit, AiRequest request) {
-        String useLedgerKey = CreditLedger.keyOf(CreditTransactionType.USE, CreditSourceType.AI_CHAT, request.getId());
-        if (!creditLedgerRepository.existsByIdempotencyKey(useLedgerKey)) {
-            return;
-        }
-        long restoredAmount = credit.earn(creditPolicy.aiChatMessageCost(), creditPolicy.maxBalance());
-        creditLedgerRepository.save(CreditLedger.restoreForChat(
-                request.getTeam(), request.getId(), restoredAmount, credit.getBalance()));
     }
 
     private AiChatbotMessage findMessage(AiRequest aiRequest) {

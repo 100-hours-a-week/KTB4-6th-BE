@@ -71,4 +71,10 @@ public class AiChatbotMessage extends BaseEntity {
                                           ChatInputType inputType, String question) {
         return new AiChatbotMessage(aiRequest, meeting, teamMember, inputType, question);
     }
+
+    public void complete(String answer, String citations, LocalDateTime answeredAt) {
+        this.answer = answer;
+        this.citations = citations;
+        this.answeredAt = answeredAt;
+    }
 }
