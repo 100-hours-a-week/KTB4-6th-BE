@@ -143,6 +143,22 @@ class RecordingServiceTest {
     }
 
     @Test
+    @DisplayName("녹음 시작이 실패하면 시작 이벤트를 발행하지 않는다")
+    void startFailureDoesNotPublishStartedEvent() {
+        // 테스트 목적:
+        // 원본 녹음 시작 비즈니스 작업이 실패한 경우
+        // MEETING_STARTED 알림으로 이어지는 RecordingStartedEvent가 발행되지 않는지 검증한다.
+
+        // given
+        when(members.findByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE))
+                .thenReturn(Optional.empty());
+
+        // when, then
+        assertCode(() -> service.start(1L, 100L), MeetingErrorCode.MEETING_ACCESS_DENIED);
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
     void startRequiresJoinedNonDeletedParticipant() {
         assertCode(() -> service.start(1L, 100L), MeetingErrorCode.MEETING_PARTICIPANT_REQUIRED);
         verify(participants).existsByMeetingIdAndTeamMemberIdAndParticipationStatusAndDeletedAtIsNull(

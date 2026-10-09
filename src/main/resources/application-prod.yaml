@@ -11,6 +11,11 @@ spring:
     url: jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_NAME}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
   jpa:
     hibernate:
       ddl-auto: update
@@ -55,3 +60,8 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+management:
+  health:
+    redis:
+      enabled: false

@@ -13,10 +13,12 @@ import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import com.backend.meety.domain.meeting.SummaryPolicy;
 import com.backend.meety.domain.meeting.entity.MeetingSummary;
+import com.backend.meety.domain.meeting.event.SummaryReadyEvent;
 import com.backend.meety.domain.meeting.repository.MeetingSummaryRepository;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +33,7 @@ public class SummaryProcessingService {
     private final CreditLedgerRepository creditLedgerRepository;
     private final CreditPolicy creditPolicy;
     private final SummaryAiRequestFactory summaryAiRequestFactory;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public Optional<SummaryAiRequest> startProcessing(Long aiRequestId) {
@@ -54,6 +57,15 @@ public class SummaryProcessingService {
         MeetingSummary summary = meetingSummaryRepository.findByAiRequestId(aiRequestId).orElseThrow();
         summary.complete(content);
         aiRequest.markCompleted();
+        if (!SummaryPolicy.isFirstSummaryIdempotencyKey(
+                summary.getMeeting().getId(), aiRequest.getIdempotencyKey())) {
+            eventPublisher.publishEvent(new SummaryReadyEvent(
+                    summary.getTeam().getId(),
+                    summary.getMeeting().getId(),
+                    aiRequest.getId(),
+                    summary.getMeeting().getTitle()
+            ));
+        }
         log.info("회의 요약이 완료되었습니다. aiRequestId={}, summaryId={}, contentLength={}",
                 aiRequestId, summary.getId(), content.length());
     }

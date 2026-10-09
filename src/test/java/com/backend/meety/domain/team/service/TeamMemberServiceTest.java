@@ -17,6 +17,8 @@ import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamBlock;
 import com.backend.meety.domain.team.entity.TeamInvitationCode;
 import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.event.TeamMemberJoinedEvent;
+import com.backend.meety.domain.team.event.TeamMemberJoinType;
 import com.backend.meety.domain.team.exception.TeamErrorCode;
 import com.backend.meety.domain.team.repository.TeamBlockRepository;
 import com.backend.meety.domain.team.repository.TeamInvitationCodeRepository;
@@ -31,12 +33,15 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -63,6 +68,9 @@ class TeamMemberServiceTest {
     @Mock
     private TeamBlockRepository teamBlockRepository;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private TeamMemberService teamMemberService;
 
     private User user;
@@ -72,7 +80,7 @@ class TeamMemberServiceTest {
     @BeforeEach
     void setUp() {
         teamMemberService = new TeamMemberService(userRepository, teamRepository,
-                teamMemberRepository, teamInvitationCodeRepository, teamBlockRepository, FIXED_CLOCK);
+                teamMemberRepository, teamInvitationCodeRepository, teamBlockRepository, FIXED_CLOCK, eventPublisher);
         user = User.create();
         team = Team.create("미티팀");
         ReflectionTestUtils.setField(team, "id", 7L);
@@ -100,6 +108,110 @@ class TeamMemberServiceTest {
         assertThat(response.hasActiveTeam()).isTrue();
         assertThat(response.teamId()).isEqualTo(7L);
         then(teamInvitationCodeRepository).should(times(2)).findByCodeAndDeletedAtIsNull(CODE);
+    }
+
+    @Test
+    @DisplayName("팀 가입에 성공하면 팀원 가입 이벤트를 발행한다")
+    void joinPublishesMemberJoinedEvent() {
+        // 테스트 목적:
+        // 신규 팀원이 초대 코드로 팀 가입에 성공하고 flush까지 완료된 경우
+        // MEMBER_JOINED 알림 생성을 위한 이벤트가 발행되는지 검증한다.
+
+        // given
+        given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
+        given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(false);
+        given(teamInvitationCodeRepository.findByCodeAndDeletedAtIsNull(CODE))
+                .willReturn(Optional.of(invitationCode));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
+        given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
+                .willReturn(3L);
+        given(teamMemberRepository.existsDisplayNameUsedByOthers(7L, 1L, "hoon")).willReturn(false);
+        given(teamMemberRepository.save(any(TeamMember.class))).willAnswer(invocation -> {
+            TeamMember saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "id", 31L);
+            return saved;
+        });
+
+        // when
+        MyTeamResponse response = teamMemberService.join(1L, REQUEST);
+
+        // then
+        assertThat(response.teamId()).isEqualTo(7L);
+        ArgumentCaptor<TeamMemberJoinedEvent> captor = ArgumentCaptor.forClass(TeamMemberJoinedEvent.class);
+        then(eventPublisher).should().publishEvent(captor.capture());
+        TeamMemberJoinedEvent event = captor.getValue();
+        assertThat(event.teamId()).isEqualTo(7L);
+        assertThat(event.joinedTeamMemberId()).isEqualTo(31L);
+        assertThat(event.joinedUserId()).isEqualTo(1L);
+        assertThat(event.joinedDisplayName()).isEqualTo("hoon");
+        assertThat(event.joinType()).isEqualTo(TeamMemberJoinType.NEW);
+        UUID.fromString(event.eventId());
+    }
+
+    @Test
+    @DisplayName("탈퇴 후 재가입은 같은 팀원 ID라도 새로운 가입 이벤트 ID를 발행한다")
+    void rejoinPublishesNewEventIdForSameTeamMemberId() {
+        // 테스트 목적:
+        // 탈퇴한 사용자가 같은 TeamMember 행으로 재가입하더라도
+        // 최초 가입과 재가입이 서로 다른 MEMBER_JOINED 알림 이벤트로 식별되는지 검증한다.
+
+        // given
+        TeamMember joinedMember = TeamMember.createMember(user, team, "hoon");
+        ReflectionTestUtils.setField(joinedMember, "id", 31L);
+        given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
+        given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(false);
+        given(teamInvitationCodeRepository.findByCodeAndDeletedAtIsNull(CODE))
+                .willReturn(Optional.of(invitationCode));
+        given(teamRepository.findByIdForUpdate(7L)).willReturn(Optional.of(team));
+        given(teamBlockRepository.existsByTeamIdAndUserIdAndDeletedAtIsNull(7L, 1L)).willReturn(false);
+        given(teamMemberRepository.countByTeamIdAndMembershipStatus(7L, MembershipStatus.ACTIVE))
+                .willReturn(3L);
+        given(teamMemberRepository.existsDisplayNameUsedByOthers(7L, 1L, "hoon")).willReturn(false);
+        given(teamMemberRepository.findByTeamIdAndUserId(7L, 1L))
+                .willReturn(Optional.empty(), Optional.of(joinedMember));
+        given(teamMemberRepository.save(any(TeamMember.class))).willReturn(joinedMember);
+
+        // when
+        teamMemberService.join(1L, REQUEST);
+        joinedMember.leave(LocalDateTime.now(FIXED_CLOCK));
+        teamMemberService.join(1L, REQUEST);
+
+        // then
+        ArgumentCaptor<TeamMemberJoinedEvent> captor = ArgumentCaptor.forClass(TeamMemberJoinedEvent.class);
+        then(eventPublisher).should(times(2)).publishEvent(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(TeamMemberJoinedEvent::joinedTeamMemberId)
+                .containsExactly(31L, 31L);
+        assertThat(captor.getAllValues())
+                .extracting(TeamMemberJoinedEvent::eventId)
+                .doesNotHaveDuplicates();
+        assertThat(captor.getAllValues())
+                .extracting(TeamMemberJoinedEvent::joinType)
+                .containsExactly(TeamMemberJoinType.NEW, TeamMemberJoinType.REJOIN);
+    }
+
+    @Test
+    @DisplayName("팀 가입에 실패하면 팀원 가입 이벤트를 발행하지 않는다")
+    void joinFailureDoesNotPublishMemberJoinedEvent() {
+        // 테스트 목적:
+        // 초대 코드가 존재하지 않아 팀 가입이 실패한 경우
+        // MEMBER_JOINED 알림 이벤트가 발행되지 않는지 검증한다.
+
+        // given
+        given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(user));
+        given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(false);
+        given(teamInvitationCodeRepository.findByCodeAndDeletedAtIsNull(CODE))
+                .willReturn(Optional.empty());
+
+        // when, then
+        assertThatThrownBy(() -> teamMemberService.join(1L, REQUEST))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.INVITATION_CODE_NOT_FOUND));
+        then(eventPublisher).shouldHaveNoInteractions();
     }
 
     @Test

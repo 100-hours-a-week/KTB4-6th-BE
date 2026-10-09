@@ -14,13 +14,18 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "notification")
+@Table(name = "notification",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_notification_user_id_idempotency_key",
+                columnNames = {"user_id", "idempotency_key"}))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Notification extends BaseEntity {
 
@@ -55,4 +60,47 @@ public class Notification extends BaseEntity {
 
     @Column(name = "is_read", nullable = false)
     private boolean isRead = false;
+
+    private Notification(
+            Team team,
+            User user,
+            NotificationType type,
+            String idempotencyKey,
+            NotificationReferenceType referenceType,
+            Long referenceId,
+            String body
+    ) {
+        this.team = team;
+        this.user = user;
+        this.type = type;
+        this.idempotencyKey = idempotencyKey;
+        this.referenceType = referenceType;
+        this.referenceId = referenceId;
+        this.body = body;
+        this.isRead = false;
+    }
+
+    public static Notification create(
+            Team team,
+            User user,
+            NotificationType type,
+            String idempotencyKey,
+            NotificationReferenceType referenceType,
+            Long referenceId,
+            String body
+    ) {
+        return new Notification(team, user, type, idempotencyKey, referenceType, referenceId, body);
+    }
+
+    public boolean markAsRead() {
+        if (isRead) {
+            return false;
+        }
+        isRead = true;
+        return true;
+    }
+
+    public void delete(LocalDateTime deletedAt) {
+        markDeleted(deletedAt);
+    }
 }

@@ -3,6 +3,8 @@ package com.backend.meety.domain.team.service;
 import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.TeamCredit;
+import com.backend.meety.domain.credit.event.CreditEarnedEvent;
+import com.backend.meety.domain.credit.event.CreditEarnedReason;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import com.backend.meety.domain.team.dto.InvitationCodeResponse;
@@ -30,6 +32,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,6 +53,7 @@ public class TeamService {
     private final CreditLedgerRepository creditLedgerRepository;
     private final Clock clock;
     private final CreditPolicy creditPolicy;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public TeamCreateResponse create(Long userId, TeamCreateRequest request) {
@@ -139,8 +143,10 @@ public class TeamService {
     private void grantInitialCredit(Team team) {
         TeamCredit credit = teamCreditRepository.save(
                 TeamCredit.create(team, creditPolicy.teamCreateGrant(), creditPolicy.maxBalance()));
-        creditLedgerRepository.save(
+        CreditLedger ledger = creditLedgerRepository.save(
                 CreditLedger.earnForTeamCreate(team, creditPolicy.teamCreateGrant(), credit.getBalance()));
+        eventPublisher.publishEvent(new CreditEarnedEvent(
+                team.getId(), ledger.getIdempotencyKey(), ledger.getAmount(), CreditEarnedReason.TEAM_CREATE));
     }
 
     private Team lockActiveTeam(Long teamId) {
