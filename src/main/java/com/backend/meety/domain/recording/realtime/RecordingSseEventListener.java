@@ -1,6 +1,6 @@
 package com.backend.meety.domain.recording.realtime;
 
-import com.backend.meety.domain.meeting.realtime.MeetingSseRegistry;
+import com.backend.meety.domain.meeting.realtime.MeetingSsePublisher;
 import com.backend.meety.domain.recording.event.RecordingCompletedEvent;
 import com.backend.meety.domain.recording.event.RecordingPausedEvent;
 import com.backend.meety.domain.recording.event.RecordingResumedEvent;
@@ -22,7 +22,7 @@ public class RecordingSseEventListener {
     private static final String RECORDING_RESUMED = "RECORDING_RESUMED";
     private static final String RECORDING_COMPLETED = "RECORDING_COMPLETED";
 
-    private final MeetingSseRegistry registry;
+    private final MeetingSsePublisher ssePublisher;
 
     @Order(0)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -50,8 +50,8 @@ public class RecordingSseEventListener {
 
     private void broadcast(Long meetingId, Long recordingSessionId, String eventName) {
         RecordingStatusSseEvent payload = new RecordingStatusSseEvent(eventName, meetingId, recordingSessionId);
-        int emitterCount = registry.broadcast(meetingId, eventName, payload);
-        log.debug("Recording SSE broadcast 완료. meetingId={}, recordingSessionId={}, event={}, emitterCount={}",
-                meetingId, recordingSessionId, eventName, emitterCount);
+        ssePublisher.broadcast(meetingId, eventName, payload);
+        log.debug("Recording SSE 발행 완료. meetingId={}, recordingSessionId={}, event={}",
+                meetingId, recordingSessionId, eventName);
     }
 }

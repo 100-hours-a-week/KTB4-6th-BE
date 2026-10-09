@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.data.redis.autoconfigure.DataRedisAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 
 class RedisConfigTest {
@@ -21,11 +20,10 @@ class RedisConfigTest {
             );
 
     @Test
-    @DisplayName("Redis 서버 없이도 회의 SSE 채널과 구독 컨테이너를 구성하고 기동한다")
-    void configureMeetingSsePubSubWithoutRedisServer() {
+    @DisplayName("구독 리스너가 없으면 Redis 서버 없이도 구독 컨테이너를 구성하고 기동한다")
+    void configureListenerContainerWithoutRedisServer() {
         contextRunner.run(context -> {
             assertThat(context).hasNotFailed();
-            assertThat(context.getBean(ChannelTopic.class).getTopic()).isEqualTo("meeting-sse");
             assertThat(context.getBean(RedisMessageListenerContainer.class).isRunning()).isTrue();
         });
     }

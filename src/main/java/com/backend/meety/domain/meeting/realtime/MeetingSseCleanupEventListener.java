@@ -16,22 +16,22 @@ public class MeetingSseCleanupEventListener {
 
     private static final String MEETING_DELETED_EVENT_NAME = "MEETING_DELETED";
 
-    private final MeetingSseRegistry registry;
+    private final MeetingSsePublisher ssePublisher;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void closeParticipantSse(MeetingParticipantLeftEvent event) {
-        registry.complete(event.meetingId(), event.userId());
+        ssePublisher.completeParticipant(event.meetingId(), event.userId());
     }
 
     @Order(Ordered.LOWEST_PRECEDENCE)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void closeMeetingSse(MeetingCompletedEvent event) {
-        registry.completeAll(event.meetingId());
+        ssePublisher.completeAll(event.meetingId());
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void sendDeletedEventAndCloseMeetingSse(MeetingDeletedEvent event) {
-        registry.sendAndCompleteAll(
+        ssePublisher.sendAndCompleteAll(
                 event.meetingId(),
                 MEETING_DELETED_EVENT_NAME,
                 MeetingSseDeletedEvent.deleted(event.meetingId())

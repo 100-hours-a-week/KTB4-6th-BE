@@ -2,6 +2,7 @@ package com.backend.meety.domain.transcript.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.backend.meety.domain.meeting.realtime.MeetingSseLoopback;
 import com.backend.meety.domain.meeting.realtime.MeetingSseRegistry;
 import com.backend.meety.domain.transcript.event.TranscriptCreatedEvent;
 import java.io.IOException;
@@ -25,7 +26,7 @@ class TranscriptSseEventListenerTest {
         registry.register(100L, 10L, starter);
         registry.register(100L, 20L, participant);
         registry.register(200L, 30L, otherMeeting);
-        TranscriptSseEventListener listener = new TranscriptSseEventListener(registry);
+        TranscriptSseEventListener listener = new TranscriptSseEventListener(MeetingSseLoopback.publisher(registry));
         LocalDateTime recognizedAt = LocalDateTime.of(2026, 9, 23, 10, 15, 30);
 
         listener.broadcastTranscriptCreated(new TranscriptCreatedEvent(
@@ -42,11 +43,11 @@ class TranscriptSseEventListenerTest {
                 100L, 900L, 31L, "final text", 12000L, 14500L, recognizedAt);
         assertThat(starter.sentData)
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
-                .contains(expected)
+                .contains(MeetingSseLoopback.json(expected))
                 .anyMatch(data -> data instanceof String value && value.startsWith("event:TRANSCRIPT_CREATED\n"));
         assertThat(participant.sentData)
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
-                .contains(expected);
+                .contains(MeetingSseLoopback.json(expected));
         assertThat(otherMeeting.sentData).isNull();
         assertThat(starter.completed).isFalse();
         assertThat(participant.completed).isFalse();

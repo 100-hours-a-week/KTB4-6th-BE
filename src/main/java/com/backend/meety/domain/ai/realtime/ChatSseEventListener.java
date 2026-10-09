@@ -4,7 +4,7 @@ import com.backend.meety.domain.ai.event.ChatCompletedEvent;
 import com.backend.meety.domain.ai.event.ChatFailedEvent;
 import com.backend.meety.domain.ai.event.ChatRequestedEvent;
 import com.backend.meety.domain.ai.repository.AiChatbotMessageRepository;
-import com.backend.meety.domain.meeting.realtime.MeetingSseRegistry;
+import com.backend.meety.domain.meeting.realtime.MeetingSsePublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -17,7 +17,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class ChatSseEventListener {
 
     private final AiChatbotMessageRepository chatbotMessageRepository;
-    private final MeetingSseRegistry registry;
+    private final MeetingSsePublisher ssePublisher;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void broadcastRequested(ChatRequestedEvent event) {
@@ -40,8 +40,7 @@ public class ChatSseEventListener {
     }
 
     private void broadcast(Long meetingId, String eventName, Object payload) {
-        int emitterCount = registry.broadcast(meetingId, eventName, payload);
-        log.debug("Chat SSE broadcast 완료. meetingId={}, event={}, emitterCount={}",
-                meetingId, eventName, emitterCount);
+        ssePublisher.broadcast(meetingId, eventName, payload);
+        log.debug("Chat SSE 발행 완료. meetingId={}, event={}", meetingId, eventName);
     }
 }
