@@ -5,9 +5,9 @@ import com.backend.meety.domain.notification.entity.NotificationType;
 import com.backend.meety.domain.notification.event.NotificationCreatedEvent;
 import java.time.LocalDateTime;
 
-public record NotificationCreatedSseEvent(
-        String type,
+public record NotificationRedisMessage(
         Long notificationId,
+        Long recipientUserId,
         NotificationType notificationType,
         String body,
         NotificationReferenceType referenceType,
@@ -16,31 +16,16 @@ public record NotificationCreatedSseEvent(
         LocalDateTime createdAt
 ) {
 
-    private static final String TYPE = "NOTIFICATION_CREATED";
-
-    public static NotificationCreatedSseEvent from(NotificationCreatedEvent event) {
-        return new NotificationCreatedSseEvent(
-                TYPE,
+    public static NotificationRedisMessage from(NotificationCreatedEvent event) {
+        return new NotificationRedisMessage(
                 event.notificationId(),
+                event.recipientUserId(),
                 event.notificationType(),
                 event.body(),
                 event.referenceType(),
                 event.referenceId(),
                 event.isRead(),
                 event.createdAt()
-        );
-    }
-
-    public static NotificationCreatedSseEvent from(NotificationRedisMessage message) {
-        return new NotificationCreatedSseEvent(
-                TYPE,
-                message.notificationId(),
-                message.notificationType(),
-                message.body(),
-                message.referenceType(),
-                message.referenceId(),
-                message.isRead(),
-                message.createdAt()
         );
     }
 }
