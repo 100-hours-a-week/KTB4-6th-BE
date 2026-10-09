@@ -2,6 +2,7 @@ package com.backend.meety.domain.recording.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.backend.meety.domain.meeting.realtime.MeetingSseLoopback;
 import com.backend.meety.domain.meeting.realtime.MeetingSseRegistry;
 import com.backend.meety.domain.recording.event.RecordingCompletedEvent;
 import com.backend.meety.domain.recording.event.RecordingPausedEvent;
@@ -27,7 +28,7 @@ class RecordingSseEventListenerTest {
         registry.register(100L, 10L, starter);
         registry.register(100L, 20L, participant);
         registry.register(200L, 30L, otherMeeting);
-        RecordingSseEventListener listener = new RecordingSseEventListener(registry);
+        RecordingSseEventListener listener = new RecordingSseEventListener(MeetingSseLoopback.publisher(registry));
 
         listener.broadcastStarted(new RecordingStartedEvent(100L, 700L));
 
@@ -48,7 +49,7 @@ class RecordingSseEventListenerTest {
         TestSseEmitter paused = new TestSseEmitter();
         TestSseEmitter resumed = new TestSseEmitter();
         TestSseEmitter completed = new TestSseEmitter();
-        RecordingSseEventListener listener = new RecordingSseEventListener(registry);
+        RecordingSseEventListener listener = new RecordingSseEventListener(MeetingSseLoopback.publisher(registry));
 
         registry.register(100L, 10L, paused);
         listener.broadcastPaused(new RecordingPausedEvent(100L, 700L));
@@ -74,7 +75,7 @@ class RecordingSseEventListenerTest {
         registry.register(100L, 10L, user10);
         registry.register(100L, 20L, user20);
         registry.register(100L, 30L, user30);
-        RecordingSseEventListener listener = new RecordingSseEventListener(registry);
+        RecordingSseEventListener listener = new RecordingSseEventListener(MeetingSseLoopback.publisher(registry));
 
         listener.broadcastPaused(new RecordingPausedEvent(100L, 700L));
 
@@ -112,7 +113,7 @@ class RecordingSseEventListenerTest {
     private void assertReceived(TestSseEmitter emitter, String eventName, RecordingStatusSseEvent payload) {
         assertThat(emitter.sentData)
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
-                .contains(payload)
+                .contains(MeetingSseLoopback.json(payload))
                 .anyMatch(data -> data instanceof String value && value.startsWith("event:" + eventName + "\n"));
     }
 

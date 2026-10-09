@@ -23,7 +23,7 @@ import com.backend.meety.domain.ai.event.ChatCompletedEvent;
 import com.backend.meety.domain.ai.event.ChatFailedEvent;
 import com.backend.meety.domain.ai.event.ChatRequestedEvent;
 import com.backend.meety.domain.ai.repository.AiChatbotMessageRepository;
-import com.backend.meety.domain.meeting.realtime.MeetingSseRegistry;
+import com.backend.meety.domain.meeting.realtime.MeetingSsePublisher;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import java.util.Optional;
@@ -34,8 +34,8 @@ import org.mockito.ArgumentCaptor;
 class ChatSseEventListenerTest {
 
     private final AiChatbotMessageRepository messages = mock(AiChatbotMessageRepository.class);
-    private final MeetingSseRegistry registry = mock(MeetingSseRegistry.class);
-    private final ChatSseEventListener listener = new ChatSseEventListener(messages, registry);
+    private final MeetingSsePublisher ssePublisher = mock(MeetingSsePublisher.class);
+    private final ChatSseEventListener listener = new ChatSseEventListener(messages, ssePublisher);
 
     @Test
     @DisplayName("질문이 접수되면 회의 참여자 전원에게 CHAT_REQUESTED를 보낸다")
@@ -50,7 +50,7 @@ class ChatSseEventListenerTest {
         listener.broadcastRequested(new ChatRequestedEvent(900L, 100L, 8801L, 9L));
 
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
-        verify(registry).broadcast(eq(100L), eq("CHAT_REQUESTED"), payload.capture());
+        verify(ssePublisher).broadcast(eq(100L), eq("CHAT_REQUESTED"), payload.capture());
         ChatRequestedSseEvent event = (ChatRequestedSseEvent) payload.getValue();
         assertThat(event.type()).isEqualTo("CHAT_REQUESTED");
         assertThat(event.messageId()).isEqualTo(8801L);
@@ -67,7 +67,7 @@ class ChatSseEventListenerTest {
 
         listener.broadcastRequested(new ChatRequestedEvent(900L, 100L, 8801L, 9L));
 
-        verify(registry, never()).broadcast(anyLong(), anyString(), any());
+        verify(ssePublisher, never()).broadcast(anyLong(), anyString(), any());
     }
 
     @Test
@@ -84,7 +84,7 @@ class ChatSseEventListenerTest {
         listener.broadcastCompleted(new ChatCompletedEvent(100L, 8801L));
 
         ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
-        verify(registry).broadcast(eq(100L), eq("CHAT_COMPLETED"), payload.capture());
+        verify(ssePublisher).broadcast(eq(100L), eq("CHAT_COMPLETED"), payload.capture());
         ChatCompletedSseEvent event = (ChatCompletedSseEvent) payload.getValue();
         assertThat(event.messageId()).isEqualTo(8801L);
         assertThat(event.answer()).isEqualTo("답변");
@@ -97,7 +97,7 @@ class ChatSseEventListenerTest {
     void broadcastsChatFailed() {
         listener.broadcastFailed(new ChatFailedEvent(100L, 8801L, 10L));
 
-        verify(registry).broadcast(100L, "CHAT_FAILED",
+        verify(ssePublisher).broadcast(100L, "CHAT_FAILED",
                 new ChatFailedSseEvent("CHAT_FAILED", 100L, 8801L, 10L));
     }
 }
