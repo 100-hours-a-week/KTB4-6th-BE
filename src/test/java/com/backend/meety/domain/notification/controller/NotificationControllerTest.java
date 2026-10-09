@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -19,6 +20,7 @@ import com.backend.meety.domain.notification.entity.NotificationReferenceType;
 import com.backend.meety.domain.notification.entity.NotificationType;
 import com.backend.meety.domain.notification.exception.NotificationErrorCode;
 import com.backend.meety.domain.notification.exception.NotificationException;
+import com.backend.meety.domain.notification.realtime.NotificationSseService;
 import com.backend.meety.domain.notification.service.NotificationService;
 import com.backend.meety.global.exception.GlobalExceptionHandler;
 import java.time.LocalDateTime;
@@ -27,21 +29,27 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 class NotificationControllerTest {
 
     private NotificationService notificationService;
+    private NotificationSseService notificationSseService;
+    private NotificationController controller;
     private MockMvc mvc;
 
     @BeforeEach
     void setUp() {
         notificationService = mock(NotificationService.class);
-        mvc = MockMvcBuilders.standaloneSetup(new NotificationController(notificationService))
+        notificationSseService = mock(NotificationSseService.class);
+        controller = new NotificationController(notificationService, notificationSseService);
+        mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -52,6 +60,45 @@ class NotificationControllerTest {
     @AfterEach
     void clearAuthentication() {
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    @DisplayName("인증 사용자는 전역 알림 SSE에 연결할 수 있다")
+    void connectEvents() throws Exception {
+        // 테스트 목적:
+        // 로그인 사용자의 전역 알림 SSE 연결 요청이 인증 사용자 ID로 서비스에 위임되고
+        // SSE 비동기 응답을 시작하는지 검증한다.
+
+        // given
+        SseEmitter emitter = new SseEmitter();
+        when(notificationSseService.connect(1L)).thenReturn(emitter);
+
+        // when
+        ResponseEntity<SseEmitter> response = controller.connectEvents(1L);
+
+        // then
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        assertThat(response.getBody()).isSameAs(emitter);
+        verify(notificationSseService).connect(1L);
+    }
+
+    @Test
+    @DisplayName("전역 알림 SSE 응답은 프록시 버퍼링을 차단한다")
+    void connectEventsDisablesProxyBuffering() throws Exception {
+        // 테스트 목적:
+        // 전역 알림 SSE 연결 응답에 Nginx buffering 비활성화와 no-cache 헤더가 포함되고
+        // text/event-stream 응답으로 반환되는지 검증한다.
+
+        // given
+        SseEmitter emitter = new SseEmitter();
+        when(notificationSseService.connect(1L)).thenReturn(emitter);
+
+        // when
+        ResponseEntity<SseEmitter> response = controller.connectEvents(1L);
+
+        // then
+        assertThat(response.getHeaders().getFirst("X-Accel-Buffering")).isEqualTo("no");
+        assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-cache");
     }
 
     @Test
