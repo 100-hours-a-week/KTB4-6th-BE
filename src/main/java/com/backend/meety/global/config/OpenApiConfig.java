@@ -7,6 +7,7 @@ import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
+import io.swagger.v3.oas.models.servers.Server;
 import java.util.Arrays;
 import java.util.List;
 import org.springdoc.core.customizers.OpenApiCustomizer;
@@ -18,6 +19,7 @@ import org.springframework.util.AntPathMatcher;
 public class OpenApiConfig {
 
     private static final String COOKIE_AUTH = "cookieAuth";
+    private static final String RELATIVE_SERVER_URL = "/";
 
     private static final List<String> PUBLIC_API_PATTERNS = Arrays.stream(PermitAllUrls.URLS)
             .filter(url -> url.startsWith("/api/"))
@@ -29,6 +31,7 @@ public class OpenApiConfig {
                 .info(new Info()
                         .title("Meety API")
                         .version("v1"))
+                .servers(List.of(new Server().url(RELATIVE_SERVER_URL)))
                 .components(new Components()
                         .addSecuritySchemes(COOKIE_AUTH, new SecurityScheme()
                                 .type(SecurityScheme.Type.APIKEY)
