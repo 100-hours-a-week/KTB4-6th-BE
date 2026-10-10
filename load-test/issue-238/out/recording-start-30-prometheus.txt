@@ -1,0 +1,11 @@
+hikari_active_max=10
+hikari_idle_min=0
+hikari_pending_max=32
+hikari_max=10
+hikari_timeout_increase=0
+hikari_acquire_seconds_max=30.006
+process_cpu_usage_max=0.010816119060297788
+jvm_heap_used_bytes_max=180123032
+jvm_live_threads_max=73
+jvm_gc_pause_count_increase=3
+jvm_gc_pause_seconds_max=0.007

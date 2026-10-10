@@ -1,0 +1,112 @@
+{
+    "metrics": {
+        "vus": {
+            "max": 100,
+            "value": 100,
+            "min": 100
+        },
+        "vus_max": {
+            "min": 100,
+            "max": 100,
+            "value": 100
+        },
+        "data_received": {
+            "count": 39252,
+            "rate": 652.0632327137236
+        },
+        "iterations": {
+            "count": 100,
+            "rate": 1.6612229509673992
+        },
+        "http_req_sending": {
+            "avg": 149.79397581,
+            "min": 65.220209,
+            "med": 156.888708,
+            "max": 195.153375,
+            "p(90)": 188.1273916,
+            "p(95)": 192.22796075000002,
+            "p(99)": 193.62955908
+        },
+        "http_reqs": {
+            "count": 100,
+            "rate": 1.6612229509673992
+        },
+        "checks": {
+            "passes": 300,
+            "fails": 0,
+            "value": 1
+        },
+        "data_sent": {
+            "count": 32254,
+            "rate": 535.8108506050249
+        },
+        "iteration_duration": {
+            "max": 60195.815236,
+            "p(90)": 60188.8996449,
+            "p(95)": 60192.80882795,
+            "p(99)": 60194.348385670004,
+            "avg": 60151.45377849003,
+            "min": 60073.826902,
+            "med": 60158.053152
+        },
+        "sse_connection_attempts": {
+            "count": 100,
+            "rate": 1.6612229509673992
+        },
+        "sse_connect_time_ms": {
+            "avg": 149.9,
+            "min": 65,
+            "med": 156.5,
+            "max": 195,
+            "p(90)": 188.3,
+            "p(95)": 192,
+            "p(99)": 194.01
+        },
+        "sse_event": {
+            "count": 100,
+            "rate": 1.6612229509673992
+        },
+        "http_req_duration": {
+            "avg": 60151.09505181001,
+            "min": 60072.170319,
+            "med": 60157.533382,
+            "max": 60195.722195,
+            "p(90)": 60188.8394065,
+            "p(95)": 60192.68200925,
+            "p(99)": 60193.92043559
+        },
+        "sse_connection_successes": {
+            "count": 100,
+            "rate": 1.6612229509673992
+        }
+    },
+    "root_group": {
+        "groups": {},
+        "checks": {
+                "sse status is 200": {
+                    "name": "sse status is 200",
+                    "path": "::sse status is 200",
+                    "id": "d5567fce3021de55d2483664e7396349",
+                    "passes": 100,
+                    "fails": 0
+                },
+                "sse open event observed": {
+                    "path": "::sse open event observed",
+                    "id": "98bd6c8a5fd589f37419316fffd901af",
+                    "passes": 100,
+                    "fails": 0,
+                    "name": "sse open event observed"
+                },
+                "CONNECTED event observed": {
+                    "name": "CONNECTED event observed",
+                    "path": "::CONNECTED event observed",
+                    "id": "9e4f0dcb61cdec9cb43af896a46b9d8c",
+                    "passes": 100,
+                    "fails": 0
+                }
+            },
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e"
+    }
+}

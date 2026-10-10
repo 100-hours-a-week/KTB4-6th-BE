@@ -1,0 +1,4 @@
+ts_epoch	hikari_active	hikari_idle	hikari_pending	hikari_max	hikari_timeout_total	process_cpu_usage	jvm_heap_used_bytes	jvm_live_threads	jvm_gc_pause_count	jvm_gc_pause_seconds_max
+1791549493.3N	0.0	10.0	0.0	10.0	0.0	1.93211725975057E-4	0	53.0	0	of
+1791549493.3N	0.0	10.0	0.0	10.0	0.0	0.0066448801051140205	0	53.0	0	of
+1791549493.3N	0.0	10.0	0.0	10.0	0.0	0.001030320963827567	0	53.0	0	of

@@ -1,0 +1,112 @@
+{
+    "metrics": {
+        "iterations": {
+            "count": 300,
+            "rate": 4.9710367651447624
+        },
+        "http_req_sending": {
+            "min": 34.804958,
+            "med": 240.9113955,
+            "max": 341.053709,
+            "p(90)": 300.31529580000006,
+            "p(95)": 319.12040064999997,
+            "p(99)": 331.4468925,
+            "avg": 219.64479973666656
+        },
+        "vus": {
+            "value": 300,
+            "min": 300,
+            "max": 300
+        },
+        "vus_max": {
+            "value": 300,
+            "min": 300,
+            "max": 300
+        },
+        "data_sent": {
+            "count": 97254,
+            "rate": 1611.510698524629
+        },
+        "data_received": {
+            "count": 117852,
+            "rate": 1952.8220828194685
+        },
+        "sse_connection_attempts": {
+            "count": 300,
+            "rate": 4.9710367651447624
+        },
+        "http_reqs": {
+            "count": 300,
+            "rate": 4.9710367651447624
+        },
+        "iteration_duration": {
+            "med": 60243.0303815,
+            "max": 60342.507152,
+            "p(90)": 60302.536394,
+            "p(95)": 60319.97388185,
+            "p(99)": 60332.60763825,
+            "avg": 60221.60670089332,
+            "min": 60039.899402
+        },
+        "sse_connect_time_ms": {
+            "max": 342,
+            "p(90)": 302,
+            "p(95)": 320,
+            "p(99)": 331.02,
+            "avg": 220.36,
+            "min": 35,
+            "med": 242
+        },
+        "http_req_duration": {
+            "med": 60241.8626105,
+            "max": 60342.343111,
+            "p(90)": 60300.8547523,
+            "p(95)": 60319.72845295,
+            "p(99)": 60332.503625339996,
+            "avg": 60220.604633589945,
+            "min": 60038.201027
+        },
+        "checks": {
+            "passes": 900,
+            "fails": 0,
+            "value": 1
+        },
+        "sse_connection_successes": {
+            "count": 300,
+            "rate": 4.9710367651447624
+        },
+        "sse_event": {
+            "count": 300,
+            "rate": 4.9710367651447624
+        }
+    },
+    "root_group": {
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "sse status is 200": {
+                    "path": "::sse status is 200",
+                    "id": "d5567fce3021de55d2483664e7396349",
+                    "passes": 300,
+                    "fails": 0,
+                    "name": "sse status is 200"
+                },
+                "sse open event observed": {
+                    "name": "sse open event observed",
+                    "path": "::sse open event observed",
+                    "id": "98bd6c8a5fd589f37419316fffd901af",
+                    "passes": 300,
+                    "fails": 0
+                },
+                "CONNECTED event observed": {
+                    "passes": 300,
+                    "fails": 0,
+                    "name": "CONNECTED event observed",
+                    "path": "::CONNECTED event observed",
+                    "id": "9e4f0dcb61cdec9cb43af896a46b9d8c"
+                }
+            },
+        "name": ""
+    }
+}
