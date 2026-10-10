@@ -18,14 +18,16 @@ public interface AiChatbotMessageRepository extends JpaRepository<AiChatbotMessa
             join fetch m.aiRequest
             join fetch m.teamMember
             where m.meeting.id = :meetingId
-              and m.id > :afterMessageId
+              and m.id < :beforeMessageId
               and m.deletedAt is null
-            order by m.id asc
+            order by m.id desc
             """)
     List<AiChatbotMessage> findPageByMeetingId(
-            @Param("meetingId") Long meetingId, @Param("afterMessageId") Long afterMessageId, Limit limit);
+            @Param("meetingId") Long meetingId, @Param("beforeMessageId") Long beforeMessageId, Limit limit);
 
     Optional<AiChatbotMessage> findByAiRequestId(Long aiRequestId);
+
+    boolean existsByMeetingIdAndTeamMemberIdAndDeletedAtIsNull(Long meetingId, Long teamMemberId);
 
     @Query("""
             select m
