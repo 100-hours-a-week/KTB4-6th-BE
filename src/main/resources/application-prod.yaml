@@ -43,6 +43,12 @@ credit:
 meeting:
   daily-create-limit: ${MEETING_DAILY_CREATE_LIMIT:5}
 
+notification:
+  executor:
+    core-pool-size: ${NOTIFICATION_EXECUTOR_CORE_POOL_SIZE}
+    max-pool-size: ${NOTIFICATION_EXECUTOR_MAX_POOL_SIZE}
+    queue-capacity: ${NOTIFICATION_EXECUTOR_QUEUE_CAPACITY}
+
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS}
 

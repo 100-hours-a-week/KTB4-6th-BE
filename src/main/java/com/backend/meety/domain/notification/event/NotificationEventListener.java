@@ -10,8 +10,10 @@ import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.recording.event.RecordingStartedEvent;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.team.event.TeamMemberJoinedEvent;
+import com.backend.meety.global.config.AsyncConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -24,6 +26,7 @@ public class NotificationEventListener {
     private final NotificationService notificationService;
     private final RecordingSessionRepository recordingSessionRepository;
 
+    @Async(AsyncConfig.NOTIFICATION_TASK_EXECUTOR_BEAN_NAME)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void createMeetingStartedNotification(RecordingStartedEvent event) {
         try {
@@ -46,6 +49,7 @@ public class NotificationEventListener {
         }
     }
 
+    @Async(AsyncConfig.NOTIFICATION_TASK_EXECUTOR_BEAN_NAME)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void createSummaryReadyNotification(SummaryReadyEvent event) {
         try {
@@ -63,6 +67,7 @@ public class NotificationEventListener {
         }
     }
 
+    @Async(AsyncConfig.NOTIFICATION_TASK_EXECUTOR_BEAN_NAME)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void createCreditEarnedNotification(CreditEarnedEvent event) {
         try {
@@ -80,6 +85,7 @@ public class NotificationEventListener {
         }
     }
 
+    @Async(AsyncConfig.NOTIFICATION_TASK_EXECUTOR_BEAN_NAME)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void createMemberJoinedNotification(TeamMemberJoinedEvent event) {
         try {

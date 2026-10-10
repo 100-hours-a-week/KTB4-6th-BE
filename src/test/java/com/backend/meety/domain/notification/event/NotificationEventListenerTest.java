@@ -25,10 +25,12 @@ import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.event.TeamMemberJoinedEvent;
 import com.backend.meety.domain.team.event.TeamMemberJoinType;
 import com.backend.meety.domain.user.entity.User;
+import com.backend.meety.global.config.AsyncConfig;
 import java.lang.reflect.Method;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
@@ -231,6 +233,34 @@ class NotificationEventListenerTest {
                 .isEqualTo(TransactionPhase.AFTER_COMMIT);
         assertThat(memberJoined.getAnnotation(TransactionalEventListener.class).phase())
                 .isEqualTo(TransactionPhase.AFTER_COMMIT);
+    }
+
+    @Test
+    @DisplayName("알림 이벤트 리스너는 Notification 전용 Executor에서 비동기로 실행된다")
+    void notificationListenersUseDedicatedExecutor() throws NoSuchMethodException {
+        // 테스트 목적:
+        // 알림 생성 후속 작업이 기본 applicationTaskExecutor가 아니라
+        // notificationTaskExecutor로 격리되어 실행되는지 검증한다.
+
+        // given
+        Method meetingStarted = NotificationEventListener.class
+                .getMethod("createMeetingStartedNotification", RecordingStartedEvent.class);
+        Method summaryReady = NotificationEventListener.class
+                .getMethod("createSummaryReadyNotification", SummaryReadyEvent.class);
+        Method creditEarned = NotificationEventListener.class
+                .getMethod("createCreditEarnedNotification", CreditEarnedEvent.class);
+        Method memberJoined = NotificationEventListener.class
+                .getMethod("createMemberJoinedNotification", TeamMemberJoinedEvent.class);
+
+        // when, then
+        assertThat(meetingStarted.getAnnotation(Async.class).value())
+                .isEqualTo(AsyncConfig.NOTIFICATION_TASK_EXECUTOR_BEAN_NAME);
+        assertThat(summaryReady.getAnnotation(Async.class).value())
+                .isEqualTo(AsyncConfig.NOTIFICATION_TASK_EXECUTOR_BEAN_NAME);
+        assertThat(creditEarned.getAnnotation(Async.class).value())
+                .isEqualTo(AsyncConfig.NOTIFICATION_TASK_EXECUTOR_BEAN_NAME);
+        assertThat(memberJoined.getAnnotation(Async.class).value())
+                .isEqualTo(AsyncConfig.NOTIFICATION_TASK_EXECUTOR_BEAN_NAME);
     }
 
     private TeamMember member(Team team, Long userId, Long memberId, String displayName) {
