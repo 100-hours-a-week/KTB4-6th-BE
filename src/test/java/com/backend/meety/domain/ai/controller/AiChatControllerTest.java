@@ -63,7 +63,7 @@ class AiChatControllerTest {
                 "[{\"sourceType\":\"transcript\",\"meetingId\":42,\"segmentId\":801}]",
                 LocalDateTime.of(2026, 8, 26, 14, 32, 10), LocalDateTime.of(2026, 8, 26, 14, 32, 30));
         when(service.getChats(1L, 100L, null, null))
-                .thenReturn(new ChatListResponse(List.of(message), null, false));
+                .thenReturn(new ChatListResponse(List.of(message), null, false, true));
 
         mvc.perform(get("/api/v1/meetings/100/chats"))
                 .andExpect(status().isOk())
@@ -72,7 +72,8 @@ class AiChatControllerTest {
                 .andExpect(jsonPath("$.data.messages[0].status").value("COMPLETED"))
                 .andExpect(jsonPath("$.data.messages[0].citations[0].segmentId").value(801))
                 .andExpect(jsonPath("$.data.nextCursor").isEmpty())
-                .andExpect(jsonPath("$.data.hasNext").value(false));
+                .andExpect(jsonPath("$.data.hasNext").value(false))
+                .andExpect(jsonPath("$.data.hasAskedQuestion").value(true));
     }
 
     @Test

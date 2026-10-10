@@ -217,34 +217,62 @@ class AiChatServiceTest {
     }
 
     @Test
-    @DisplayName("목록은 size보다 하나 더 조회해 다음 페이지가 있으면 마지막 메시지 ID를 커서로 준다")
-    void listsFirstPageWithNextCursor() {
-        when(messages.findPageByMeetingId(100L, 0L, Limit.of(3)))
-                .thenReturn(List.of(chatMessage(8801L), chatMessage(8802L), chatMessage(8803L)));
+    @DisplayName("커서가 없으면 최신 메시지부터 조회해 오름차순으로 주고, 가장 오래된 메시지 ID를 다음 커서로 준다")
+    void listsLatestPageFirst() {
+        when(messages.findPageByMeetingId(100L, Long.MAX_VALUE, Limit.of(3)))
+                .thenReturn(List.of(chatMessage(8805L), chatMessage(8804L), chatMessage(8803L)));
 
         ChatListResponse response = service.getChats(1L, 100L, null, 2);
 
-        assertThat(response.messages()).extracting(ChatMessageResponse::messageId).containsExactly(8801L, 8802L);
+        assertThat(response.messages()).extracting(ChatMessageResponse::messageId).containsExactly(8804L, 8805L);
+        assertThat(response.hasNext()).isTrue();
+        assertThat(response.nextCursor()).isEqualTo(8804L);
+    }
+
+    @Test
+    @DisplayName("커서가 있으면 그보다 오래된 메시지를 조회한다")
+    void listsOlderPageBeforeCursor() {
+        when(messages.findPageByMeetingId(100L, 8804L, Limit.of(3)))
+                .thenReturn(List.of(chatMessage(8803L), chatMessage(8802L), chatMessage(8801L)));
+
+        ChatListResponse response = service.getChats(1L, 100L, 8804L, 2);
+
+        assertThat(response.messages()).extracting(ChatMessageResponse::messageId).containsExactly(8802L, 8803L);
         assertThat(response.hasNext()).isTrue();
         assertThat(response.nextCursor()).isEqualTo(8802L);
     }
 
     @Test
-    @DisplayName("마지막 페이지와 빈 목록은 다음 커서 없이 반환한다")
-    void listsLastPageAndEmptyPage() {
+    @DisplayName("가장 오래된 페이지와 빈 목록은 다음 커서 없이 반환한다")
+    void listsOldestPageAndEmptyPage() {
         when(messages.findPageByMeetingId(100L, 8802L, Limit.of(ChatPolicy.DEFAULT_PAGE_SIZE + 1)))
-                .thenReturn(List.of(chatMessage(8803L)));
-        when(messages.findPageByMeetingId(100L, 8803L, Limit.of(ChatPolicy.DEFAULT_PAGE_SIZE + 1)))
+                .thenReturn(List.of(chatMessage(8801L)));
+        when(messages.findPageByMeetingId(100L, 8801L, Limit.of(ChatPolicy.DEFAULT_PAGE_SIZE + 1)))
                 .thenReturn(List.of());
 
-        ChatListResponse last = service.getChats(1L, 100L, 8802L, null);
-        ChatListResponse empty = service.getChats(1L, 100L, 8803L, null);
+        ChatListResponse oldest = service.getChats(1L, 100L, 8802L, null);
+        ChatListResponse empty = service.getChats(1L, 100L, 8801L, null);
 
-        assertThat(last.messages()).hasSize(1);
-        assertThat(last.hasNext()).isFalse();
-        assertThat(last.nextCursor()).isNull();
+        assertThat(oldest.messages()).extracting(ChatMessageResponse::messageId).containsExactly(8801L);
+        assertThat(oldest.hasNext()).isFalse();
+        assertThat(oldest.nextCursor()).isNull();
         assertThat(empty.messages()).isEmpty();
         assertThat(empty.nextCursor()).isNull();
+    }
+
+    @Test
+    @DisplayName("현재 팀원이 이 회의에서 질문한 적이 있는지 함께 반환한다")
+    void listsWhetherMemberHasAskedQuestion() {
+        when(messages.findPageByMeetingId(100L, Long.MAX_VALUE, Limit.of(ChatPolicy.DEFAULT_PAGE_SIZE + 1)))
+                .thenReturn(List.of());
+        when(messages.existsByMeetingIdAndTeamMemberIdAndDeletedAtIsNull(100L, 10L))
+                .thenReturn(false, true);
+
+        ChatListResponse beforeAsking = service.getChats(1L, 100L, null, null);
+        ChatListResponse afterAsking = service.getChats(1L, 100L, null, null);
+
+        assertThat(beforeAsking.hasAskedQuestion()).isFalse();
+        assertThat(afterAsking.hasAskedQuestion()).isTrue();
     }
 
     @Test

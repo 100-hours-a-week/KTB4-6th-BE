@@ -73,14 +73,16 @@ public class AiChatService {
 
     @Transactional(readOnly = true)
     public ChatListResponse getChats(Long userId, Long meetingId, Long cursor, Integer size) {
-        long afterMessageId = resolveCursor(cursor);
+        long beforeMessageId = resolveCursor(cursor);
         int pageSize = resolvePageSize(size);
         Meeting meeting = findMeeting(meetingId);
-        findParticipant(userId, meeting);
+        TeamMember member = findParticipant(userId, meeting);
         validateInProgress(meeting);
         List<AiChatbotMessage> fetched = chatbotMessageRepository.findPageByMeetingId(
-                meetingId, afterMessageId, Limit.of(pageSize + 1));
-        return ChatListResponse.of(fetched, pageSize);
+                meetingId, beforeMessageId, Limit.of(pageSize + 1));
+        boolean hasAskedQuestion = chatbotMessageRepository.existsByMeetingIdAndTeamMemberIdAndDeletedAtIsNull(
+                meetingId, member.getId());
+        return ChatListResponse.of(fetched, pageSize, hasAskedQuestion);
     }
 
     private ChatCreateResponse acceptQuestion(Long userId, Meeting meeting, TeamCredit credit,
@@ -111,7 +113,7 @@ public class AiChatService {
 
     private long resolveCursor(Long cursor) {
         if (cursor == null) {
-            return 0L;
+            return Long.MAX_VALUE;
         }
         if (cursor < 1) {
             throw new MeetingException(MeetingErrorCode.INVALID_CURSOR);
