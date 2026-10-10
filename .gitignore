@@ -9,6 +9,7 @@ AGENTS.md
 .claude/
 .codex
 .env
+/load-test/
 .local-docs/
 └── troubleshooting/
 ### STS ###
