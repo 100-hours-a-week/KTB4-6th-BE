@@ -16,6 +16,20 @@ CHART_DIR = OUT_DIR / "charts"
 RECORDING_STAGES = [1, 10, 30, 50]
 SSE_STAGES = [1, 50, 100, 300]
 
+NOTIFICATION_SPLIT_RECORDING = [
+    {"stage": 1, "requests": 1, "success": 1, "failure": 0, "max_s": 0.048, "timeout_logs": 0},
+    {"stage": 10, "requests": 10, "success": 10, "failure": 0, "max_s": 0.28, "timeout_logs": 0},
+    {"stage": 30, "requests": 30, "success": 30, "failure": 0, "max_s": 0.64, "timeout_logs": 0},
+    {"stage": 50, "requests": 50, "success": 50, "failure": 0, "max_s": 0.92, "timeout_logs": 0},
+]
+
+ASYNC_RECORDING = [
+    {"stage": 1, "requests": 1, "success": 1, "failure": 0, "max_s": 0.075, "timeout_logs": 0},
+    {"stage": 10, "requests": 10, "success": 10, "failure": 0, "max_s": 0.17, "timeout_logs": 0},
+    {"stage": 30, "requests": 30, "success": 30, "failure": 0, "max_s": 1.10, "timeout_logs": 0},
+    {"stage": 50, "requests": 50, "success": 50, "failure": 0, "max_s": 0.73, "timeout_logs": 0},
+]
+
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 BG = "#0f1117"
@@ -305,6 +319,7 @@ def line_chart(
     height: int = 420,
     y_max: float | None = None,
     unit: str = "",
+    value_digits: int = 1,
 ) -> None:
     parts = svg_header(width, height)
     add_title(parts, title, subtitle)
@@ -333,7 +348,7 @@ def line_chart(
             x = x_at(i)
             y = y_at(value)
             parts.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="4" fill="{color}"/>')
-            parts.append(f'<text class="value" x="{x:.2f}" y="{y - 9:.2f}" text-anchor="middle">{esc(fmt(value))}{esc(unit)}</text>')
+            parts.append(f'<text class="value" x="{x:.2f}" y="{y - 9:.2f}" text-anchor="middle">{esc(fmt(value, value_digits))}{esc(unit)}</text>')
 
     for i, label in enumerate(labels):
         parts.append(f'<text class="axis" x="{x_at(i):.2f}" y="{top + plot_h + 25}" text-anchor="middle">{esc(label)}</text>')
@@ -388,6 +403,23 @@ def table_html(recording: list[dict[str, float]], sse: list[dict[str, float]]) -
     """
 
 
+def rows_table(title: str, headers: list[str], rows: list[list[object]]) -> str:
+    header_html = "".join(f"<th>{esc(header)}</th>" for header in headers)
+    row_html = "\n".join(
+        "<tr>" + "".join(f"<td>{esc(cell)}</td>" for cell in row) + "</tr>"
+        for row in rows
+    )
+    return f"""
+    <article class="panel table-panel">
+      <h3>{esc(title)}</h3>
+      <table>
+        <thead><tr>{header_html}</tr></thead>
+        <tbody>{row_html}</tbody>
+      </table>
+    </article>
+    """
+
+
 def stat_card(label: str, value: str, detail: str, color: str) -> str:
     return f"""
     <div class="stat" style="border-color:{color}">
@@ -398,17 +430,172 @@ def stat_card(label: str, value: str, detail: str, color: str) -> str:
     """
 
 
+def chart_panel(src: str, alt: str) -> str:
+    return f'<article class="panel"><img src="{esc(src)}" alt="{esc(alt)}"></article>'
+
+
+def category_section(
+    section_id: str,
+    eyebrow: str,
+    title: str,
+    summary: str,
+    cards: list[str],
+    charts: list[str],
+    table: str,
+) -> str:
+    return f"""
+    <section class="category" id="{esc(section_id)}">
+      <div class="category-head">
+        <div>
+          <div class="eyebrow">{esc(eyebrow)}</div>
+          <h2>{esc(title)}</h2>
+          <p>{esc(summary)}</p>
+        </div>
+      </div>
+      <div class="stats">{''.join(cards)}</div>
+      <div class="chart-grid">{''.join(charts)}{table}</div>
+    </section>
+    """
+
+
+def recording_failure_table(recording: list[dict[str, float]]) -> str:
+    return rows_table(
+        "녹음 시작 실패 상세",
+        ["동시 요청", "성공", "실패", "P99", "Active", "Pending", "Timeout"],
+        [
+            [
+                int(row["stage"]),
+                int(row["success"]),
+                int(row["failure"]),
+                f"{fmt(row['p99_ms'] / 1000, 2)}s",
+                fmt(row["hikari_active"]),
+                fmt(row["hikari_pending"]),
+                fmt(row["timeout_delta"]),
+            ]
+            for row in recording
+        ],
+    )
+
+
+def sse_table(sse: list[dict[str, float]]) -> str:
+    return rows_table(
+        "SSE 연결 성공 상세",
+        ["연결 수", "성공", "실패", "P99", "Pending", "Timeout"],
+        [
+            [
+                int(row["stage"]),
+                int(row["success"]),
+                int(row["failure"]),
+                f"{fmt(row['p99_ms'], 2)}ms",
+                fmt(row["hikari_pending"]),
+                fmt(row["timeout_delta"]),
+            ]
+            for row in sse
+        ],
+    )
+
+
+def success_case_table(title: str, rows: list[dict[str, float]]) -> str:
+    return rows_table(
+        title,
+        ["동시 요청", "성공", "실패", "최대 응답 시간", "풀 대기 시간 초과 로그"],
+        [
+            [
+                int(row["stage"]),
+                int(row["success"]),
+                int(row["failure"]),
+                f"{fmt(row['max_s'], 3)}s",
+                int(row["timeout_logs"]),
+            ]
+            for row in rows
+        ],
+    )
+
+
 def write_dashboard(recording: list[dict[str, float]], sse: list[dict[str, float]]) -> None:
     r50 = next(row for row in recording if row["stage"] == 50)
     s300 = next(row for row in sse if row["stage"] == 300)
-    cards = "\n".join(
+    split50 = next(row for row in NOTIFICATION_SPLIT_RECORDING if row["stage"] == 50)
+    async50 = next(row for row in ASYNC_RECORDING if row["stage"] == 50)
+
+    sse_section = category_section(
+        "sse-success",
+        "Category 1",
+        "SSE 연결 성공",
+        "SSE 단독 Baseline은 300개 연결까지 전부 성공했고 Hikari Pending과 Connection Timeout이 0이었다.",
         [
-            stat_card("Recording 50", f"{int(r50['success'])}/{int(r50['requests'])}", "successful starts", GREEN),
+            stat_card("SSE 300", f"{int(s300['success'])}/{int(s300['attempts'])}", "successful connections", GREEN),
+            stat_card("SSE failure", str(int(s300["failure"])), "failed connections", BLUE),
+            stat_card("SSE P99", f"{fmt(s300['p99_ms'], 2)}ms", "connect latency at 300", CYAN),
+            stat_card("Hikari timeout", fmt(s300["timeout_delta"]), "timeout increase", YELLOW),
+        ],
+        [
+            chart_panel("sse-success-failure.svg", "SSE success and failure"),
+            chart_panel("sse-latency.svg", "SSE connection latency"),
+        ],
+        sse_table(sse),
+    )
+
+    recording_failure_section = category_section(
+        "recording-failure",
+        "Category 2",
+        "기존 녹음 시작 실패",
+        "AFTER_COMMIT 알림 저장과 REQUIRES_NEW가 같은 요청 흐름에 묶인 상태에서는 성공 건수가 풀 크기 부근에서 멈추고 Pending과 Timeout이 증가했다.",
+        [
+            stat_card("Recording 50", f"{int(r50['success'])}/{int(r50['requests'])}", "successful starts", RED),
             stat_card("Recording 50 failures", str(int(r50["failure"])), "500 responses after pool timeout", RED),
             stat_card("Max Hikari pending", fmt(r50["hikari_pending"]), "recording-start-50 stage", YELLOW),
-            stat_card("SSE 300", f"{int(s300['success'])}/{int(s300['attempts'])}", "successful connections", BLUE),
-        ]
+            stat_card("P99 latency", f"{fmt(r50['p99_ms'] / 1000, 2)}s", "connection wait dominated", ORANGE),
+        ],
+        [
+            chart_panel("recording-start-success-failure.svg", "Recording start success and failure"),
+            chart_panel("recording-start-hikari.svg", "Recording start Hikari connection pool"),
+            chart_panel("recording-start-latency.svg", "Recording start latency"),
+            chart_panel("recording-start-lock-wait.svg", "Recording start row lock waits"),
+        ],
+        recording_failure_table(recording),
     )
+
+    split_section = category_section(
+        "notification-split-success",
+        "Category 3",
+        "녹음 시작과 알림 저장 분리 성공",
+        "알림 후처리를 제거하거나 격리한 B 구성에서는 풀 10에서도 동시 50 녹음 시작이 모두 성공했고 풀 대기 시간 초과가 발생하지 않았다.",
+        [
+            stat_card("Split 50", f"{int(split50['success'])}/{int(split50['requests'])}", "successful starts", GREEN),
+            stat_card("Split failure", str(int(split50["failure"])), "failed starts", GREEN),
+            stat_card("Max response", f"{fmt(split50['max_s'], 2)}s", "at concurrency 50", CYAN),
+            stat_card("Timeout logs", str(int(split50["timeout_logs"])), "Connection is not available", GREEN),
+        ],
+        [
+            chart_panel("notification-split-success-failure.svg", "Notification split success and failure"),
+            chart_panel("notification-split-latency.svg", "Notification split response latency"),
+            chart_panel("notification-split-timeouts.svg", "Notification split timeout logs"),
+        ],
+        success_case_table("알림 저장 분리 성공 상세", NOTIFICATION_SPLIT_RECORDING),
+    )
+
+    async_section = category_section(
+        "async-success",
+        "Category 4",
+        "@Async 적용 성공",
+        "@Async로 AFTER_COMMIT 후속 작업을 요청 Thread에서 분리하자 원본 Transaction cleanup이 먼저 진행되어 풀 10에서도 동시 50까지 모두 성공했다.",
+        [
+            stat_card("Async 50", f"{int(async50['success'])}/{int(async50['requests'])}", "successful starts", GREEN),
+            stat_card("Async failure", str(int(async50["failure"])), "failed starts", GREEN),
+            stat_card("Max response", f"{fmt(async50['max_s'], 2)}s", "at concurrency 50", CYAN),
+            stat_card("Timeout logs", str(int(async50["timeout_logs"])), "Connection is not available", GREEN),
+        ],
+        [
+            chart_panel("async-success-failure.svg", "Async success and failure"),
+            chart_panel("async-latency.svg", "Async response latency"),
+            chart_panel("async-timeouts.svg", "Async timeout logs"),
+        ],
+        success_case_table("@Async 적용 성공 상세", ASYNC_RECORDING),
+    )
+
+    sections = "\n".join([sse_section, recording_failure_section, split_section, async_section])
+
     body = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -452,6 +639,36 @@ def write_dashboard(recording: list[dict[str, float]], sse: list[dict[str, float
       margin: 0;
       color: var(--muted);
     }}
+    nav {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 18px 0 24px;
+    }}
+    nav a {{
+      color: var(--text);
+      text-decoration: none;
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 8px;
+      padding: 9px 12px;
+    }}
+    .category {{
+      margin: 22px 0 30px;
+      padding-top: 8px;
+    }}
+    .category-head {{
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 14px;
+    }}
+    .eyebrow {{
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }}
     .stats {{
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -474,7 +691,7 @@ def write_dashboard(recording: list[dict[str, float]], sse: list[dict[str, float
       font-size: 30px;
       font-weight: 700;
     }}
-    .grid {{
+    .chart-grid {{
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 14px;
@@ -494,6 +711,11 @@ def write_dashboard(recording: list[dict[str, float]], sse: list[dict[str, float
       padding: 18px;
     }}
     h2 {{
+      margin: 0 0 8px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }}
+    h3 {{
       margin: 0 0 14px;
       font-size: 17px;
     }}
@@ -517,7 +739,7 @@ def write_dashboard(recording: list[dict[str, float]], sse: list[dict[str, float
     }}
     @media (max-width: 980px) {{
       .stats,
-      .grid {{
+      .chart-grid {{
         grid-template-columns: 1fr;
       }}
       main {{
@@ -531,22 +753,17 @@ def write_dashboard(recording: list[dict[str, float]], sse: list[dict[str, float
     <header>
       <div>
         <h1>Issue 238 Load Test Dashboard</h1>
-        <p>Static Grafana-style view generated from k6 summaries, Actuator samples, Prometheus snapshots, and app log slices.</p>
+        <p>Four separated views: SSE success, original recording-start failure, notification split success, and @Async success.</p>
       </div>
-      <p>Source: load-test/issue-238/out</p>
+      <p>Source: out + after-commit-requires-new README</p>
     </header>
-    <section class="stats">
-      {cards}
-    </section>
-    <section class="grid">
-      <article class="panel"><img src="recording-start-success-failure.svg" alt="Recording start success and failure"></article>
-      <article class="panel"><img src="recording-start-hikari.svg" alt="Recording start Hikari connection pool"></article>
-      <article class="panel"><img src="recording-start-latency.svg" alt="Recording start latency"></article>
-      <article class="panel"><img src="sse-latency.svg" alt="SSE connection latency"></article>
-      <article class="panel"><img src="sse-success-failure.svg" alt="SSE connection success and failure"></article>
-      <article class="panel"><img src="recording-start-lock-wait.svg" alt="Recording start lock waits"></article>
-      {table_html(recording, sse)}
-    </section>
+    <nav>
+      <a href="#sse-success">SSE 연결 성공</a>
+      <a href="#recording-failure">녹음 시작 실패</a>
+      <a href="#notification-split-success">알림 저장 분리 성공</a>
+      <a href="#async-success">@Async 성공</a>
+    </nav>
+    {sections}
   </main>
 </body>
 </html>
@@ -635,6 +852,78 @@ def main() -> None:
             ("failure", [row["failure"] for row in sse], RED),
         ],
         CHART_DIR / "sse-success-failure.svg",
+    )
+
+    split_labels = [str(row["stage"]) for row in NOTIFICATION_SPLIT_RECORDING]
+    stacked_bar_chart(
+        "Notification Split: Success vs Failure",
+        "With notification follow-up removed or isolated, recording start succeeded through 50 concurrent requests.",
+        split_labels,
+        [
+            ("success", [row["success"] for row in NOTIFICATION_SPLIT_RECORDING], GREEN),
+            ("failure", [row["failure"] for row in NOTIFICATION_SPLIT_RECORDING], RED),
+        ],
+        CHART_DIR / "notification-split-success-failure.svg",
+    )
+
+    line_chart(
+        "Notification Split: Max Response Time",
+        "The 30s connection wait disappeared; max response time stayed under 1 second at concurrency 50.",
+        split_labels,
+        [
+            ("max", [row["max_s"] for row in NOTIFICATION_SPLIT_RECORDING], CYAN),
+        ],
+        CHART_DIR / "notification-split-latency.svg",
+        y_max=1.2,
+        unit="s",
+        value_digits=2,
+    )
+
+    line_chart(
+        "Notification Split: Pool Timeout Logs",
+        "Connection acquisition timeout logs stayed at zero in every stage.",
+        split_labels,
+        [
+            ("timeout logs", [row["timeout_logs"] for row in NOTIFICATION_SPLIT_RECORDING], GREEN),
+        ],
+        CHART_DIR / "notification-split-timeouts.svg",
+        y_max=1,
+    )
+
+    async_labels = [str(row["stage"]) for row in ASYNC_RECORDING]
+    stacked_bar_chart(
+        "@Async: Success vs Failure",
+        "With AFTER_COMMIT listeners moved off the request thread, recording start succeeded through 50 concurrent requests.",
+        async_labels,
+        [
+            ("success", [row["success"] for row in ASYNC_RECORDING], GREEN),
+            ("failure", [row["failure"] for row in ASYNC_RECORDING], RED),
+        ],
+        CHART_DIR / "async-success-failure.svg",
+    )
+
+    line_chart(
+        "@Async: Max Response Time",
+        "The original transaction can clean up first, so max response time stayed near sub-second levels.",
+        async_labels,
+        [
+            ("max", [row["max_s"] for row in ASYNC_RECORDING], CYAN),
+        ],
+        CHART_DIR / "async-latency.svg",
+        y_max=1.2,
+        unit="s",
+        value_digits=2,
+    )
+
+    line_chart(
+        "@Async: Pool Timeout Logs",
+        "Connection acquisition timeout logs stayed at zero after async separation.",
+        async_labels,
+        [
+            ("timeout logs", [row["timeout_logs"] for row in ASYNC_RECORDING], GREEN),
+        ],
+        CHART_DIR / "async-timeouts.svg",
+        y_max=1,
     )
 
     write_dashboard(recording, sse)
