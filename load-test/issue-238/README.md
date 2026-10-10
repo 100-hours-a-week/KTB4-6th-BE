@@ -200,3 +200,21 @@ Summarize:
 ```bash
 ./load-test/issue-238/scripts/summarize-recording-start-results.sh
 ```
+
+## Static Dashboard
+
+Generate Grafana-style static charts from the saved k6 summaries, Actuator samples, Prometheus snapshots, and app log slices:
+
+```bash
+./load-test/issue-238/scripts/render-dashboard.py
+```
+
+Generated files:
+
+- `load-test/issue-238/out/charts/dashboard.html`
+- `load-test/issue-238/out/charts/recording-start-success-failure.svg`
+- `load-test/issue-238/out/charts/recording-start-hikari.svg`
+- `load-test/issue-238/out/charts/recording-start-latency.svg`
+- `load-test/issue-238/out/charts/recording-start-lock-wait.svg`
+- `load-test/issue-238/out/charts/sse-latency.svg`
+- `load-test/issue-238/out/charts/sse-success-failure.svg`
