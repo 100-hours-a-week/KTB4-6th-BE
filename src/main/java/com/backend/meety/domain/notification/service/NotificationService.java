@@ -37,10 +37,10 @@ public class NotificationService {
     private static final int MIN_PAGE_SIZE = 1;
     private static final int MAX_PAGE_SIZE = 50;
 
-    private static final String NEW_JOINED_MEMBER_BODY_FORMAT = "%s 님이 팀에 합류했습니다";
-    private static final String NEW_EXISTING_MEMBER_JOINED_BODY_FORMAT = "%s 님이 팀에 합류했습니다";
-    private static final String REJOIN_JOINED_MEMBER_BODY_FORMAT = "%s 님이 팀에 합류했습니다";
-    private static final String REJOIN_EXISTING_MEMBER_JOINED_BODY_FORMAT = "%s 님이 팀에 다시 합류했습니다";
+    private static final String NEW_JOINED_MEMBER_BODY_FORMAT = "%s 님, 팀에 오신 걸 환영해요!";
+    private static final String NEW_EXISTING_MEMBER_JOINED_BODY_FORMAT = "%s 님이 팀에 합류했어요!";
+    private static final String REJOIN_JOINED_MEMBER_BODY_FORMAT = "%s 님, 다시 오신 걸 환영해요!";
+    private static final String REJOIN_EXISTING_MEMBER_JOINED_BODY_FORMAT = "%s 님이 팀에 다시 합류했어요!";
 
     private final TeamMemberRepository teamMemberRepository;
     private final NotificationWriter notificationWriter;

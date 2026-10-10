@@ -182,10 +182,10 @@ class NotificationServiceTest {
         assertThat(newExistingBody).isEqualTo(service.newExistingMemberJoinedBody("hoon"));
         assertThat(rejoinedBody).isEqualTo(service.rejoinedMemberBody("hoon"));
         assertThat(rejoinedExistingBody).isEqualTo(service.rejoinedExistingMemberJoinedBody("hoon"));
-        assertThat(newJoinedBody).isEqualTo("hoon 님이 팀에 합류했습니다");
-        assertThat(newExistingBody).isEqualTo("hoon 님이 팀에 합류했습니다");
-        assertThat(rejoinedBody).isEqualTo("hoon 님이 팀에 합류했습니다");
-        assertThat(rejoinedExistingBody).isEqualTo("hoon 님이 팀에 다시 합류했습니다");
+        assertThat(newJoinedBody).isEqualTo("hoon 님, 팀에 오신 걸 환영해요!");
+        assertThat(newExistingBody).isEqualTo("hoon 님이 팀에 합류했어요!");
+        assertThat(rejoinedBody).isEqualTo("hoon 님, 다시 오신 걸 환영해요!");
+        assertThat(rejoinedExistingBody).isEqualTo("hoon 님이 팀에 다시 합류했어요!");
     }
 
     @Test
