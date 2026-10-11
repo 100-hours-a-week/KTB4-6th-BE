@@ -72,6 +72,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.tag.outputs.value }}
+      # V2 배포는 태그 대신 바뀌지 않는 digest로 이미지를 고정한다.
+      image_digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: 소스 코드 체크아웃
         uses: actions/checkout@v4
@@ -89,6 +91,7 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: BE 이미지 빌드 및 게시
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -107,18 +110,13 @@ jobs:
       pull-requests: read
     outputs:
       is_migration: ${{ steps.check.outputs.is_migration }}
+      v2_migration: ${{ steps.check.outputs.v2_migration }}
     steps:
       - name: PR 마이그레이션 라벨 확인
         id: check
         uses: actions/github-script@v7
         with:
           script: |
-            // 스테이징에는 운영 DB 마이그레이션 승인 절차를 적용하지 않는다.
-            if (context.ref !== 'refs/heads/main') {
-              core.setOutput('is_migration', 'false');
-              return;
-            }
-
             const label = '📊 migration';
             const { owner, repo } = context.repo;
             const { data: prs } =
@@ -146,7 +144,10 @@ jobs:
               }
             }
 
-            core.setOutput('is_migration', String(hasLabel));
+            // V1 스테이징에는 운영 DB 마이그레이션 승인 절차를 적용하지 않는다.
+            core.setOutput('is_migration', String(context.ref === 'refs/heads/main' && hasLabel));
+            // V2 staging은 dev에서도 라벨이 있으면 승인 후 배포한다.
+            core.setOutput('v2_migration', String(hasLabel));
 
   deploy:
     name: BE EC2 배포
@@ -261,6 +262,153 @@ jobs:
             echo "::error::SSM 배포 실패 (status=$STATUS)"
             exit 1
           }
+
+  deploy-v2-staging:
+    name: BE V2 staging ECS 배포
+    needs: [docker-build, check-migration-label]
+    # V1 dev 배포와 별개로 실행한다. 저장소 변수로 켜고 끈다 (리허설 등으로 배포를 멈출 때 false).
+    if: ${{ github.ref_name == 'dev' && vars.V2_STAGING_DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # migration 라벨 PR은 승인 환경에서 대기한다. 승인 전에 staging DB 스키마를 먼저 맞춘다.
+    environment:
+      name: ${{ needs.check-migration-label.outputs.v2_migration == 'true' && 'v2-staging-migration-approval' || 'v2-staging' }}
+
+    permissions:
+      id-token: write
+      contents: read
+
+    concurrency:
+      group: deploy-backend-v2-staging
+      cancel-in-progress: false
+
+    env:
+      AWS_REGION: ap-northeast-2
+      CLUSTER: meety-v2-staging
+      REALTIME_SERVICE: meety-v2-staging-be-realtime
+      API_SERVICE: meety-v2-staging-be-api
+      # Terraform이 관리하는 태스크 정의. 이 정의에서 이미지만 바꿔 등록한다.
+      TEMPLATE_PARAM: /meety/staging/be/deploy/TASK_TEMPLATE_ARN
+      IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/meety-be@${{ needs.docker-build.outputs.image_digest }}
+      HEALTH_URL: https://api-staging.meety.io.kr/actuator/health
+
+    steps:
+      - name: 배포 설정 확인
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          IMAGE_DIGEST: ${{ needs.docker-build.outputs.image_digest }}
+        run: |
+          echo "::notice::BE V2 staging 배포 대상: image=${IMAGE}"
+          [ -n "$AWS_ROLE_ARN" ] || { echo "::error::AWS_ROLE_ARN 누락"; exit 1; }
+          [ -n "$IMAGE_DIGEST" ] || { echo "::error::이미지 digest 누락"; exit 1; }
+
+      - name: AWS 인증
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-be-v2-deploy-${{ github.run_id }}
+          role-skip-session-tagging: true
+
+      - name: 새 태스크 정의 등록
+        id: register
+        run: |
+          TEMPLATE=$(aws ssm get-parameter --name "$TEMPLATE_PARAM" --query Parameter.Value --output text)
+          echo "기준 태스크 정의: ${TEMPLATE##*/}"
+
+          # 이미지만 바꾸고, 등록할 때 쓸 수 없는 조회 전용 필드는 뺀다.
+          aws ecs describe-task-definition --task-definition "$TEMPLATE" --query taskDefinition --output json \
+            | jq --arg image "$IMAGE" --arg sha "$GITHUB_SHA" '
+                .containerDefinitions |= map(if .name == "be" then .image = $image else . end)
+                | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities,
+                      .registeredAt, .registeredBy, .deregisteredAt)
+                | .tags = [
+                    {key: "Service", value: "meety"},
+                    {key: "Project", value: "meety"},
+                    {key: "Version", value: "v2"},
+                    {key: "Env", value: "staging"},
+                    {key: "ManagedBy", value: "github-actions"},
+                    {key: "GitSha", value: $sha}
+                  ]' > task-definition.json
+
+          ARN=$(aws ecs register-task-definition --cli-input-json file://task-definition.json \
+            --query taskDefinition.taskDefinitionArn --output text)
+          echo "task_definition=$ARN" >> "$GITHUB_OUTPUT"
+          echo "::notice::새 태스크 정의: ${ARN##*/}"
+
+      - name: 배포 대기 스크립트 준비
+        run: |
+          # 서비스 배포를 시작하고, 끝날 조건이 될 때까지 상태를 확인한다.
+          # 사용법: deploy.sh <서비스> <태스크 정의> <성공으로 볼 단계(공백 구분)>
+          cat > "$RUNNER_TEMP/deploy.sh" <<'EOF'
+          #!/bin/bash
+          set -euo pipefail
+          SERVICE=$1 TASK_DEFINITION=$2 DONE_STAGES=$3
+          STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "$TASK_DEFINITION" > /dev/null
+
+          # 이번 update-service로 생긴 배포를 찾는다.
+          DEPLOYMENT=""
+          for i in $(seq 1 30); do
+            DEPLOYMENT=$(aws ecs list-service-deployments --cluster "$CLUSTER" --service "$SERVICE" \
+              --created-at "after=$STARTED" --query 'serviceDeployments[0].serviceDeploymentArn' --output text)
+            [ "$DEPLOYMENT" != "None" ] && [ -n "$DEPLOYMENT" ] && break
+            sleep 5
+          done
+          [ "$DEPLOYMENT" != "None" ] && [ -n "$DEPLOYMENT" ] || { echo "::error::${SERVICE} 배포를 찾지 못함"; exit 1; }
+          echo "${SERVICE} 배포: ${DEPLOYMENT##*/}"
+
+          LAST=""
+          while :; do
+            read -r STATUS STAGE < <(aws ecs describe-service-deployments --service-deployment-arns "$DEPLOYMENT" \
+              --query 'serviceDeployments[0].[status, lifecycleStage]' --output text)
+            [ "$STATUS $STAGE" != "$LAST" ] && { echo "$(date +%T) ${SERVICE}: ${STATUS} ${STAGE}"; LAST="$STATUS $STAGE"; }
+            case "$STATUS" in
+              SUCCESSFUL) exit 0 ;;
+              FAILED|STOPPED|STOP_REQUESTED|ROLLBACK_*)
+                echo "::error::${SERVICE} 배포 실패 (${STATUS}). ECS가 이전 버전으로 되돌린다"; exit 1 ;;
+            esac
+            for done_stage in $DONE_STAGES; do
+              [ "$STAGE" = "$done_stage" ] && exit 0
+            done
+            sleep 10
+          done
+          EOF
+          chmod +x "$RUNNER_TEMP/deploy.sh"
+
+      # 블루/그린: 새 버전이 헬스체크를 통과하고 트래픽이 넘어가면(BAKE_TIME) 성공으로 본다.
+      # 이전 버전은 관찰 시간(95분) 동안 기존 녹음 WebSocket과 SSE 연결을 계속 처리한 뒤 ECS가 정리한다.
+      - name: be-realtime 배포 (블루/그린)
+        run: |
+          "$RUNNER_TEMP/deploy.sh" "$REALTIME_SERVICE" "${{ steps.register.outputs.task_definition }}" "BAKE_TIME CLEAN_UP"
+
+      # 롤링: 새 태스크가 헬스체크를 통과한 뒤 기존 태스크를 내린다. 배포가 끝날 때까지 기다린다.
+      - name: be-api 배포 (롤링)
+        run: |
+          "$RUNNER_TEMP/deploy.sh" "$API_SERVICE" "${{ steps.register.outputs.task_definition }}" ""
+
+      - name: 배포 결과 확인
+        run: |
+          for svc in "$REALTIME_SERVICE" "$API_SERVICE"; do
+            echo "$svc: $(aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
+              --query 'services[0].[runningCount, desiredCount]' --output text)"
+          done
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL")
+          echo "be-api health: $CODE"
+          [ "$CODE" = "200" ] || { echo "::error::be-api health 실패 ($CODE)"; exit 1; }
+
+      - name: Discord 실패 알림
+        if: failure()
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "$WEBHOOK_URL" ] || exit 0
+          jq -n --arg repo "$GITHUB_REPOSITORY" --arg branch "$GITHUB_REF_NAME" --arg url "$RUN_URL" \
+            '{content: ("❌ [BE V2 staging 배포 실패] " + $repo + "\nBranch: " + $branch + "\n" + $url)}' \
+            | curl --fail --silent --show-error -H "Content-Type: application/json" --data-binary @- "$WEBHOOK_URL"
 
   notify-failure:
     name: BE 실패 알림
