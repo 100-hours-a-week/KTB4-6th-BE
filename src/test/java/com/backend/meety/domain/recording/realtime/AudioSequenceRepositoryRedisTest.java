@@ -2,6 +2,7 @@ package com.backend.meety.domain.recording.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.backend.meety.domain.recording.owner.RecordingRedisKeys;
 import java.time.Duration;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.AfterEach;
@@ -59,6 +60,6 @@ class AudioSequenceRepositoryRedisTest {
     }
 
     private String sequenceKey() {
-        return AudioSequenceRepository.sequenceKey(RECORDING_SESSION_ID);
+        return RecordingRedisKeys.sequence(RECORDING_SESSION_ID);
     }
 }

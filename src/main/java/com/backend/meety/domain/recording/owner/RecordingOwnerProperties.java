@@ -5,6 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "recording.owner")
 public record RecordingOwnerProperties(
-        Duration ttl
+        Duration ttl,
+        Duration heartbeatInterval
 ) {
 }

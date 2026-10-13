@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnection;
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionRegistry;
@@ -59,7 +60,56 @@ class RecordingOwnerServiceTest {
         assertThat(connection.owner()).isEqualTo("server-a:0");
     }
 
+    @Test
+    @DisplayName("heartbeat는 Owner를 보관한 열린 AI 연결만 갱신한다")
+    void refreshesOnlyOpenConnectionsWithOwner() {
+        AiLiveMeetingConnection owned = connection(88L);
+        owned.assignOwner("server-a:1");
+        AiLiveMeetingConnection withoutOwner = connection(89L);
+        AiLiveMeetingConnection closed = connection(90L);
+        closed.assignOwner("server-a:2");
+        closed.close();
+        aiConnectionRegistry.reserve(owned);
+        aiConnectionRegistry.reserve(withoutOwner);
+        aiConnectionRegistry.reserve(closed);
+
+        ownerService.refreshOwners();
+
+        verify(ownerRepository).refreshIfOwner(88L, "server-a:1");
+        verifyNoMoreInteractions(ownerRepository);
+    }
+
+    @Test
+    @DisplayName("한 녹음의 갱신이 실패해도 나머지 녹음은 계속 갱신한다")
+    void continuesRefreshWhenOneFails() {
+        AiLiveMeetingConnection first = connection(88L);
+        first.assignOwner("server-a:1");
+        AiLiveMeetingConnection second = connection(89L);
+        second.assignOwner("server-a:2");
+        aiConnectionRegistry.reserve(first);
+        aiConnectionRegistry.reserve(second);
+        doThrow(new RedisConnectionFailureException("down")).when(ownerRepository).refreshIfOwner(88L, "server-a:1");
+
+        ownerService.refreshOwners();
+
+        verify(ownerRepository).refreshIfOwner(89L, "server-a:2");
+    }
+
+    @Test
+    @DisplayName("Owner 해제는 자신의 Owner 값으로 조건부 삭제를 요청하고 Redis 오류는 전파하지 않는다")
+    void releasesWithOwnValue() {
+        doThrow(new RedisConnectionFailureException("down")).when(ownerRepository).deleteIfOwner(88L, "server-a:1");
+
+        ownerService.release(88L, "server-a:1");
+
+        verify(ownerRepository).deleteIfOwner(88L, "server-a:1");
+    }
+
     private AiLiveMeetingConnection connection() {
-        return new AiLiveMeetingConnection(88L, 42L, AudioFormat.WEBM_OPUS, "start-1");
+        return connection(88L);
+    }
+
+    private AiLiveMeetingConnection connection(Long recordingSessionId) {
+        return new AiLiveMeetingConnection(recordingSessionId, 42L, AudioFormat.WEBM_OPUS, "start-1");
     }
 }

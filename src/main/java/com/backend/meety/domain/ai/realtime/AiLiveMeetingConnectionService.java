@@ -2,6 +2,7 @@ package com.backend.meety.domain.ai.realtime;
 
 import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
+import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.net.URI;
@@ -29,10 +30,18 @@ public class AiLiveMeetingConnectionService {
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final TranscriptService transcriptService;
+    private final RecordingOwnerService ownerService;
 
     void notifyTranscriptFinalized(AiLiveMeetingConnection connection) {
         eventPublisher.publishEvent(new MeetingTranscriptFinalizedEvent(
                 connection.meetingId(), connection.recordingSessionId()));
+        releaseOwner(connection);
+    }
+
+    private void releaseOwner(AiLiveMeetingConnection connection) {
+        if (connection.owner() != null) {
+            ownerService.release(connection.recordingSessionId(), connection.owner());
+        }
     }
 
     void markReady(AiLiveMeetingConnection connection) {
