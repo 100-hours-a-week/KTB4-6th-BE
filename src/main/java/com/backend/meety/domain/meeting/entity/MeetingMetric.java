@@ -40,4 +40,19 @@ public class MeetingMetric extends BaseEntity {
 
     @Column(name = "speech_balance_score", precision = 5, scale = 2, columnDefinition = "DECIMAL(5,2)")
     private BigDecimal speechBalanceScore;
+
+    @Column(name = "context_out_duration_ms")
+    private Long contextOutDurationMs;
+
+    private MeetingMetric(AiRequest aiRequest, Meeting meeting, String metrics, Long contextOutDurationMs) {
+        this.aiRequest = aiRequest;
+        this.meeting = meeting;
+        this.metrics = metrics;
+        this.contextOutDurationMs = contextOutDurationMs;
+    }
+
+    public static MeetingMetric create(
+            AiRequest aiRequest, Meeting meeting, String metrics, Long contextOutDurationMs) {
+        return new MeetingMetric(aiRequest, meeting, metrics, contextOutDurationMs);
+    }
 }

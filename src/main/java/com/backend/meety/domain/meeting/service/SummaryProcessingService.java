@@ -3,6 +3,7 @@ package com.backend.meety.domain.meeting.service;
 import com.backend.meety.domain.ai.client.SummaryAiRequest;
 import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
+import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
@@ -11,6 +12,7 @@ import com.backend.meety.domain.credit.entity.CreditTransactionType;
 import com.backend.meety.domain.credit.entity.TeamCredit;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
+import com.backend.meety.domain.meeting.MetricPolicy;
 import com.backend.meety.domain.meeting.SummaryPolicy;
 import com.backend.meety.domain.meeting.entity.MeetingSummary;
 import com.backend.meety.domain.meeting.event.SummaryReadyEvent;
@@ -19,6 +21,7 @@ import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,6 +60,7 @@ public class SummaryProcessingService {
         MeetingSummary summary = meetingSummaryRepository.findByAiRequestId(aiRequestId).orElseThrow();
         summary.complete(content);
         aiRequest.markCompleted();
+        registerMetricRequest(summary, aiRequest);
         if (!SummaryPolicy.isFirstSummaryIdempotencyKey(
                 summary.getMeeting().getId(), aiRequest.getIdempotencyKey())) {
             eventPublisher.publishEvent(new SummaryReadyEvent(
@@ -94,6 +98,20 @@ public class SummaryProcessingService {
         restoreCreditIfCharged(aiRequest);
         log.error("AI 요약 호출이 최종 실패했습니다. aiRequestId={}, retryCount={}",
                 aiRequest.getId(), aiRequest.getRetryCount());
+    }
+
+    private void registerMetricRequest(MeetingSummary summary, AiRequest summaryRequest) {
+        String idempotencyKey = MetricPolicy.idempotencyKey(summary.getId());
+        if (aiRequestRepository.findByIdempotencyKey(idempotencyKey).isPresent()) {
+            return;
+        }
+        try {
+            aiRequestRepository.save(AiRequest.create(
+                    summary.getTeam(), summaryRequest.getTeamMember(), idempotencyKey, AiRequestType.METRIC));
+        } catch (DataIntegrityViolationException e) {
+            log.warn("Metric 요청이 이미 등록되어 건너뜁니다. summaryId={}, idempotencyKey={}",
+                    summary.getId(), idempotencyKey, e);
+        }
     }
 
     private void restoreCreditIfCharged(AiRequest aiRequest) {
