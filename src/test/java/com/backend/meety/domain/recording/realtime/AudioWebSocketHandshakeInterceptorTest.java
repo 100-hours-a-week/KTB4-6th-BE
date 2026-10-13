@@ -29,8 +29,9 @@ class AudioWebSocketHandshakeInterceptorTest {
     private final AudioWebSocketRegistry registry = new AudioWebSocketRegistry();
     private final AiLiveMeetingConnectionService aiConnectionService = mock(AiLiveMeetingConnectionService.class);
     private final RecordingOwnerService ownerService = mock(RecordingOwnerService.class);
+    private final AudioSequenceRepository sequenceRepository = mock(AudioSequenceRepository.class);
     private final AudioWebSocketHandshakeInterceptor interceptor = new AudioWebSocketHandshakeInterceptor(
-            authentication, accessService, registry, aiConnectionService, ownerService);
+            authentication, accessService, registry, aiConnectionService, ownerService, sequenceRepository);
 
     @Test
     void unsupportedAudioFormatRejectsHandshakeBeforeAiSessionStartCanRun() {
@@ -122,6 +123,61 @@ class AudioWebSocketHandshakeInterceptorTest {
         assertThat(result).isFalse();
         assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         verify(aiConnectionService, never()).closeConnection(88L);
+    }
+
+    @Test
+    @DisplayName("Owner를 기록한 뒤 Redis 순번이 메모리보다 크면 Redis 순번으로 올린다")
+    void restoresLargerSequenceFromRedis() {
+        ServerHttpRequest request = givenValidHandshake();
+        org.mockito.Mockito.when(ownerService.register(88L)).thenReturn(true);
+        org.mockito.Mockito.when(sequenceRepository.find(88L)).thenReturn(OptionalLong.of(1500L));
+        registry.streamState(88L).markProcessed(900L);
+
+        boolean result = interceptor.beforeHandshake(
+                request, new TestServerHttpResponse(), mock(WebSocketHandler.class), new HashMap<>());
+
+        assertThat(result).isTrue();
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isEqualTo(1500L);
+    }
+
+    @Test
+    @DisplayName("메모리 순번이 Redis보다 크면 메모리 순번을 유지한다")
+    void keepsLargerMemorySequence() {
+        ServerHttpRequest request = givenValidHandshake();
+        org.mockito.Mockito.when(ownerService.register(88L)).thenReturn(true);
+        org.mockito.Mockito.when(sequenceRepository.find(88L)).thenReturn(OptionalLong.of(1490L));
+        registry.streamState(88L).markProcessed(1500L);
+
+        interceptor.beforeHandshake(request, new TestServerHttpResponse(), mock(WebSocketHandler.class), new HashMap<>());
+
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isEqualTo(1500L);
+    }
+
+    @Test
+    @DisplayName("Redis 순번 조회에 실패해도 메모리 순번으로 연결을 승인한다")
+    void approvesWithMemorySequenceWhenRedisFails() {
+        ServerHttpRequest request = givenValidHandshake();
+        org.mockito.Mockito.when(ownerService.register(88L)).thenReturn(true);
+        org.mockito.Mockito.when(sequenceRepository.find(88L))
+                .thenThrow(new org.springframework.data.redis.RedisConnectionFailureException("down"));
+        registry.streamState(88L).markProcessed(700L);
+
+        boolean result = interceptor.beforeHandshake(
+                request, new TestServerHttpResponse(), mock(WebSocketHandler.class), new HashMap<>());
+
+        assertThat(result).isTrue();
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isEqualTo(700L);
+    }
+
+    @Test
+    @DisplayName("Owner 기록에 실패하면 Redis 순번을 조회하지 않는다")
+    void doesNotReadSequenceWhenOwnerCannotRegister() {
+        ServerHttpRequest request = givenValidHandshake();
+        org.mockito.Mockito.when(ownerService.register(88L)).thenReturn(false);
+
+        interceptor.beforeHandshake(request, new TestServerHttpResponse(), mock(WebSocketHandler.class), new HashMap<>());
+
+        verify(sequenceRepository, never()).find(88L);
     }
 
     private ServerHttpRequest givenValidHandshake() {

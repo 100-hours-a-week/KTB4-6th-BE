@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.OptionalLong;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
@@ -29,6 +30,7 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
     private final AudioWebSocketRegistry registry;
     private final AiLiveMeetingConnectionService aiConnectionService;
     private final RecordingOwnerService ownerService;
+    private final AudioSequenceRepository sequenceRepository;
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
@@ -52,6 +54,7 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
                 rejectWithoutOwner(recordingSessionId, reusingAiConnection, response);
                 return false;
             }
+            restoreSequence(recordingSessionId);
             attributes.put(CONTEXT_ATTRIBUTE, context.withStreamEpoch(streamEpoch.getAsLong()));
             log.info("Audio WebSocket 핸드셰이크를 승인했습니다. recordingSessionId={}, meetingId={}, openSessions={}",
                     recordingSessionId, context.meetingId(), registry.count());
@@ -85,6 +88,24 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
         log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. recordingSessionId={}, reason=owner not registered",
                 recordingSessionId);
         response.setStatusCode(HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    private void restoreSequence(Long recordingSessionId) {
+        OptionalLong sequence;
+        try {
+            sequence = sequenceRepository.find(recordingSessionId);
+        } catch (DataAccessException e) {
+            log.warn("오디오 복구 순번 조회에 실패해 메모리 순번으로 진행합니다. recordingSessionId={}",
+                    recordingSessionId, e);
+            return;
+        }
+        if (sequence.isEmpty()) {
+            return;
+        }
+        AudioStreamState state = registry.streamState(recordingSessionId);
+        synchronized (state) {
+            state.restore(sequence.getAsLong());
+        }
     }
 
     private Long extractRecordingSessionId(URI uri) {

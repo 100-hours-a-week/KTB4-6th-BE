@@ -23,6 +23,10 @@ public class AudioStreamState {
         return true;
     }
 
+    public void restore(long sequence) {
+        lastProcessedSequence = Math.max(lastProcessedSequence, sequence);
+    }
+
     public long lastProcessedSequence() {
         return lastProcessedSequence;
     }
