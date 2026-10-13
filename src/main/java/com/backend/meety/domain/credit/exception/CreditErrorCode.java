@@ -11,7 +11,11 @@ public enum CreditErrorCode implements BaseCode {
 
     INSUFFICIENT_CREDIT(HttpStatus.CONFLICT, "INSUFFICIENT_CREDIT", "크레딧이 부족합니다."),
     TEAM_CREDIT_NOT_FOUND(HttpStatus.INTERNAL_SERVER_ERROR, "TEAM_CREDIT_NOT_FOUND", "팀 크레딧 정보를 찾을 수 없습니다."),
-    CREDIT_LOOKUP_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "CREDIT_LOOKUP_FAILED", "크레딧 정보를 조회하지 못했습니다.");
+    CREDIT_LOOKUP_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "CREDIT_LOOKUP_FAILED", "크레딧 정보를 조회하지 못했습니다."),
+    INVALID_CURSOR(HttpStatus.BAD_REQUEST, "INVALID_CURSOR", "페이지 요청 정보를 확인해주세요."),
+    INVALID_PAGE_SIZE(HttpStatus.BAD_REQUEST, "INVALID_PAGE_SIZE", "페이지 크기를 확인해주세요."),
+    CREDIT_LEDGER_LOOKUP_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "CREDIT_LEDGER_LOOKUP_FAILED",
+            "크레딧 원장을 조회하지 못했습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;
