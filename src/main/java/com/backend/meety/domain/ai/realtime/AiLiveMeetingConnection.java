@@ -32,6 +32,7 @@ public class AiLiveMeetingConnection {
     private volatile AiLiveMeetingConnectionState stateBeforeReset;
     private long streamEpoch;
     private volatile ScheduledFuture<?> stopTimeoutFuture;
+    private volatile String owner;
 
     public AiLiveMeetingConnection(Long recordingSessionId, Long meetingId,
                                    AudioFormat audioFormat, String sessionStartRequestId) {
@@ -70,6 +71,14 @@ public class AiLiveMeetingConnection {
 
     public synchronized AiLiveMeetingConnectionState state() {
         return state;
+    }
+
+    public String owner() {
+        return owner;
+    }
+
+    public void assignOwner(String owner) {
+        this.owner = owner;
     }
 
     public void attach(WebSocketSession webSocketSession) {

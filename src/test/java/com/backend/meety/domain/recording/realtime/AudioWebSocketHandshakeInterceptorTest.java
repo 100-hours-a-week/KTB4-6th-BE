@@ -2,11 +2,13 @@ package com.backend.meety.domain.recording.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionService;
 import com.backend.meety.domain.ai.realtime.AudioFormat;
+import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.global.security.WebSocketCookieAuthentication;
 import java.net.URI;
 import java.util.HashMap;
@@ -26,8 +28,9 @@ class AudioWebSocketHandshakeInterceptorTest {
     private final AudioWebSocketAccessService accessService = mock(AudioWebSocketAccessService.class);
     private final AudioWebSocketRegistry registry = new AudioWebSocketRegistry();
     private final AiLiveMeetingConnectionService aiConnectionService = mock(AiLiveMeetingConnectionService.class);
-    private final AudioWebSocketHandshakeInterceptor interceptor =
-            new AudioWebSocketHandshakeInterceptor(authentication, accessService, registry, aiConnectionService);
+    private final RecordingOwnerService ownerService = mock(RecordingOwnerService.class);
+    private final AudioWebSocketHandshakeInterceptor interceptor = new AudioWebSocketHandshakeInterceptor(
+            authentication, accessService, registry, aiConnectionService, ownerService);
 
     @Test
     void unsupportedAudioFormatRejectsHandshakeBeforeAiSessionStartCanRun() {
@@ -53,6 +56,7 @@ class AudioWebSocketHandshakeInterceptorTest {
         org.mockito.Mockito.when(authentication.authenticate(request)).thenReturn(7L);
         org.mockito.Mockito.when(accessService.validate(7L, 88L, AudioFormat.WEBM_OPUS)).thenReturn(context);
         org.mockito.Mockito.when(aiConnectionService.prepareStream(context)).thenReturn(OptionalLong.of(2L));
+        org.mockito.Mockito.when(ownerService.register(88L)).thenReturn(true);
         WebSocketSession previous = mock(WebSocketSession.class);
         registry.replace(88L, previous);
         Map<String, Object> attributes = new HashMap<>();
@@ -66,6 +70,7 @@ class AudioWebSocketHandshakeInterceptorTest {
         AudioWebSocketContext stored =
                 (AudioWebSocketContext) attributes.get(AudioWebSocketHandshakeInterceptor.CONTEXT_ATTRIBUTE);
         assertThat(stored.streamEpoch()).isEqualTo(2L);
+        verify(ownerService).register(88L);
     }
 
     @Test
@@ -83,6 +88,49 @@ class AudioWebSocketHandshakeInterceptorTest {
 
         assertThat(result).isFalse();
         assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        verify(ownerService, never()).register(88L);
+    }
+
+    @Test
+    @DisplayName("Owner 기록에 실패하면 이번 시도에서 만든 AI 연결을 정리하고 503으로 거절한다")
+    void closesNewAiConnectionWhenOwnerCannotRegister() {
+        ServerHttpRequest request = givenValidHandshake();
+        org.mockito.Mockito.when(aiConnectionService.hasOpenConnection(88L)).thenReturn(false);
+        org.mockito.Mockito.when(ownerService.register(88L)).thenReturn(false);
+        TestServerHttpResponse response = new TestServerHttpResponse();
+        Map<String, Object> attributes = new HashMap<>();
+
+        boolean result = interceptor.beforeHandshake(request, response, mock(WebSocketHandler.class), attributes);
+
+        assertThat(result).isFalse();
+        assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(attributes).isEmpty();
+        verify(aiConnectionService).closeConnection(88L);
+    }
+
+    @Test
+    @DisplayName("Owner 기록에 실패해도 재사용한 AI 연결은 정리하지 않는다")
+    void keepsReusedAiConnectionWhenOwnerCannotRegister() {
+        ServerHttpRequest request = givenValidHandshake();
+        org.mockito.Mockito.when(aiConnectionService.hasOpenConnection(88L)).thenReturn(true);
+        org.mockito.Mockito.when(ownerService.register(88L)).thenReturn(false);
+        TestServerHttpResponse response = new TestServerHttpResponse();
+
+        boolean result = interceptor.beforeHandshake(
+                request, response, mock(WebSocketHandler.class), new HashMap<>());
+
+        assertThat(result).isFalse();
+        assertThat(response.statusCode).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        verify(aiConnectionService, never()).closeConnection(88L);
+    }
+
+    private ServerHttpRequest givenValidHandshake() {
+        ServerHttpRequest request = request("ws://localhost/ws/v1/recordings/88/audio?audioFormat=webm_opus");
+        AudioWebSocketContext context = new AudioWebSocketContext(7L, 42L, 88L, AudioFormat.WEBM_OPUS);
+        org.mockito.Mockito.when(authentication.authenticate(request)).thenReturn(7L);
+        org.mockito.Mockito.when(accessService.validate(7L, 88L, AudioFormat.WEBM_OPUS)).thenReturn(context);
+        org.mockito.Mockito.when(aiConnectionService.prepareStream(context)).thenReturn(OptionalLong.of(0L));
+        return request;
     }
 
     @Test
