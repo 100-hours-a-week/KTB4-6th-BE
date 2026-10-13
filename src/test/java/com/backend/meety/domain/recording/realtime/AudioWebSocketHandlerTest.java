@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -33,8 +35,9 @@ class AudioWebSocketHandlerTest {
 
     private final AudioWebSocketRegistry registry = new AudioWebSocketRegistry();
     private final AiLiveMeetingConnectionService aiConnectionService = mock(AiLiveMeetingConnectionService.class);
+    private final AudioSequenceRepository sequenceRepository = mock(AudioSequenceRepository.class);
     private final AudioWebSocketHandler handler =
-            new AudioWebSocketHandler(registry, aiConnectionService, new ObjectMapper());
+            new AudioWebSocketHandler(registry, aiConnectionService, sequenceRepository, new ObjectMapper());
 
     @BeforeEach
     void aiConnectionIsStreamable() {
@@ -166,6 +169,47 @@ class AudioWebSocketHandlerTest {
         verify(session, times(2)).sendMessage(messages.capture());
         assertThat(messages.getAllValues()).extracting(message -> (String) message.getPayload())
                 .containsExactly("{\"type\":\"ack\",\"seq\":10}", "{\"type\":\"ack\",\"seq\":20}");
+    }
+
+    @Test
+    @DisplayName("AI로 전달한 청크마다 처리 순번을 Redis에 저장한다")
+    void savesSequenceForEachForwardedChunk() throws Exception {
+        WebSocketSession session = session(context());
+        forwardSucceeds();
+
+        handler.handleBinaryMessage(session, frame(1, 16));
+        handler.handleBinaryMessage(session, frame(2, 16));
+        handler.handleBinaryMessage(session, frame(2, 16));
+
+        verify(sequenceRepository).save(88L, 1L);
+        verify(sequenceRepository).save(88L, 2L);
+        verify(sequenceRepository, times(2)).save(eq(88L), anyLong());
+    }
+
+    @Test
+    @DisplayName("AI 전달에 실패한 청크는 순번을 Redis에 저장하지 않는다")
+    void doesNotSaveSequenceWhenForwardFails() throws Exception {
+        WebSocketSession session = session(context());
+
+        handler.handleBinaryMessage(session, frame(1, 16));
+
+        verify(sequenceRepository, never()).save(anyLong(), anyLong());
+    }
+
+    @Test
+    @DisplayName("ACK 차례에 순번 저장이 실패하면 ACK를 보내지 않고 처리는 계속한다")
+    void skipsAckWhenSequenceSaveFails() throws Exception {
+        WebSocketSession session = session(context());
+        forwardSucceeds();
+        doThrow(new RedisConnectionFailureException("down")).when(sequenceRepository).save(88L, 10L);
+
+        for (long sequence = 1; sequence <= 20; sequence++) {
+            handler.handleBinaryMessage(session, frame(sequence, 16));
+        }
+
+        assertThat(sentTexts(session)).containsExactly("{\"type\":\"ack\",\"seq\":20}");
+        assertThat(registry.streamState(88L).lastProcessedSequence()).isEqualTo(20L);
+        verify(session, never()).close(any(CloseStatus.class));
     }
 
     @Test

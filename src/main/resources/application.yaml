@@ -38,6 +38,8 @@ notification:
 recording:
   owner:
     ttl: ${RECORDING_OWNER_TTL:30s}
+  sequence:
+    ttl: ${RECORDING_SEQUENCE_TTL:90m}
 
 chat:
   executor:
