@@ -50,3 +50,11 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+migration:
+  write-gate:
+    enabled: ${MIGRATION_WRITE_GATE_ENABLED:false}
+    initially-closed: ${MIGRATION_WRITE_GATE_INITIALLY_CLOSED:true}
+    max-wait: ${MIGRATION_WRITE_GATE_MAX_WAIT:10s}
+    max-pending: ${MIGRATION_WRITE_GATE_MAX_PENDING:100}
+    admin-token: ${MIGRATION_WRITE_GATE_ADMIN_TOKEN:}
