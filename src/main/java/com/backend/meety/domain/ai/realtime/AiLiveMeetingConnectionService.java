@@ -104,6 +104,14 @@ public class AiLiveMeetingConnectionService {
         return OptionalLong.of(connection.streamEpoch());
     }
 
+    public boolean hasOpenConnection(Long recordingSessionId) {
+        return openConnection(recordingSessionId).isPresent();
+    }
+
+    public void closeConnection(Long recordingSessionId) {
+        registry.find(recordingSessionId).ifPresent(this::cleanup);
+    }
+
     public boolean awaitStreamable(Long recordingSessionId) {
         AiLiveMeetingConnection connection = openConnection(recordingSessionId).orElse(null);
         if (connection == null) {

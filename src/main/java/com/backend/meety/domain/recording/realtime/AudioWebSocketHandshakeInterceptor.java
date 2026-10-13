@@ -2,6 +2,7 @@ package com.backend.meety.domain.recording.realtime;
 
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionService;
 import com.backend.meety.domain.ai.realtime.AudioFormat;
+import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.global.security.WebSocketCookieAuthentication;
 import java.net.URI;
 import java.util.Arrays;
@@ -27,6 +28,7 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
     private final AudioWebSocketAccessService accessService;
     private final AudioWebSocketRegistry registry;
     private final AiLiveMeetingConnectionService aiConnectionService;
+    private final RecordingOwnerService ownerService;
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
@@ -38,11 +40,16 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
             AudioWebSocketContext context = accessService.validate(userId, recordingSessionId, audioFormat);
             registry.find(recordingSessionId).ifPresent(previous ->
                     registry.closeAndRemove(recordingSessionId, previous, AudioWebSocketHandler.SUPERSEDED));
+            boolean reusingAiConnection = aiConnectionService.hasOpenConnection(recordingSessionId);
             OptionalLong streamEpoch = aiConnectionService.prepareStream(context);
             if (streamEpoch.isEmpty()) {
                 log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. recordingSessionId={}, reason=ai not ready",
                         recordingSessionId);
                 response.setStatusCode(HttpStatus.SERVICE_UNAVAILABLE);
+                return false;
+            }
+            if (!ownerService.register(recordingSessionId)) {
+                rejectWithoutOwner(recordingSessionId, reusingAiConnection, response);
                 return false;
             }
             attributes.put(CONTEXT_ATTRIBUTE, context.withStreamEpoch(streamEpoch.getAsLong()));
@@ -68,6 +75,16 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
         if (exception != null) {
             log.warn("Audio WebSocket 업그레이드에 실패했습니다. uri={}", request.getURI().getPath(), exception);
         }
+    }
+
+    private void rejectWithoutOwner(Long recordingSessionId, boolean reusingAiConnection,
+                                    ServerHttpResponse response) {
+        if (!reusingAiConnection) {
+            aiConnectionService.closeConnection(recordingSessionId);
+        }
+        log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. recordingSessionId={}, reason=owner not registered",
+                recordingSessionId);
+        response.setStatusCode(HttpStatus.SERVICE_UNAVAILABLE);
     }
 
     private Long extractRecordingSessionId(URI uri) {
