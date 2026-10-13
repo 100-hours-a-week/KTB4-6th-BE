@@ -26,6 +26,7 @@ import com.backend.meety.domain.credit.entity.TeamCredit;
 import com.backend.meety.domain.credit.event.CreditEarnedEvent;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
+import com.backend.meety.domain.meeting.MetricPolicy;
 import com.backend.meety.domain.meeting.SummaryPolicy;
 import com.backend.meety.domain.meeting.event.SummaryReadyEvent;
 import com.backend.meety.domain.meeting.entity.Meeting;
@@ -107,6 +108,56 @@ class SummaryProcessingServiceTest {
     }
 
     @Test
+    @DisplayName("최초 자동 요약 성공 시 METRIC 요청을 등록한다")
+    void completeFirstSummaryRegistersMetricRequest() {
+        // 테스트 목적:
+        // 최초 자동 요약이 정상 완료된 경우
+        // 별도 HTTP 호출 없이 Metric 처리용 AiRequest가 등록되는지 검증한다.
+
+        // given
+        AiRequest firstRequest = withId(AiRequest.create(
+                team, member, SummaryPolicy.firstSummaryIdempotencyKey(meeting.getId()), AiRequestType.SUMMARY), 901L);
+        MeetingSummary firstSummary = withId(
+                MeetingSummary.createPending(firstRequest, team, meeting, 1L, null), 503L);
+        firstRequest.markProcessing();
+        when(aiRequests.findById(901L)).thenReturn(Optional.of(firstRequest));
+        when(summaries.findByAiRequestId(901L)).thenReturn(Optional.of(firstSummary));
+
+        // when
+        service.completeProcessing(901L, "## 최초 요약");
+
+        // then
+        ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiRequests).save(captor.capture());
+        AiRequest metricRequest = captor.getValue();
+        assertThat(metricRequest.getRequestType()).isEqualTo(AiRequestType.METRIC);
+        assertThat(metricRequest.getIdempotencyKey()).isEqualTo(MetricPolicy.idempotencyKey(503L));
+        assertThat(metricRequest.getTeam()).isSameAs(team);
+        assertThat(metricRequest.getTeamMember()).isSameAs(member);
+    }
+
+    @Test
+    @DisplayName("요약 재생성 성공 시 새 METRIC 요청을 등록한다")
+    void completeRegeneratedSummaryRegistersMetricRequest() {
+        // 테스트 목적:
+        // 수동 요약 재생성이 정상 완료된 경우
+        // 재생성된 요약 버전을 기준으로 신규 Metric 요청이 등록되는지 검증한다.
+
+        // given
+        aiRequest.markProcessing();
+
+        // when
+        service.completeProcessing(900L, "## 재생성 요약");
+
+        // then
+        ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiRequests).save(captor.capture());
+        AiRequest metricRequest = captor.getValue();
+        assertThat(metricRequest.getRequestType()).isEqualTo(AiRequestType.METRIC);
+        assertThat(metricRequest.getIdempotencyKey()).isEqualTo(MetricPolicy.idempotencyKey(502L));
+    }
+
+    @Test
     @DisplayName("최초 자동 요약 완료는 알림 이벤트를 발행하지 않는다")
     void completeProcessingSkipsNotificationForFirstSummary() {
         // 테스트 목적:
@@ -163,6 +214,7 @@ class SummaryProcessingServiceTest {
         // then
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
         verify(eventPublisher, never()).publishEvent(any());
+        verify(aiRequests, never()).save(any());
     }
 
     @Test
