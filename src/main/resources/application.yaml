@@ -38,6 +38,7 @@ notification:
 recording:
   owner:
     ttl: ${RECORDING_OWNER_TTL:30s}
+    heartbeat-interval: ${RECORDING_OWNER_HEARTBEAT_INTERVAL:10s}
   sequence:
     ttl: ${RECORDING_SEQUENCE_TTL:90m}
 

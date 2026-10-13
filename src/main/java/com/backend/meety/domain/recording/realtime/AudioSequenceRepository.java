@@ -1,5 +1,6 @@
 package com.backend.meety.domain.recording.realtime;
 
+import com.backend.meety.domain.recording.owner.RecordingRedisKeys;
 import java.util.OptionalLong;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -14,15 +15,11 @@ public class AudioSequenceRepository {
 
     public void save(Long recordingSessionId, long lastProcessedSequence) {
         redisTemplate.opsForValue().set(
-                sequenceKey(recordingSessionId), String.valueOf(lastProcessedSequence), properties.ttl());
+                RecordingRedisKeys.sequence(recordingSessionId), String.valueOf(lastProcessedSequence), properties.ttl());
     }
 
     public OptionalLong find(Long recordingSessionId) {
-        String value = redisTemplate.opsForValue().get(sequenceKey(recordingSessionId));
+        String value = redisTemplate.opsForValue().get(RecordingRedisKeys.sequence(recordingSessionId));
         return value == null ? OptionalLong.empty() : OptionalLong.of(Long.parseLong(value));
-    }
-
-    static String sequenceKey(Long recordingSessionId) {
-        return "recording:{" + recordingSessionId + "}:sequence";
     }
 }

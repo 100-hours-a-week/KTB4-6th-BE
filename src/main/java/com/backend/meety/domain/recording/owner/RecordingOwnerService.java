@@ -28,4 +28,34 @@ public class RecordingOwnerService {
         log.info("녹음 세션 Owner를 기록했습니다. recordingSessionId={}, owner={}", recordingSessionId, owner);
         return true;
     }
+
+    public void refreshOwners() {
+        aiConnectionRegistry.findAll().stream()
+                .filter(connection -> connection.owner() != null && !connection.isClosed())
+                .forEach(connection -> refresh(connection.recordingSessionId(), connection.owner()));
+    }
+
+    public void release(Long recordingSessionId, String owner) {
+        try {
+            if (ownerRepository.deleteIfOwner(recordingSessionId, owner)) {
+                log.info("녹음 세션 Owner를 해제했습니다. recordingSessionId={}, owner={}", recordingSessionId, owner);
+                return;
+            }
+            log.info("현재 Owner가 아니어서 Owner를 해제하지 않았습니다. recordingSessionId={}, owner={}",
+                    recordingSessionId, owner);
+        } catch (DataAccessException e) {
+            log.warn("녹음 세션 Owner 해제에 실패했습니다. recordingSessionId={}, owner={}", recordingSessionId, owner, e);
+        }
+    }
+
+    private void refresh(Long recordingSessionId, String owner) {
+        try {
+            if (!ownerRepository.refreshIfOwner(recordingSessionId, owner)) {
+                log.warn("Redis Owner가 없거나 다른 연결이라 갱신하지 않았습니다. recordingSessionId={}, owner={}",
+                        recordingSessionId, owner);
+            }
+        } catch (DataAccessException e) {
+            log.warn("녹음 세션 Owner 갱신에 실패했습니다. recordingSessionId={}, owner={}", recordingSessionId, owner, e);
+        }
+    }
 }
