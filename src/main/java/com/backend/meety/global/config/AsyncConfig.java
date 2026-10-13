@@ -10,6 +10,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 public class AsyncConfig {
 
     public static final String NOTIFICATION_TASK_EXECUTOR_BEAN_NAME = "notificationTaskExecutor";
+    public static final String CHAT_TASK_EXECUTOR_BEAN_NAME = "chatTaskExecutor";
 
     @Bean(name = NOTIFICATION_TASK_EXECUTOR_BEAN_NAME)
     public ThreadPoolTaskExecutor notificationTaskExecutor(NotificationExecutorProperties properties) {
@@ -18,6 +19,16 @@ public class AsyncConfig {
         executor.setMaxPoolSize(properties.maxPoolSize());
         executor.setQueueCapacity(properties.queueCapacity());
         executor.setThreadNamePrefix("notification-");
+        return executor;
+    }
+
+    @Bean(name = CHAT_TASK_EXECUTOR_BEAN_NAME)
+    public ThreadPoolTaskExecutor chatTaskExecutor(ChatExecutorProperties properties) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(properties.corePoolSize());
+        executor.setMaxPoolSize(properties.maxPoolSize());
+        executor.setQueueCapacity(properties.queueCapacity());
+        executor.setThreadNamePrefix("chat-");
         return executor;
     }
 }
