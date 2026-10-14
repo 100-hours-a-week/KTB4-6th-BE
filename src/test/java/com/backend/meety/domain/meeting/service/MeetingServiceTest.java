@@ -2,6 +2,7 @@ package com.backend.meety.domain.meeting.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
@@ -12,18 +13,23 @@ import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.meeting.MeetingPolicy;
 import com.backend.meety.domain.meeting.TestMeetingPolicy;
+import com.backend.meety.domain.meeting.dto.MeetingAttendeeResponse;
+import com.backend.meety.domain.meeting.dto.MeetingAttendeeType;
+import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
 import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
-import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
 import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.meeting.entity.MeetingParticipant;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
+import com.backend.meety.domain.meeting.entity.ParticipationStatus;
 import com.backend.meety.domain.meeting.event.MeetingDeletedEvent;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
+import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.meeting.repository.support.MeetingCursor;
 import com.backend.meety.domain.meeting.repository.support.MeetingListSearchCondition;
@@ -66,6 +72,7 @@ class MeetingServiceTest {
     private MeetingRepository meetingRepository;
     private TeamRepository teamRepository;
     private TeamMemberRepository teamMemberRepository;
+    private MeetingParticipantRepository meetingParticipantRepository;
     private ApplicationEventPublisher eventPublisher;
     private MeetingService meetingService;
 
@@ -74,11 +81,15 @@ class MeetingServiceTest {
         meetingRepository = mock(MeetingRepository.class);
         teamRepository = mock(TeamRepository.class);
         teamMemberRepository = mock(TeamMemberRepository.class);
+        meetingParticipantRepository = mock(MeetingParticipantRepository.class);
+        lenient().when(meetingParticipantRepository.saveAllAndFlush(any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
         eventPublisher = mock(ApplicationEventPublisher.class);
         meetingService = new MeetingService(
                 meetingRepository,
                 teamRepository,
                 teamMemberRepository,
+                meetingParticipantRepository,
                 FIXED_CLOCK,
                 eventPublisher,
                 TestMeetingPolicy.DEFAULT
@@ -300,6 +311,7 @@ class MeetingServiceTest {
                 meetingRepository,
                 teamRepository,
                 teamMemberRepository,
+                meetingParticipantRepository,
                 FIXED_CLOCK,
                 eventPublisher,
                 new MeetingPolicy(10L)
@@ -1338,6 +1350,95 @@ class MeetingServiceTest {
         verify(eventPublisher, never()).publishEvent(any(MeetingDeletedEvent.class));
     }
 
+    @Test
+    @DisplayName("회의 생성 시 팀원과 직접 입력 참석자를 입장 전 상태로 저장하고 팀원 먼저 응답한다")
+    void createMeetingSavesAttendees() {
+        TeamMember first = attendeeMember(11L, "박서준");
+        TeamMember second = attendeeMember(12L, "이하은");
+        when(teamMemberRepository.findAllByTeamIdAndIdInAndMembershipStatus(
+                TEAM_ID, List.of(12L, 11L), MembershipStatus.ACTIVE)).thenReturn(List.of(first, second));
+
+        MeetingCreateResponse response = createMeetingWithTodayCount(
+                0, attendeeRequest(List.of(12L, 11L), List.of("  외부 디자이너 ")));
+
+        assertThat(response.attendees())
+                .extracting(MeetingAttendeeResponse::teamMemberId, MeetingAttendeeResponse::name,
+                        MeetingAttendeeResponse::type)
+                .containsExactly(
+                        tuple(12L, "이하은", MeetingAttendeeType.TEAM_MEMBER),
+                        tuple(11L, "박서준", MeetingAttendeeType.TEAM_MEMBER),
+                        tuple(null, "외부 디자이너", MeetingAttendeeType.CUSTOM));
+        ArgumentCaptor<List<MeetingParticipant>> captor = ArgumentCaptor.forClass(List.class);
+        verify(meetingParticipantRepository).saveAllAndFlush(captor.capture());
+        assertThat(captor.getValue()).allSatisfy(attendee -> {
+            assertThat(attendee.isAttendee()).isTrue();
+            assertThat(attendee.getParticipationStatus()).isEqualTo(ParticipationStatus.NOT_ENTERED);
+        });
+        assertThat(captor.getValue().get(2).getTeamMember()).isNull();
+    }
+
+    @Test
+    @DisplayName("참석자 수가 1~10명이 아니면 INVALID_MEETING_ATTENDEE로 거절한다")
+    void rejectAttendeeCountOutOfRange() {
+        setUpCreatableMemberWithTodayCount(0);
+
+        assertInvalidAttendee(attendeeRequest(List.of(), List.of()));
+        assertInvalidAttendee(attendeeRequest(
+                List.of(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L), List.of("외부1", "외부2")));
+    }
+
+    @Test
+    @DisplayName("직접 입력이 2명을 넘거나 이름이 비었거나 10자를 넘으면 거절한다")
+    void rejectInvalidCustomAttendees() {
+        setUpCreatableMemberWithTodayCount(0);
+
+        assertInvalidAttendee(attendeeRequest(List.of(), List.of("외부1", "외부2", "외부3")));
+        assertInvalidAttendee(attendeeRequest(List.of(), List.of("   ")));
+        assertInvalidAttendee(attendeeRequest(List.of(), List.of("a".repeat(11))));
+    }
+
+    @Test
+    @DisplayName("참석자 필드가 없거나 팀원 ID가 중복되면 거절한다")
+    void rejectMissingFieldsOrDuplicateTeamMembers() {
+        setUpCreatableMemberWithTodayCount(0);
+
+        assertInvalidAttendee(attendeeRequest(null, List.of("외부 디자이너")));
+        assertInvalidAttendee(attendeeRequest(List.of(11L), null));
+        assertInvalidAttendee(attendeeRequest(List.of(11L, 11L), List.of()));
+    }
+
+    @Test
+    @DisplayName("다른 팀이거나 활성 상태가 아닌 팀원이 섞이면 거절한다")
+    void rejectNonActiveTeamMembers() {
+        setUpCreatableMemberWithTodayCount(0);
+        TeamMember activeMember = attendeeMember(11L, "박서준");
+        when(teamMemberRepository.findAllByTeamIdAndIdInAndMembershipStatus(
+                TEAM_ID, List.of(11L, 99L), MembershipStatus.ACTIVE))
+                .thenReturn(List.of(activeMember));
+
+        assertInvalidAttendee(attendeeRequest(List.of(11L, 99L), List.of()));
+        verify(meetingRepository, never()).saveAndFlush(any(Meeting.class));
+    }
+
+    private void assertInvalidAttendee(MeetingCreateRequest request) {
+        assertThatThrownBy(() -> meetingService.createMeeting(USER_ID, TEAM_ID, request))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.INVALID_MEETING_ATTENDEE);
+    }
+
+    private MeetingCreateRequest attendeeRequest(List<Long> teamMemberIds, List<String> customNames) {
+        return new MeetingCreateRequest(
+                "주간 스프린트 회의", "진행 상황과 이슈 공유", null, 30, teamMemberIds, customNames);
+    }
+
+    private TeamMember attendeeMember(Long id, String displayName) {
+        TeamMember member = mock(TeamMember.class);
+        lenient().when(member.getId()).thenReturn(id);
+        lenient().when(member.getDisplayName()).thenReturn(displayName);
+        return member;
+    }
+
     private MeetingCreateResponse createMeetingWithTodayCount(long todayCount, MeetingCreateRequest request) {
         setUpCreatableMemberWithTodayCount(todayCount);
         when(meetingRepository.saveAndFlush(any(Meeting.class))).thenAnswer(invocation -> {
@@ -1370,7 +1471,9 @@ class MeetingServiceTest {
                 "주간 스프린트 회의",
                 "진행 상황과 이슈 공유",
                 note,
-                targetDurationMinutes
+                targetDurationMinutes,
+                List.of(),
+                List.of("외부 디자이너")
         );
     }
 

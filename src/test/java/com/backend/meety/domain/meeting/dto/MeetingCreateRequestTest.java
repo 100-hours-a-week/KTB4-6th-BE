@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -36,7 +37,9 @@ class MeetingCreateRequestTest {
                 "",
                 "a".repeat(101),
                 "a".repeat(201),
-                null
+                null,
+                List.of(),
+                List.of()
         );
 
         Set<ConstraintViolation<MeetingCreateRequest>> violations = validator.validate(request);
@@ -61,7 +64,8 @@ class MeetingCreateRequestTest {
     }
 
     private MeetingCreateRequest createRequestWithTitle(String title) {
-        return new MeetingCreateRequest(title, "진행 상황과 이슈 공유", "API 명세 검토", 30);
+        return new MeetingCreateRequest(
+                title, "진행 상황과 이슈 공유", "API 명세 검토", 30, List.of(), List.of());
     }
 
     private MeetingCreateRequest createRequest(Integer targetDurationMinutes) {
@@ -69,7 +73,9 @@ class MeetingCreateRequestTest {
                 "주간 스프린트 회의",
                 "진행 상황과 이슈 공유",
                 "API 명세 검토",
-                targetDurationMinutes
+                targetDurationMinutes,
+                List.of(),
+                List.of()
         );
     }
 }
