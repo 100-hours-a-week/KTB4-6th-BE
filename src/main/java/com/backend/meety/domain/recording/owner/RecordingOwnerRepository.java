@@ -1,6 +1,7 @@
 package com.backend.meety.domain.recording.owner;
 
 import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -28,6 +29,10 @@ public class RecordingOwnerRepository {
 
     public void save(Long recordingSessionId, String owner) {
         redisTemplate.opsForValue().set(RecordingRedisKeys.owner(recordingSessionId), owner, properties.ttl());
+    }
+
+    public Optional<String> find(Long recordingSessionId) {
+        return Optional.ofNullable(redisTemplate.opsForValue().get(RecordingRedisKeys.owner(recordingSessionId)));
     }
 
     public boolean refreshIfOwner(Long recordingSessionId, String owner) {

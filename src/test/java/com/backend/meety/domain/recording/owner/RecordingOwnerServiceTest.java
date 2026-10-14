@@ -4,11 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnection;
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionRegistry;
 import com.backend.meety.domain.ai.realtime.AudioFormat;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.RedisConnectionFailureException;
@@ -17,8 +20,9 @@ class RecordingOwnerServiceTest {
 
     private final RecordingOwnerRepository ownerRepository = mock(RecordingOwnerRepository.class);
     private final AiLiveMeetingConnectionRegistry aiConnectionRegistry = new AiLiveMeetingConnectionRegistry();
+    private final RecordingCommandPublisher commandPublisher = mock(RecordingCommandPublisher.class);
     private final RecordingOwnerService ownerService = new RecordingOwnerService(
-            new ServerInstance("server-a"), ownerRepository, aiConnectionRegistry);
+            new ServerInstance("server-a"), ownerRepository, aiConnectionRegistry, commandPublisher);
 
     @Test
     @DisplayName("Owner를 Redis에 기록하고 같은 값을 AI 연결에 보관한다")
@@ -103,6 +107,40 @@ class RecordingOwnerServiceTest {
         ownerService.release(88L, "server-a:1");
 
         verify(ownerRepository).deleteIfOwner(88L, "server-a:1");
+    }
+
+    @Test
+    @DisplayName("Redis Owner가 있으면 조회한 Owner 값을 담아 명령을 발행한다")
+    void dispatchesCommandWithCurrentOwner() {
+        when(ownerRepository.find(88L)).thenReturn(Optional.of("server-b:7"));
+
+        RecordingCommandDispatch dispatch = ownerService.dispatch(88L, RecordingCommand.STOP);
+
+        assertThat(dispatch).isEqualTo(RecordingCommandDispatch.SENT);
+        verify(commandPublisher).publish(new RecordingCommandMessage(88L, RecordingCommand.STOP, "server-b:7"));
+    }
+
+    @Test
+    @DisplayName("Redis Owner가 없으면 명령을 발행하지 않는다")
+    void doesNotDispatchWithoutOwner() {
+        when(ownerRepository.find(88L)).thenReturn(Optional.empty());
+
+        RecordingCommandDispatch dispatch = ownerService.dispatch(88L, RecordingCommand.PAUSE);
+
+        assertThat(dispatch).isEqualTo(RecordingCommandDispatch.NO_OWNER);
+        verifyNoInteractions(commandPublisher);
+    }
+
+    @Test
+    @DisplayName("Owner 조회나 발행에 실패하면 실패 결과를 돌려준다")
+    void returnsFailedWhenRedisFails() {
+        when(ownerRepository.find(88L)).thenReturn(Optional.of("server-b:7"));
+        doThrow(new RedisConnectionFailureException("down")).when(commandPublisher)
+                .publish(new RecordingCommandMessage(88L, RecordingCommand.STOP, "server-b:7"));
+
+        RecordingCommandDispatch dispatch = ownerService.dispatch(88L, RecordingCommand.STOP);
+
+        assertThat(dispatch).isEqualTo(RecordingCommandDispatch.FAILED);
     }
 
     private AiLiveMeetingConnection connection() {

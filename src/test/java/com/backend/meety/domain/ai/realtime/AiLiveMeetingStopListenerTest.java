@@ -2,34 +2,44 @@ package com.backend.meety.domain.ai.realtime;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
 import com.backend.meety.domain.recording.event.RecordingCompletedEvent;
+import com.backend.meety.domain.recording.owner.RecordingCommand;
+import com.backend.meety.domain.recording.owner.RecordingCommandDispatch;
+import com.backend.meety.domain.recording.owner.RecordingOwnerService;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
-import java.lang.reflect.Method;
 import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 class AiLiveMeetingStopListenerTest {
 
-    private final AiLiveMeetingConnectionService connectionService = mock(AiLiveMeetingConnectionService.class);
-    private final AiLiveMeetingConnectionRegistry registry = new AiLiveMeetingConnectionRegistry();
+    private final RecordingOwnerService ownerService = mock(RecordingOwnerService.class);
     private final List<Object> publishedEvents = new ArrayList<>();
-    private final AiLiveMeetingStopListener listener =
-            new AiLiveMeetingStopListener(connectionService, registry, publishedEvents::add);
+    private final AiLiveMeetingStopListener listener = new AiLiveMeetingStopListener(ownerService, publishedEvents::add);
 
     @Test
-    void stopAiLiveMeetingAfterRecordingCompletedCommit() {
+    @DisplayName("녹음 종료가 커밋되면 Owner 서버로 STOP 명령을 보낸다")
+    void dispatchesStopAfterRecordingCompletedCommit() {
+        when(ownerService.dispatch(88L, RecordingCommand.STOP)).thenReturn(RecordingCommandDispatch.SENT);
+
         listener.stopAiLiveMeeting(new RecordingCompletedEvent(42L, 88L));
 
-        verify(connectionService).stop(88L);
+        verify(ownerService).dispatch(88L, RecordingCommand.STOP);
+        Assertions.assertThat(publishedEvents).isEmpty();
     }
 
     @Test
-    void publishesTranscriptFinalizedWhenConnectionAbsent() {
+    @DisplayName("Owner가 없으면 요청 서버가 전사 확정 이벤트를 바로 발행한다")
+    void publishesTranscriptFinalizedWhenOwnerAbsent() {
+        when(ownerService.dispatch(88L, RecordingCommand.STOP)).thenReturn(RecordingCommandDispatch.NO_OWNER);
+
         listener.stopAiLiveMeeting(new RecordingCompletedEvent(42L, 88L));
 
         Assertions.assertThat(publishedEvents)
@@ -37,8 +47,9 @@ class AiLiveMeetingStopListenerTest {
     }
 
     @Test
-    void doesNotPublishWhenConnectionExists() {
-        registry.reserve(new AiLiveMeetingConnection(88L, 42L, AudioFormat.WEBM_OPUS, "start-test"));
+    @DisplayName("명령 전달에 실패하면 전사 확정 이벤트를 발행하지 않는다")
+    void doesNotPublishWhenDispatchFails() {
+        when(ownerService.dispatch(88L, RecordingCommand.STOP)).thenReturn(RecordingCommandDispatch.FAILED);
 
         listener.stopAiLiveMeeting(new RecordingCompletedEvent(42L, 88L));
 
