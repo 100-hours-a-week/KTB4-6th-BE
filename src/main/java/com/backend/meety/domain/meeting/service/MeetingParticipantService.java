@@ -93,7 +93,7 @@ public class MeetingParticipantService {
         if (participant.isDisconnected()) {
             throw new MeetingException(MeetingErrorCode.PARTICIPANT_STATUS_CONFLICT);
         }
-        if (!participant.isLeft()) {
+        if (!participant.isLeft() && !participant.isNotEntered()) {
             throw new MeetingException(MeetingErrorCode.PARTICIPANT_STATUS_CONFLICT);
         }
 
