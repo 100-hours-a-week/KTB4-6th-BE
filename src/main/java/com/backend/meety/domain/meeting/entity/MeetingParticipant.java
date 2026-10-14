@@ -91,6 +91,10 @@ public class MeetingParticipant extends BaseEntity {
         return participationStatus == ParticipationStatus.LEFT;
     }
 
+    public boolean isNotEntered() {
+        return participationStatus == ParticipationStatus.NOT_ENTERED;
+    }
+
     public boolean isDisconnected() {
         return participationStatus == ParticipationStatus.DISCONNECTED;
     }
