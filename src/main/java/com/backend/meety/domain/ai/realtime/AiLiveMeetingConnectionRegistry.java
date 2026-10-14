@@ -1,5 +1,6 @@
 package com.backend.meety.domain.ai.realtime;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,10 @@ public class AiLiveMeetingConnectionRegistry {
 
     public void remove(Long recordingSessionId, AiLiveMeetingConnection connection) {
         connections.remove(recordingSessionId, connection);
+    }
+
+    public List<AiLiveMeetingConnection> findAll() {
+        return List.copyOf(connections.values());
     }
 
     public int count() {

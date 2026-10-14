@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.util.OptionalLong;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
@@ -29,6 +30,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
 
     private final AudioWebSocketRegistry registry;
     private final AiLiveMeetingConnectionService aiConnectionService;
+    private final AudioSequenceRepository sequenceRepository;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -103,6 +105,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
             if (forwarded) {
                 ackDue = state.markProcessed(frame.sequence());
                 ackSequence = state.lastProcessedSequence();
+                ackDue = saveSequence(recordingSessionId, ackSequence) && ackDue;
             }
         }
         stats.record(frame.audio().length, forwarded);
@@ -178,6 +181,17 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
             lastProcessedSequence = state.lastProcessedSequence();
         }
         send(session, recordingSessionId, AudioRecoveryStartMessage.create(lastProcessedSequence));
+    }
+
+    private boolean saveSequence(Long recordingSessionId, long sequence) {
+        try {
+            sequenceRepository.save(recordingSessionId, sequence);
+            return true;
+        } catch (DataAccessException e) {
+            log.warn("오디오 복구 순번 저장에 실패했습니다. recordingSessionId={}, sequence={}",
+                    recordingSessionId, sequence, e);
+            return false;
+        }
     }
 
     private void sendAck(WebSocketSession session, Long recordingSessionId, long sequence) {

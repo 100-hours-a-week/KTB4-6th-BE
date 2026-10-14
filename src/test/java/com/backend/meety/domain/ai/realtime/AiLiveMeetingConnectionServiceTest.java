@@ -1,12 +1,17 @@
 package com.backend.meety.domain.ai.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
+import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.net.URI;
@@ -44,6 +49,7 @@ class AiLiveMeetingConnectionServiceTest {
     private final TestAiStopTimeoutScheduler timeoutScheduler = new TestAiStopTimeoutScheduler();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final TranscriptService transcriptService = mock(TranscriptService.class);
+    private final RecordingOwnerService ownerService = mock(RecordingOwnerService.class);
     private final AiLiveMeetingConnectionService service = new AiLiveMeetingConnectionService(
             registry,
             client,
@@ -52,7 +58,8 @@ class AiLiveMeetingConnectionServiceTest {
             timeoutScheduler,
             objectMapper,
             readyEvents::add,
-            transcriptService
+            transcriptService,
+            ownerService
     );
 
     @Test
@@ -558,6 +565,95 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.CLOSED);
         assertThat(registry.find(88L)).isEmpty();
         assertThat(client.session.closeStatuses).contains(CloseStatus.NORMAL);
+    }
+
+    @Test
+    @DisplayName("session.ended로 종료되면 요약 이벤트를 발행한 뒤 자신의 Owner를 해제한다")
+    void releasesOwnerAfterTranscriptFinalizedOnSessionEnded() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+        doAnswer(invocation -> {
+            assertThat(readyEvents).contains(new MeetingTranscriptFinalizedEvent(42L, 88L));
+            return null;
+        }).when(ownerService).release(88L, "server-a:1");
+        service.stop(88L);
+
+        client.receive(sessionEnded());
+
+        verify(ownerService).release(88L, "server-a:1");
+    }
+
+    @Test
+    @DisplayName("session.ended를 30초 안에 받지 못해도 요약 이벤트를 발행한 뒤 Owner를 해제한다")
+    void releasesOwnerOnStopTimeout() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+        service.stop(88L);
+
+        timeoutScheduler.runScheduledTask();
+
+        verify(ownerService).release(88L, "server-a:1");
+    }
+
+    @Test
+    @DisplayName("녹음 중 AI 오류로 정리되면 Owner를 해제하지 않는다")
+    void keepsOwnerWhenAiErrorDuringRecording() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+
+        client.receive("""
+                {
+                  "type": "error",
+                  "requestId": "start-test",
+                  "payload": {
+                    "code": "provider_unavailable",
+                    "message": "provider is unavailable",
+                    "retryable": true
+                  }
+                }
+                """);
+
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.CLOSED);
+        verify(ownerService, never()).release(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("session.ended 없이 AI가 연결을 닫으면 Owner를 해제하지 않는다")
+    void keepsOwnerWhenRemoteClosesBeforeSessionEnded() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+        service.stop(88L);
+
+        client.closeFromRemote(CloseStatus.NORMAL);
+
+        verify(ownerService, never()).release(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("Owner를 기록하지 않은 연결은 종료해도 해제를 요청하지 않는다")
+    void skipsReleaseWhenConnectionHasNoOwner() throws Exception {
+        readyConnection();
+        service.stop(88L);
+
+        client.receive(sessionEnded());
+
+        verify(ownerService, never()).release(anyLong(), anyString());
+    }
+
+    private String sessionEnded() {
+        return """
+                {
+                  "type": "session.ended",
+                  "requestId": "stop-test",
+                  "meetingId": "42",
+                  "recordingSessionId": "88",
+                  "payload": {
+                    "status": "ENDED",
+                    "lastSequence": null,
+                    "audioDurationMs": 3600000
+                  }
+                }
+                """;
     }
 
     @Test

@@ -1,26 +1,22 @@
 package com.backend.meety.domain.recording.realtime;
 
-import com.backend.meety.domain.recording.event.RecordingCompletedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class RecordingAudioWebSocketCleanupListener {
+public class AudioWebSocketCloser {
 
     private final AudioWebSocketRegistry registry;
 
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void closeAudioWebSocket(RecordingCompletedEvent event) {
-        registry.find(event.recordingSessionId())
-                .ifPresent(session -> closeAndRemove(event.recordingSessionId(), session));
-        registry.removeStreamState(event.recordingSessionId());
+    public void close(Long recordingSessionId) {
+        registry.find(recordingSessionId)
+                .ifPresent(session -> closeAndRemove(recordingSessionId, session));
+        registry.removeStreamState(recordingSessionId);
     }
 
     private void closeAndRemove(Long recordingSessionId, WebSocketSession session) {
