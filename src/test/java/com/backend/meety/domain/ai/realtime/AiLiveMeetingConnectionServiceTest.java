@@ -11,8 +11,12 @@ import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
+import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.meeting.entity.MeetingParticipant;
+import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
+import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -50,6 +54,7 @@ class AiLiveMeetingConnectionServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final TranscriptService transcriptService = mock(TranscriptService.class);
     private final RecordingOwnerService ownerService = mock(RecordingOwnerService.class);
+    private final MeetingParticipantRepository meetingParticipantRepository = mock(MeetingParticipantRepository.class);
     private final AiLiveMeetingConnectionService service = new AiLiveMeetingConnectionService(
             registry,
             client,
@@ -59,7 +64,8 @@ class AiLiveMeetingConnectionServiceTest {
             objectMapper,
             readyEvents::add,
             transcriptService,
-            ownerService
+            ownerService,
+            meetingParticipantRepository
     );
 
     @Test
@@ -187,6 +193,28 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isFalse();
 
         assertThat(registry.find(88L)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("session.start에 회의 생성 시 지정한 참석자와 참석자 수를 담는다")
+    void sessionStartIncludesAttendees() throws Exception {
+        Meeting meeting = mock(Meeting.class);
+        TeamMember member = mock(TeamMember.class);
+        when(member.getId()).thenReturn(10L);
+        when(member.getDisplayName()).thenReturn("김지우");
+        when(meetingParticipantRepository.findAttendeesByMeetingId(42L)).thenReturn(List.of(
+                MeetingParticipant.createAttendee(meeting, member),
+                MeetingParticipant.createCustomAttendee(meeting, "외부 디자이너")));
+
+        service.start(context(AudioFormat.WEBM_OPUS));
+
+        JsonNode root = objectMapper.readTree(client.session.sentMessages.getFirst());
+        assertThat(root.path("participantCount").asInt()).isEqualTo(2);
+        assertThat(root.path("participants").get(0).path("teamMemberId").asLong()).isEqualTo(10L);
+        assertThat(root.path("participants").get(0).path("name").asText()).isEqualTo("김지우");
+        assertThat(root.path("participants").get(1).has("teamMemberId")).isTrue();
+        assertThat(root.path("participants").get(1).path("teamMemberId").isNull()).isTrue();
+        assertThat(root.path("participants").get(1).path("name").asText()).isEqualTo("외부 디자이너");
     }
 
     @Test
@@ -1120,7 +1148,7 @@ class AiLiveMeetingConnectionServiceTest {
 
     private void assertSessionStart(String json) throws Exception {
         JsonNode root = objectMapper.readTree(json);
-        assertThat(root.size()).isEqualTo(4);
+        assertThat(root.size()).isEqualTo(6);
         assertThat(root.path("type").asText()).isEqualTo("session.start");
         assertThat(root.path("requestId").asText()).isEqualTo("start-test");
         assertThat(root.path("meetingId").isTextual()).isTrue();
@@ -1128,6 +1156,9 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(root.path("recordingSessionId").isTextual()).isTrue();
         assertThat(root.path("recordingSessionId").asText()).isEqualTo("88");
         assertThat(root.has("payload")).isFalse();
+        assertThat(root.path("participantCount").asInt()).isZero();
+        assertThat(root.path("participants").isArray()).isTrue();
+        assertThat(root.path("participants")).isEmpty();
     }
 
     private void assertSessionStop(String json) throws Exception {
