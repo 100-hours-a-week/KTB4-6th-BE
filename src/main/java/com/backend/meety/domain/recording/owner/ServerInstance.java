@@ -11,6 +11,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class ServerInstance {
 
+    public static final String OWNER_DELIMITER = ":";
+
     private final String serverId;
     private final AtomicLong connectionCounter = new AtomicLong();
 
@@ -28,7 +30,7 @@ public class ServerInstance {
     }
 
     public String nextOwner() {
-        return serverId + ":" + connectionCounter.incrementAndGet();
+        return serverId + OWNER_DELIMITER + connectionCounter.incrementAndGet();
     }
 
     private static String hostname() {
