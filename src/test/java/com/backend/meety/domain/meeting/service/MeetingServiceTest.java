@@ -368,6 +368,32 @@ class MeetingServiceTest {
         assertThat(response.status()).isEqualTo(MeetingStatus.WAITING);
         assertThat(response.createdAt()).isEqualTo(LocalDateTime.of(2026, 9, 15, 9, 0));
         assertThat(response.updatedAt()).isEqualTo(LocalDateTime.of(2026, 9, 15, 9, 30));
+        assertThat(response.attendees()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("회의 상세에 생성 시 지정한 참석자를 팀원과 직접 입력으로 구분해 담는다")
+    void getMeetingWithAttendees() {
+        Meeting meeting = meeting(100L, MeetingStatus.WAITING, LocalDateTime.of(2026, 9, 15, 15, 0), null);
+        TeamMember member = attendeeMember(11L, "박서준");
+        when(meetingRepository.findDetailByIdAndDeletedAtIsNull(100L)).thenReturn(Optional.of(meeting));
+        when(teamMemberRepository.existsByTeamIdAndUserIdAndMembershipStatus(
+                TEAM_ID,
+                USER_ID,
+                MembershipStatus.ACTIVE
+        )).thenReturn(true);
+        when(meetingParticipantRepository.findAttendeesByMeetingId(100L)).thenReturn(List.of(
+                MeetingParticipant.createAttendee(meeting, member),
+                MeetingParticipant.createCustomAttendee(meeting, "외부 디자이너")));
+
+        MeetingDetailResponse response = meetingService.getMeeting(USER_ID, 100L);
+
+        assertThat(response.attendees())
+                .extracting(MeetingAttendeeResponse::teamMemberId, MeetingAttendeeResponse::name,
+                        MeetingAttendeeResponse::type)
+                .containsExactly(
+                        tuple(11L, "박서준", MeetingAttendeeType.TEAM_MEMBER),
+                        tuple(null, "외부 디자이너", MeetingAttendeeType.CUSTOM));
     }
 
     @Test
