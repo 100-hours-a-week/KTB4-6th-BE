@@ -172,7 +172,7 @@ public class MeetingService {
 
         validateMeetingAccess(userId, meeting.getTeam().getId());
 
-        return MeetingDetailResponse.from(meeting);
+        return MeetingDetailResponse.from(meeting, meetingParticipantRepository.findAttendeesByMeetingId(meetingId));
     }
 
     @Transactional
