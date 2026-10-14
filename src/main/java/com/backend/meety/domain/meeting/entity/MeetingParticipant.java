@@ -33,8 +33,14 @@ public class MeetingParticipant extends BaseEntity {
     private Meeting meeting;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "team_member_id", nullable = false)
+    @JoinColumn(name = "team_member_id")
     private TeamMember teamMember;
+
+    @Column(name = "display_name", length = 10)
+    private String displayName;
+
+    @Column(name = "attendee", nullable = false)
+    private boolean attendee;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "participation_status", nullable = false, length = 30)
@@ -47,6 +53,24 @@ public class MeetingParticipant extends BaseEntity {
         meetingParticipant.participationStatus = ParticipationStatus.JOINED;
         meetingParticipant.restoreDeleted();
         return meetingParticipant;
+    }
+
+    public static MeetingParticipant createAttendee(Meeting meeting, TeamMember teamMember) {
+        MeetingParticipant attendee = new MeetingParticipant();
+        attendee.meeting = meeting;
+        attendee.teamMember = teamMember;
+        attendee.attendee = true;
+        attendee.participationStatus = ParticipationStatus.NOT_ENTERED;
+        return attendee;
+    }
+
+    public static MeetingParticipant createCustomAttendee(Meeting meeting, String displayName) {
+        MeetingParticipant attendee = new MeetingParticipant();
+        attendee.meeting = meeting;
+        attendee.displayName = displayName;
+        attendee.attendee = true;
+        attendee.participationStatus = ParticipationStatus.NOT_ENTERED;
+        return attendee;
     }
 
     public void rejoin() {

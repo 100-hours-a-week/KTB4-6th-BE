@@ -1,11 +1,12 @@
 package com.backend.meety.domain.meeting.service;
 
+import com.backend.meety.domain.meeting.MeetingAttendeePolicy;
 import com.backend.meety.domain.meeting.MeetingPolicy;
-import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
-import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
 import com.backend.meety.domain.meeting.dto.MeetingCalendarDateResponse;
 import com.backend.meety.domain.meeting.dto.MeetingCalendarItemResponse;
 import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
+import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
+import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
 import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
 import com.backend.meety.domain.meeting.dto.MeetingGroupResponse;
 import com.backend.meety.domain.meeting.dto.MeetingInProgressResponse;
@@ -14,10 +15,12 @@ import com.backend.meety.domain.meeting.dto.MeetingListResponse;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.meeting.entity.MeetingParticipant;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import com.backend.meety.domain.meeting.event.MeetingDeletedEvent;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
+import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.meeting.repository.support.MeetingCursor;
 import com.backend.meety.domain.meeting.repository.support.MeetingListSearchCondition;
@@ -37,7 +40,13 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessException;
@@ -54,6 +63,7 @@ public class MeetingService {
     private final MeetingRepository meetingRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
+    private final MeetingParticipantRepository meetingParticipantRepository;
     private final Clock clock;
     private final ApplicationEventPublisher eventPublisher;
     private final MeetingPolicy meetingPolicy;
@@ -70,6 +80,9 @@ public class MeetingService {
                         MembershipStatus.ACTIVE
                 )
                 .orElseThrow(() -> new MeetingException(MeetingErrorCode.TEAM_MEMBERSHIP_REQUIRED));
+        List<String> customAttendeeNames = normalizeCustomAttendeeNames(request.customAttendeeNames());
+        List<TeamMember> attendeeTeamMembers = findAttendeeTeamMembers(
+                teamId, request.attendeeTeamMemberIds(), customAttendeeNames.size());
 
         Meeting meeting = Meeting.create(
                 team,
@@ -82,10 +95,58 @@ public class MeetingService {
         );
 
         try {
-            return MeetingCreateResponse.from(meetingRepository.saveAndFlush(meeting));
+            Meeting savedMeeting = meetingRepository.saveAndFlush(meeting);
+            List<MeetingParticipant> attendees = meetingParticipantRepository.saveAllAndFlush(
+                    createAttendees(savedMeeting, attendeeTeamMembers, customAttendeeNames));
+            return MeetingCreateResponse.from(savedMeeting, attendees);
         } catch (DataAccessException e) {
             throw new MeetingException(MeetingErrorCode.MEETING_CREATE_FAILED);
         }
+    }
+
+    private List<String> normalizeCustomAttendeeNames(List<String> names) {
+        if (names == null || names.size() > MeetingAttendeePolicy.MAX_CUSTOM_ATTENDEES) {
+            throw new MeetingException(MeetingErrorCode.INVALID_MEETING_ATTENDEE);
+        }
+        List<String> normalized = names.stream()
+                .map(name -> name == null ? "" : name.trim())
+                .toList();
+        if (normalized.stream().anyMatch(name -> name.isEmpty()
+                || name.length() > MeetingAttendeePolicy.MAX_CUSTOM_NAME_LENGTH)) {
+            throw new MeetingException(MeetingErrorCode.INVALID_MEETING_ATTENDEE);
+        }
+        return normalized;
+    }
+
+    private List<TeamMember> findAttendeeTeamMembers(Long teamId, List<Long> teamMemberIds, int customAttendeeCount) {
+        if (teamMemberIds == null || teamMemberIds.stream().anyMatch(Objects::isNull)
+                || new HashSet<>(teamMemberIds).size() != teamMemberIds.size()) {
+            throw new MeetingException(MeetingErrorCode.INVALID_MEETING_ATTENDEE);
+        }
+        int attendeeCount = teamMemberIds.size() + customAttendeeCount;
+        if (attendeeCount < MeetingAttendeePolicy.MIN_ATTENDEES
+                || attendeeCount > MeetingAttendeePolicy.MAX_ATTENDEES) {
+            throw new MeetingException(MeetingErrorCode.INVALID_MEETING_ATTENDEE);
+        }
+        if (teamMemberIds.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, TeamMember> activeMembers = teamMemberRepository
+                .findAllByTeamIdAndIdInAndMembershipStatus(teamId, teamMemberIds, MembershipStatus.ACTIVE)
+                .stream()
+                .collect(Collectors.toMap(TeamMember::getId, Function.identity()));
+        if (activeMembers.size() != teamMemberIds.size()) {
+            throw new MeetingException(MeetingErrorCode.INVALID_MEETING_ATTENDEE);
+        }
+        return teamMemberIds.stream().map(activeMembers::get).toList();
+    }
+
+    private List<MeetingParticipant> createAttendees(
+            Meeting meeting, List<TeamMember> teamMembers, List<String> customAttendeeNames) {
+        return Stream.concat(
+                teamMembers.stream().map(member -> MeetingParticipant.createAttendee(meeting, member)),
+                customAttendeeNames.stream().map(name -> MeetingParticipant.createCustomAttendee(meeting, name))
+        ).toList();
     }
 
     private void validateDailyMeetingLimit(Long teamId) {

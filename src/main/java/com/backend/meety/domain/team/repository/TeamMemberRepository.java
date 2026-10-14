@@ -75,6 +75,9 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
 
     List<TeamMember> findAllByTeamIdAndUserIdIn(Long teamId, List<Long> userIds);
 
+    List<TeamMember> findAllByTeamIdAndIdInAndMembershipStatus(
+            Long teamId, List<Long> ids, MembershipStatus membershipStatus);
+
     @Query("""
             select tm
             from TeamMember tm
