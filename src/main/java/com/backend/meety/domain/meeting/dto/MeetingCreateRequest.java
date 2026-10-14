@@ -8,7 +8,7 @@ import jakarta.validation.constraints.Size;
 
 public record MeetingCreateRequest(
         @NotBlank(message = "회의 제목을 입력해주세요.")
-        @Size(max = 20, message = "회의 제목은 최대 20자까지 입력할 수 있습니다.")
+        @Size(min = 2, max = 20, message = "회의 제목은 2자 이상 20자 이하로 입력해주세요.")
         String title,
 
         @NotBlank(message = "회의 목적을 입력해주세요.")

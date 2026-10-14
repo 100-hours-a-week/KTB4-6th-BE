@@ -2,8 +2,10 @@ package com.backend.meety.domain.meeting.controller;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -17,7 +19,9 @@ import com.backend.meety.global.exception.GlobalExceptionHandler;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
@@ -84,5 +88,21 @@ class MeetingControllerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.data").doesNotExist())
                 .andExpect(jsonPath("$.error.code").value("TEAM_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("1글자 제목으로 회의를 생성하면 400 INVALID_INPUT_VALUE로 거절한다")
+    void createMeetingRejectsOneCharacterTitle() throws Exception {
+        mvc.perform(post("/api/v1/teams/1/meetings")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"A","purpose":"진행 상황 공유","targetDurationMinutes":30}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("INVALID_INPUT_VALUE"))
+                .andExpect(jsonPath("$.error.message").value("회의 제목은 2자 이상 20자 이하로 입력해주세요."));
+
+        verifyNoInteractions(meetingService);
     }
 }

@@ -46,6 +46,24 @@ class MeetingCreateRequestTest {
                 .contains("title", "purpose", "note", "targetDurationMinutes");
     }
 
+    @Test
+    @DisplayName("회의 생성 요청은 제목을 2자부터 20자까지 허용한다")
+    void validateTitleLength() {
+        assertThat(validator.validate(createRequestWithTitle("주간"))).isEmpty();
+        assertThat(validator.validate(createRequestWithTitle("a".repeat(20)))).isEmpty();
+
+        assertThat(validator.validate(createRequestWithTitle("A")))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .containsExactly("title");
+        assertThat(validator.validate(createRequestWithTitle("a".repeat(21))))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .containsExactly("title");
+    }
+
+    private MeetingCreateRequest createRequestWithTitle(String title) {
+        return new MeetingCreateRequest(title, "진행 상황과 이슈 공유", "API 명세 검토", 30);
+    }
+
     private MeetingCreateRequest createRequest(Integer targetDurationMinutes) {
         return new MeetingCreateRequest(
                 "주간 스프린트 회의",
