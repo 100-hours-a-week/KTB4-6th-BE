@@ -82,8 +82,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "start-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {
                     "status": "READY",
                     "inputAudioFormat": "webm_opus",
@@ -155,8 +155,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "%s",
-                  "meetingId": "%s",
-                  "recordingSessionId": "%s",
+                  "meetingId": %s,
+                  "recordingSessionId": %s,
                   "payload": {"status": "READY"}
                 }
                 """, requestId, meetingId, recordingSessionId));
@@ -231,8 +231,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ended",
                   "requestId": "stop-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {
                     "status": "ENDED",
                     "lastSequence": null,
@@ -464,8 +464,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ended",
                   "requestId": "%s",
-                  "meetingId": "%s",
-                  "recordingSessionId": "%s",
+                  "meetingId": %s,
+                  "recordingSessionId": %s,
                   "payload": {"status": "%s"}
                 }
                 """, requestId, meetingId, recordingSessionId, status));
@@ -483,8 +483,8 @@ class AiLiveMeetingConnectionServiceTest {
         client.receive("""
                 {
                   "type": "transcript.committed",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {
                     "sequenceNumber": 99,
                     "content": "last transcript",
@@ -507,8 +507,8 @@ class AiLiveMeetingConnectionServiceTest {
         client.receive("""
                 {
                   "type": "transcript.committed",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {
                     "sequenceNumber": 31,
                     "content": "final text",
@@ -543,8 +543,8 @@ class AiLiveMeetingConnectionServiceTest {
         client.receive("""
                 {
                   "type": "transcript.committed",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {
                     "sequenceNumber": 32,
                     "content": "last final text",
@@ -673,8 +673,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ended",
                   "requestId": "stop-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {
                     "status": "ENDED",
                     "lastSequence": null,
@@ -704,8 +704,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ended",
                   "requestId": "stop-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {"status": "ENDED", "audioDurationMs": 1}
                 }
                 """);
@@ -723,8 +723,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "start-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {"status": "READY"}
                 }
                 """);
@@ -906,8 +906,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "other-request",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": { "status": "READY" }
                 }
                 """);
@@ -926,8 +926,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "start-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": { "status": "READY" }
                 }
                 """);
@@ -957,8 +957,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "start-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {"status": "READY"}
                 }
                 """);
@@ -1151,10 +1151,10 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(root.size()).isEqualTo(6);
         assertThat(root.path("type").asText()).isEqualTo("session.start");
         assertThat(root.path("requestId").asText()).isEqualTo("start-test");
-        assertThat(root.path("meetingId").isTextual()).isTrue();
-        assertThat(root.path("meetingId").asText()).isEqualTo("42");
-        assertThat(root.path("recordingSessionId").isTextual()).isTrue();
-        assertThat(root.path("recordingSessionId").asText()).isEqualTo("88");
+        assertThat(root.path("meetingId").isIntegralNumber()).isTrue();
+        assertThat(root.path("meetingId").asLong()).isEqualTo(42L);
+        assertThat(root.path("recordingSessionId").isIntegralNumber()).isTrue();
+        assertThat(root.path("recordingSessionId").asLong()).isEqualTo(88L);
         assertThat(root.has("payload")).isFalse();
         assertThat(root.path("participantCount").asInt()).isZero();
         assertThat(root.path("participants").isArray()).isTrue();
