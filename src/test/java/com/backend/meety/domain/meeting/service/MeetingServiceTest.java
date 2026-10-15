@@ -19,6 +19,7 @@ import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
 import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
 import com.backend.meety.domain.meeting.dto.MeetingDetailResponse;
+import com.backend.meety.domain.meeting.dto.MeetingListItemResponse;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingUpdateResponse;
@@ -504,6 +505,9 @@ class MeetingServiceTest {
         assertThat(response.groups().get(0).date()).isEqualTo(LocalDate.of(2026, 9, 16));
         assertThat(response.groups().get(0).meetingCount()).isEqualTo(2);
         assertThat(response.groups().get(1).date()).isEqualTo(LocalDate.of(2026, 9, 15));
+        assertThat(response.groups().get(0).meetings())
+                .extracting(MeetingListItemResponse::createdByTeamMemberId)
+                .containsOnly(TEAM_MEMBER_ID);
 
         ArgumentCaptor<MeetingListSearchCondition> conditionCaptor =
                 ArgumentCaptor.forClass(MeetingListSearchCondition.class);
