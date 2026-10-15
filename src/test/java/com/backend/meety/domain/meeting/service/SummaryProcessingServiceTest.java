@@ -8,6 +8,7 @@ import static com.backend.meety.domain.recording.RecordingFixtures.withId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -71,6 +72,13 @@ class SummaryProcessingServiceTest {
         meeting.complete(LocalDateTime.now());
         aiRequest = withId(AiRequest.create(team, member, "key-1", AiRequestType.SUMMARY), 900L);
         summary = withId(MeetingSummary.createPending(aiRequest, team, meeting, 1L, null), 502L);
+        when(aiRequests.claimAccepted(900L)).thenAnswer(invocation -> {
+            if (!aiRequest.isAccepted()) {
+                return 0;
+            }
+            aiRequest.markProcessing();
+            return 1;
+        });
         when(aiRequests.findById(900L)).thenReturn(Optional.of(aiRequest));
         when(summaries.findByAiRequestId(900L)).thenReturn(Optional.of(summary));
         when(transcripts.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of());
@@ -79,8 +87,16 @@ class SummaryProcessingServiceTest {
     @Test
     @DisplayName("ACCEPTED 요청을 PROCESSING으로 전이하고 AI 요청 본문을 만든다")
     void startProcessingTransitionsAndBuildsPayload() {
+        // 테스트 목적:
+        // ACCEPTED 요약 요청의 원자적 선점에 성공하면
+        // PROCESSING 상태와 AI 요청 본문이 함께 준비되는지 검증한다.
+
+        // given
+
+        // when
         Optional<SummaryAiRequest> request = service.startProcessing(900L);
 
+        // then
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.PROCESSING);
         assertThat(request).isPresent();
         assertThat(request.get().requestId()).isEqualTo("900");
@@ -89,11 +105,61 @@ class SummaryProcessingServiceTest {
     }
 
     @Test
-    @DisplayName("이미 PROCESSING이면 건너뛴다")
-    void startProcessingSkipsNonAccepted() {
-        aiRequest.markProcessing();
+    @DisplayName("다른 인스턴스가 먼저 선점한 요청은 건너뛴다")
+    void startProcessingSkipsClaimMiss() {
+        // 테스트 목적:
+        // 동일 요청을 다른 인스턴스가 먼저 선점해 조건부 UPDATE가 0을 반환하면
+        // 예외나 AI 요청 생성 없이 정상적으로 건너뛰는지 검증한다.
 
-        assertThat(service.startProcessing(900L)).isEmpty();
+        // given
+        doReturn(0).when(aiRequests).claimAccepted(900L);
+
+        // when
+        Optional<SummaryAiRequest> result = service.startProcessing(900L);
+
+        // then
+        assertThat(result).isEmpty();
+        verify(aiRequests, never()).findById(anyLong());
+        verify(summaries, never()).findByAiRequestId(anyLong());
+    }
+
+    @Test
+    @DisplayName("선점 후 요약 행이 없으면 요청을 FAILED로 처리한다")
+    void startProcessingFailsWhenSummaryMissing() {
+        // 테스트 목적:
+        // 원자적 선점에는 성공했지만 연결된 MeetingSummary가 없으면
+        // 기존 정책대로 AI 호출 대상에서 제외하고 FAILED로 처리하는지 검증한다.
+
+        // given
+        when(summaries.findByAiRequestId(900L)).thenReturn(Optional.empty());
+
+        // when
+        Optional<SummaryAiRequest> result = service.startProcessing(900L);
+
+        // then
+        assertThat(result).isEmpty();
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
+        assertThat(aiRequest.getFailureReason()).isEqualTo(AiFailureReason.AI_CALL_FAILED);
+    }
+
+    @Test
+    @DisplayName("재시도로 ACCEPTED가 된 요청은 다시 선점할 수 있다")
+    void retryableRequestCanBeClaimedAgain() {
+        // 테스트 목적:
+        // AI 호출 실패로 ACCEPTED 상태에 재등록된 요약 요청이
+        // 다음 폴링에서 동일한 원자적 선점 절차를 다시 통과하는지 검증한다.
+
+        // given
+        aiRequest.markProcessing();
+        service.handleRetryableFailure(900L);
+
+        // when
+        Optional<SummaryAiRequest> result = service.startProcessing(900L);
+
+        // then
+        assertThat(result).isPresent();
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.PROCESSING);
+        assertThat(aiRequest.getRetryCount()).isEqualTo(1L);
     }
 
     @Test

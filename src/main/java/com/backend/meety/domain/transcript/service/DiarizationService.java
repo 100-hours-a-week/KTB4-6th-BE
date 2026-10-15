@@ -112,9 +112,12 @@ public class DiarizationService {
                     aiRequestId, audioFile.getId(), e);
             return Optional.empty();
         }
-        aiRequest.markProcessing();
-        return Optional.of(new DiarizationAiRequest(
-                String.valueOf(aiRequest.getId()), meetingId, audioUrl, segments));
+        DiarizationAiRequest request = new DiarizationAiRequest(
+                String.valueOf(aiRequest.getId()), meetingId, audioUrl, segments);
+        if (aiRequestRepository.claimAccepted(aiRequestId) == 0) {
+            return Optional.empty();
+        }
+        return Optional.of(request);
     }
 
     @Transactional

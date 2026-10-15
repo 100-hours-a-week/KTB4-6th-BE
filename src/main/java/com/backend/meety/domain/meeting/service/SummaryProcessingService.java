@@ -40,8 +40,11 @@ public class SummaryProcessingService {
 
     @Transactional
     public Optional<SummaryAiRequest> startProcessing(Long aiRequestId) {
+        if (aiRequestRepository.claimAccepted(aiRequestId) == 0) {
+            return Optional.empty();
+        }
         AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElse(null);
-        if (aiRequest == null || !aiRequest.isAccepted()) {
+        if (aiRequest == null) {
             return Optional.empty();
         }
         MeetingSummary summary = meetingSummaryRepository.findByAiRequestId(aiRequestId).orElse(null);
@@ -50,7 +53,6 @@ public class SummaryProcessingService {
             aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
             return Optional.empty();
         }
-        aiRequest.markProcessing();
         return Optional.of(summaryAiRequestFactory.create(aiRequest, summary));
     }
 
