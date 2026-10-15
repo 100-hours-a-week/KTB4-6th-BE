@@ -5,8 +5,8 @@ import java.util.List;
 public record AiSessionStartMessage(
         String type,
         String requestId,
-        String meetingId,
-        String recordingSessionId,
+        Long meetingId,
+        Long recordingSessionId,
         int participantCount,
         List<AiSessionParticipant> participants
 ) {
@@ -18,8 +18,8 @@ public record AiSessionStartMessage(
         return new AiSessionStartMessage(
                 TYPE,
                 connection.sessionStartRequestId(),
-                String.valueOf(connection.meetingId()),
-                String.valueOf(connection.recordingSessionId()),
+                connection.meetingId(),
+                connection.recordingSessionId(),
                 participants.size(),
                 participants
         );
