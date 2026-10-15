@@ -46,8 +46,21 @@ public class MetricProcessingService {
             aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
             return Optional.empty();
         }
-        aiRequest.markProcessing();
-        return Optional.of(metricAiRequestFactory.create(aiRequest, summary));
+        if (aiRequestRepository.claimAccepted(aiRequestId) == 0) {
+            return Optional.empty();
+        }
+
+        AiRequest claimedRequest = aiRequestRepository.findById(aiRequestId).orElse(null);
+        if (claimedRequest == null) {
+            return Optional.empty();
+        }
+        MeetingSummary claimedSummary = findSummaryFor(claimedRequest).orElse(null);
+        if (claimedSummary == null || claimedSummary.getContent() == null) {
+            log.error("Metric 처리 대상 요약을 찾을 수 없습니다. aiRequestId={}", aiRequestId);
+            claimedRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
+            return Optional.empty();
+        }
+        return Optional.of(metricAiRequestFactory.create(claimedRequest, claimedSummary));
     }
 
     @Transactional

@@ -7,6 +7,7 @@ import static com.backend.meety.domain.recording.RecordingFixtures.withId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -68,6 +69,13 @@ class MetricProcessingServiceTest {
                 AiRequest.create(team, member, MetricPolicy.idempotencyKey(502L), AiRequestType.METRIC), 900L);
         summary = withId(MeetingSummary.createPending(summaryRequest, team, meeting, 2L, null), 502L);
         summary.complete("# 회의 요약");
+        when(aiRequests.claimAccepted(900L)).thenAnswer(invocation -> {
+            if (!metricRequest.isAccepted()) {
+                return 0;
+            }
+            metricRequest.markProcessing();
+            return 1;
+        });
         when(aiRequests.findById(900L)).thenReturn(Optional.of(metricRequest));
         when(summaries.findById(502L)).thenReturn(Optional.of(summary));
         when(transcripts.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(segment(101L, 0L)));
@@ -110,6 +118,46 @@ class MetricProcessingServiceTest {
         assertThat(result).isEmpty();
         assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
         assertThat(metricRequest.getFailureReason()).isEqualTo(AiFailureReason.AI_CALL_FAILED);
+        verify(aiRequests, never()).claimAccepted(anyLong());
+    }
+
+    @Test
+    @DisplayName("다른 인스턴스가 먼저 선점한 Metric 요청은 건너뛴다")
+    void startProcessingSkipsClaimMiss() {
+        // 테스트 목적:
+        // 처리 가능한 Metric 요청이라도 다른 인스턴스의 조건부 UPDATE가 먼저 성공하면
+        // DTO를 만들거나 AI 호출 대상으로 반환하지 않는지 검증한다.
+
+        // given
+        doReturn(0).when(aiRequests).claimAccepted(900L);
+
+        // when
+        Optional<MetricAiRequest> result = service.startProcessing(900L);
+
+        // then
+        assertThat(result).isEmpty();
+        assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
+        verify(transcripts, never()).findAllByMeetingIdOrderBySequence(anyLong());
+    }
+
+    @Test
+    @DisplayName("재시도로 ACCEPTED가 된 Metric 요청은 다시 선점할 수 있다")
+    void retryableRequestCanBeClaimedAgain() {
+        // 테스트 목적:
+        // AI 호출 실패로 ACCEPTED 상태에 재등록된 Metric 요청이
+        // 다음 폴링에서 원자적 선점 후 다시 AI 요청으로 만들어지는지 검증한다.
+
+        // given
+        metricRequest.markProcessing();
+        service.handleRetryableFailure(900L);
+
+        // when
+        Optional<MetricAiRequest> result = service.startProcessing(900L);
+
+        // then
+        assertThat(result).isPresent();
+        assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.PROCESSING);
+        assertThat(metricRequest.getRetryCount()).isEqualTo(1L);
     }
 
     @Test

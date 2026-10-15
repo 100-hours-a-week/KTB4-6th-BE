@@ -11,6 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -81,6 +82,13 @@ class DiarizationServiceTest {
         aiRequest = withId(AiRequest.create(team, member, KEY, AiRequestType.DIARIZATION), AI_REQUEST_ID);
         first = withId(TranscriptSegment.createFinal(meeting, "k-1", 0L, "첫 발화", 0L, 1000L, NOW), 101L);
         second = withId(TranscriptSegment.createFinal(meeting, "k-2", 1L, "둘째 발화", 1000L, null, NOW), 102L);
+        when(aiRequests.claimAccepted(AI_REQUEST_ID)).thenAnswer(invocation -> {
+            if (!aiRequest.isAccepted()) {
+                return 0;
+            }
+            aiRequest.markProcessing();
+            return 1;
+        });
         when(aiRequests.findById(AI_REQUEST_ID)).thenReturn(Optional.of(aiRequest));
         when(meetings.findByIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.of(meeting));
         when(sessions.findByIdAndDeletedAtIsNull(SESSION_ID)).thenReturn(Optional.of(session));
@@ -138,10 +146,17 @@ class DiarizationServiceTest {
     @Test
     @DisplayName("오디오가 준비되면 PROCESSING으로 전이하고 presigned URL과 전사 구간으로 요청을 만든다")
     void startProcessingBuildsRequestWhenAudioAvailable() {
+        // 테스트 목적:
+        // 오디오와 전사가 모두 준비된 화자 분리 요청이 원자적 선점에 성공하면
+        // presigned URL과 전사 구간을 포함한 AI 요청이 반환되는지 검증한다.
+
+        // given
         when(audioFiles.findByMeetingIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.of(availableAudio()));
 
+        // when
         Optional<DiarizationAiRequest> request = service.startProcessing(AI_REQUEST_ID);
 
+        // then
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.PROCESSING);
         assertThat(request).isPresent();
         assertThat(request.get().requestId()).isEqualTo("900");
@@ -155,12 +170,64 @@ class DiarizationServiceTest {
     @Test
     @DisplayName("오디오가 아직 없으면 ACCEPTED로 두고 기다린다")
     void startProcessingWaitsForAudio() {
+        // 테스트 목적:
+        // 오디오 대기 한도 안에서 파일이 준비되지 않은 요청은 선점하지 않고
+        // ACCEPTED 상태로 남겨 다음 폴링에서 다시 확인하는지 검증한다.
+
+        // given
         ReflectionTestUtils.setField(aiRequest, "createdAt", NOW.minusMinutes(1));
         when(audioFiles.findByMeetingIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.empty());
 
-        assertThat(service.startProcessing(AI_REQUEST_ID)).isEmpty();
+        // when
+        Optional<DiarizationAiRequest> result = service.startProcessing(AI_REQUEST_ID);
+
+        // then
+        assertThat(result).isEmpty();
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
+        verify(aiRequests, never()).claimAccepted(anyLong());
         verify(storage, never()).createDownloadUrl(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("전사가 없으면 선점하지 않고 TRANSCRIPT_EMPTY로 실패 처리한다")
+    void startProcessingFailsWithoutTranscriptBeforeClaim() {
+        // 테스트 목적:
+        // 오디오는 준비됐지만 전사 구간이 없는 요청은 원자적 선점을 시도하지 않고
+        // 기존 정책대로 TRANSCRIPT_EMPTY 실패로 종료하는지 검증한다.
+
+        // given
+        when(audioFiles.findByMeetingIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.of(availableAudio()));
+        when(segments.findAllByMeetingIdOrderBySequence(MEETING_ID)).thenReturn(List.of());
+
+        // when
+        Optional<DiarizationAiRequest> result = service.startProcessing(AI_REQUEST_ID);
+
+        // then
+        assertThat(result).isEmpty();
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
+        assertThat(aiRequest.getFailureReason()).isEqualTo(AiFailureReason.TRANSCRIPT_EMPTY);
+        verify(aiRequests, never()).claimAccepted(anyLong());
+        verify(storage, never()).createDownloadUrl(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("presigned URL 생성 후 선점에 실패하면 AI 요청을 반환하지 않는다")
+    void startProcessingSkipsWhenClaimMissesAfterPreparation() {
+        // 테스트 목적:
+        // 두 인스턴스가 화자 분리 준비 조건을 동시에 통과하더라도
+        // 마지막 조건부 UPDATE에서 실패한 인스턴스는 AI 호출 대상으로 넘기지 않는지 검증한다.
+
+        // given
+        when(audioFiles.findByMeetingIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.of(availableAudio()));
+        doReturn(0).when(aiRequests).claimAccepted(AI_REQUEST_ID);
+
+        // when
+        Optional<DiarizationAiRequest> result = service.startProcessing(AI_REQUEST_ID);
+
+        // then
+        assertThat(result).isEmpty();
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
+        verify(storage).createDownloadUrl(anyString(), any(Duration.class));
     }
 
     @Test
