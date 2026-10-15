@@ -2,10 +2,12 @@ package com.backend.meety.domain.ai.realtime;
 
 import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
+import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.net.URI;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ public class AiLiveMeetingConnectionService {
     private final ApplicationEventPublisher eventPublisher;
     private final TranscriptService transcriptService;
     private final RecordingOwnerService ownerService;
+    private final MeetingParticipantRepository meetingParticipantRepository;
 
     void notifyTranscriptFinalized(AiLiveMeetingConnection connection) {
         eventPublisher.publishEvent(new MeetingTranscriptFinalizedEvent(
@@ -214,7 +217,12 @@ public class AiLiveMeetingConnectionService {
     }
 
     private void sendSessionStart(AiLiveMeetingConnection connection, WebSocketSession aiSession) throws Exception {
-        String payload = objectMapper.writeValueAsString(AiSessionStartMessage.of(connection));
+        List<AiSessionParticipant> participants = meetingParticipantRepository
+                .findAttendeesByMeetingId(connection.meetingId())
+                .stream()
+                .map(AiSessionParticipant::from)
+                .toList();
+        String payload = objectMapper.writeValueAsString(AiSessionStartMessage.of(connection, participants));
         aiSession.sendMessage(new TextMessage(payload));
         connection.markStartSent();
     }

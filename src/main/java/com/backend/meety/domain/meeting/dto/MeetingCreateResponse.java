@@ -1,8 +1,10 @@
 package com.backend.meety.domain.meeting.dto;
 
 import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.meeting.entity.MeetingParticipant;
 import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record MeetingCreateResponse(
         Long meetingId,
@@ -14,10 +16,11 @@ public record MeetingCreateResponse(
         LocalDateTime scheduledAt,
         Integer targetDurationMinutes,
         MeetingStatus status,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        List<MeetingAttendeeResponse> attendees
 ) {
 
-    public static MeetingCreateResponse from(Meeting meeting) {
+    public static MeetingCreateResponse from(Meeting meeting, List<MeetingParticipant> attendees) {
         return new MeetingCreateResponse(
                 meeting.getId(),
                 meeting.getTeam().getId(),
@@ -28,7 +31,8 @@ public record MeetingCreateResponse(
                 meeting.getScheduledAt(),
                 meeting.getTargetDurationMinutes(),
                 meeting.getStatus(),
-                meeting.getCreatedAt()
+                meeting.getCreatedAt(),
+                attendees.stream().map(MeetingAttendeeResponse::from).toList()
         );
     }
 }

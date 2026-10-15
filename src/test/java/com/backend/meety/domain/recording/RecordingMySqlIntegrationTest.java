@@ -119,8 +119,9 @@ class RecordingMySqlIntegrationTest {
 
         @Bean
         MeetingService meetingService(MeetingRepository meetings, TeamRepository teams, TeamMemberRepository members,
-                ApplicationEventPublisher publisher) {
-            return new MeetingService(meetings, teams, members, CLOCK, publisher, TestMeetingPolicy.DEFAULT);
+                MeetingParticipantRepository participants, ApplicationEventPublisher publisher) {
+            return new MeetingService(meetings, teams, members, participants, CLOCK, publisher,
+                    TestMeetingPolicy.DEFAULT);
         }
     }
 

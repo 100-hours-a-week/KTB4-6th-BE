@@ -29,6 +29,7 @@ public enum MeetingErrorCode implements BaseCode {
     INVALID_CURSOR(HttpStatus.BAD_REQUEST, "INVALID_CURSOR", "커서 값이 올바르지 않습니다."),
     INVALID_PAGE_SIZE(HttpStatus.BAD_REQUEST, "INVALID_PAGE_SIZE", "페이지 크기가 올바르지 않습니다."),
     INVALID_MEETING_KEYWORD(HttpStatus.BAD_REQUEST, "INVALID_MEETING_KEYWORD", "검색어가 올바르지 않습니다."),
+    INVALID_MEETING_ATTENDEE(HttpStatus.BAD_REQUEST, "INVALID_MEETING_ATTENDEE", "회의 참석자를 확인해주세요."),
     MEETING_CREATE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "MEETING_CREATE_FAILED", "회의 생성에 실패했습니다.");
 
     private final HttpStatus httpStatus;
