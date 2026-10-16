@@ -1,6 +1,7 @@
 package com.backend.meety.global.security;
 
 import com.backend.meety.domain.auth.exception.AuthErrorCode;
+import com.backend.meety.global.config.AuthCookieProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -22,6 +23,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final AccessTokenBlacklist accessTokenBlacklist;
+    private final AuthCookieProperties authCookieProperties;
 
     @Override
     protected boolean shouldNotFilterAsyncDispatch() {
@@ -44,7 +46,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return null;
         }
         for (Cookie cookie : cookies) {
-            if (TokenConstants.ACCESS_TOKEN_COOKIE.equals(cookie.getName())) {
+            if (authCookieProperties.accessTokenCookieName().equals(cookie.getName())) {
                 return cookie.getValue();
             }
         }

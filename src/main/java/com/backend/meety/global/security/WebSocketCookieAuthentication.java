@@ -2,6 +2,7 @@ package com.backend.meety.global.security;
 
 import com.backend.meety.domain.auth.exception.AuthErrorCode;
 import com.backend.meety.domain.auth.exception.AuthException;
+import com.backend.meety.global.config.AuthCookieProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -18,6 +19,7 @@ public class WebSocketCookieAuthentication {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final AccessTokenBlacklist accessTokenBlacklist;
+    private final AuthCookieProperties authCookieProperties;
 
     public Long authenticate(ServerHttpRequest request) {
         if (!(request instanceof ServletServerHttpRequest servletRequest)) {
@@ -50,7 +52,7 @@ public class WebSocketCookieAuthentication {
             return null;
         }
         for (Cookie cookie : cookies) {
-            if (TokenConstants.ACCESS_TOKEN_COOKIE.equals(cookie.getName())) {
+            if (authCookieProperties.accessTokenCookieName().equals(cookie.getName())) {
                 return cookie.getValue();
             }
         }

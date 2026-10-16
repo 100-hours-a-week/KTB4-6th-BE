@@ -12,7 +12,7 @@ class OpenApiConfigTest {
     @Test
     @DisplayName("Swagger 서버 주소를 상대 경로로 지정해 페이지를 연 주소와 같은 scheme·host로 요청한다")
     void useRelativeServerUrl() {
-        OpenAPI openAPI = new OpenApiConfig().openAPI();
+        OpenAPI openAPI = new OpenApiConfig().openAPI(new AuthCookieProperties("accessToken"));
 
         assertThat(openAPI.getServers())
                 .extracting(Server::getUrl)
