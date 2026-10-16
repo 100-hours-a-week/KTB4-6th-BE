@@ -3,6 +3,8 @@ package com.backend.meety.domain.ai.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.lang.reflect.Method;
+import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.repository.Modifying;
@@ -30,7 +32,57 @@ class AiRequestRepositoryTest {
         assertThat(modifying.clearAutomatically()).isTrue();
         assertThat(query).contains("update AiRequest a");
         assertThat(query).contains("set a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING");
+        assertThat(query).contains("a.updatedAt = CURRENT_TIMESTAMP");
         assertThat(query).contains("where a.id = :id");
         assertThat(query).contains("a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.ACCEPTED");
+    }
+
+    @Test
+    @DisplayName("stale PROCESSING 복구는 상태·시간·재시도 횟수를 검사하는 조건부 UPDATE로 선언된다")
+    void staleRecoveryUsesConditionalBulkUpdate() throws NoSuchMethodException {
+        // 테스트 목적:
+        // 여러 인스턴스가 같은 요청을 복구해도 PROCESSING 상태, stale 기준 시각,
+        // 재시도 한도를 만족하는 단일 UPDATE만 retryCount를 증가시키는지 Repository 계약을 검증한다.
+
+        // given
+        Method method = AiRequestRepository.class.getMethod(
+                "recoverStaleProcessing", Long.class, LocalDateTime.class, long.class);
+
+        // when
+        Modifying modifying = method.getAnnotation(Modifying.class);
+        String query = method.getAnnotation(Query.class).value().replaceAll("\\s+", " ").trim();
+
+        // then
+        assertThat(method.getReturnType()).isEqualTo(int.class);
+        assertThat(modifying.flushAutomatically()).isTrue();
+        assertThat(modifying.clearAutomatically()).isTrue();
+        assertThat(query).contains("a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.ACCEPTED");
+        assertThat(query).contains("a.retryCount = a.retryCount + 1");
+        assertThat(query).contains("a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING");
+        assertThat(query).contains("a.updatedAt <= :staleBefore");
+        assertThat(query).contains("a.retryCount < :lastRetryCount");
+    }
+
+    @Test
+    @DisplayName("재시도 한도에 도달한 stale PROCESSING은 조건부 UPDATE로 FAILED 처리된다")
+    void staleFailureUsesConditionalBulkUpdate() throws NoSuchMethodException {
+        // 테스트 목적:
+        // 마지막 재시도에서 멈춘 PROCESSING 요청이 멀티 인스턴스 환경에서도 한 번만
+        // retryCount 증가와 FAILED 전이를 수행하도록 Repository 계약을 검증한다.
+
+        // given
+        Method method = AiRequestRepository.class.getMethod(
+                "failStaleProcessing", Long.class, LocalDateTime.class, long.class, long.class);
+
+        // when
+        String query = method.getAnnotation(Query.class).value().replaceAll("\\s+", " ").trim();
+
+        // then
+        assertThat(query).contains("a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.FAILED");
+        assertThat(query).contains("when a.retryCount < :maxRetryCount then a.retryCount + 1");
+        assertThat(query).contains("a.failureReason = com.backend.meety.domain.ai.entity.AiFailureReason.AI_CALL_FAILED");
+        assertThat(query).contains("a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING");
+        assertThat(query).contains("a.updatedAt <= :staleBefore");
+        assertThat(query).contains("a.retryCount >= :lastRetryCount");
     }
 }

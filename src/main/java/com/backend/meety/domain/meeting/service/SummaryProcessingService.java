@@ -3,6 +3,7 @@ package com.backend.meety.domain.meeting.service;
 import com.backend.meety.domain.ai.client.SummaryAiRequest;
 import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
+import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.credit.CreditPolicy;
@@ -93,6 +94,17 @@ public class SummaryProcessingService {
     public void handlePermanentFailure(Long aiRequestId) {
         AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
         failPermanently(aiRequest);
+    }
+
+    @Transactional
+    public void restoreCreditAfterStaleFailure(Long aiRequestId) {
+        AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElse(null);
+        if (aiRequest == null
+                || aiRequest.getRequestType() != AiRequestType.SUMMARY
+                || aiRequest.getStatus() != AiRequestStatus.FAILED) {
+            return;
+        }
+        restoreCreditIfCharged(aiRequest);
     }
 
     private void failPermanently(AiRequest aiRequest) {

@@ -12,6 +12,8 @@ import com.backend.meety.domain.user.entity.User;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.PersistenceContext;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -199,6 +201,196 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("stale PROCESSING 요청은 ACCEPTED로 복구되고 retryCount가 한 번 증가한다")
+    void recoversStaleProcessingRequest() {
+        // 테스트 목적:
+        // 실제 MySQL에서 timeout을 지난 PROCESSING 요청이 조건부 UPDATE 한 번으로
+        // ACCEPTED 전이와 실패 횟수 증가를 함께 수행하는지 검증한다.
+
+        // given
+        long requestId = createRequest(AiRequestType.SUMMARY, AiRequestStatus.PROCESSING);
+        LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+        makeStale(requestId, staleBefore.minusMinutes(1), 0L);
+
+        // when
+        int affectedRows = recover(requestId, staleBefore, 2L);
+
+        // then
+        assertThat(affectedRows).isOne();
+        assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.ACCEPTED);
+        assertThat(retryCountOf(requestId)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("timeout이 지나지 않은 PROCESSING 요청은 복구하지 않는다")
+    void keepsFreshProcessingRequest() {
+        // 테스트 목적:
+        // 정상적으로 AI 응답을 기다리는 PROCESSING 요청이 timeout 이전에는
+        // ACCEPTED 또는 FAILED로 변경되지 않는지 검증한다.
+
+        // given
+        long requestId = createRequest(AiRequestType.DIARIZATION, AiRequestStatus.PROCESSING);
+        LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+
+        // when
+        int recovered = recover(requestId, staleBefore, 2L);
+        int failed = fail(requestId, staleBefore, 2L, 3L);
+
+        // then
+        assertThat(recovered).isZero();
+        assertThat(failed).isZero();
+        assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.PROCESSING);
+        assertThat(retryCountOf(requestId)).isZero();
+    }
+
+    @ParameterizedTest(name = "{0} 요청은 stale 복구 대상이 아니다")
+    @EnumSource(value = AiRequestStatus.class, names = {"ACCEPTED", "COMPLETED", "FAILED"})
+    @DisplayName("PROCESSING이 아닌 요청은 stale 시각이어도 변경하지 않는다")
+    void skipsStaleNonProcessingRequest(AiRequestStatus initialStatus) {
+        // 테스트 목적:
+        // 오래된 timestamp를 가진 요청이라도 현재 상태가 PROCESSING이 아니면
+        // stale 복구 조건부 UPDATE가 기존 상태와 retryCount를 보존하는지 검증한다.
+
+        // given
+        long requestId = createRequest(AiRequestType.METRIC, initialStatus);
+        LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+        makeStale(requestId, staleBefore.minusMinutes(1), 0L);
+
+        // when
+        int recovered = recover(requestId, staleBefore, 2L);
+        int failed = fail(requestId, staleBefore, 2L, 3L);
+
+        // then
+        assertThat(recovered).isZero();
+        assertThat(failed).isZero();
+        assertThat(statusOf(requestId)).isEqualTo(initialStatus);
+        assertThat(retryCountOf(requestId)).isZero();
+    }
+
+    @Test
+    @DisplayName("3회째 stale 실패는 retryCount를 증가시키고 FAILED로 전이한다")
+    void failsStaleProcessingAtRetryLimit() {
+        // 테스트 목적:
+        // 기존 재시도 정책과 동일하게 두 번 실패한 PROCESSING 요청의 다음 stale 판정이
+        // 세 번째 실패 횟수를 기록하고 최종 실패 처리되는지 검증한다.
+
+        // given
+        long requestId = createRequest(AiRequestType.SUMMARY, AiRequestStatus.PROCESSING);
+        LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+        makeStale(requestId, staleBefore.minusMinutes(1), 2L);
+
+        // when
+        int recovered = recover(requestId, staleBefore, 2L);
+        int failed = fail(requestId, staleBefore, 2L, 3L);
+
+        // then
+        assertThat(recovered).isZero();
+        assertThat(failed).isOne();
+        assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.FAILED);
+        assertThat(retryCountOf(requestId)).isEqualTo(3L);
+        assertThat(failureReasonOf(requestId)).isEqualTo(AiFailureReason.AI_CALL_FAILED);
+    }
+
+    @Test
+    @DisplayName("이미 최대 Retry 횟수인 stale 요청은 횟수를 더 늘리지 않고 FAILED로 전이한다")
+    void failsStaleProcessingWithoutExceedingRetryLimit() {
+        // 테스트 목적:
+        // 비정상 데이터나 이전 실행으로 retryCount가 이미 최대값에 도달한 경우에도
+        // stale 실패 처리가 retryCount를 상한보다 증가시키지 않는지 검증한다.
+
+        // given
+        long requestId = createRequest(AiRequestType.SUMMARY, AiRequestStatus.PROCESSING);
+        LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+        makeStale(requestId, staleBefore.minusMinutes(1), 3L);
+
+        // when
+        int affectedRows = fail(requestId, staleBefore, 2L, 3L);
+
+        // then
+        assertThat(affectedRows).isOne();
+        assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.FAILED);
+        assertThat(retryCountOf(requestId)).isEqualTo(3L);
+        assertThat(failureReasonOf(requestId)).isEqualTo(AiFailureReason.AI_CALL_FAILED);
+    }
+
+    @Test
+    @DisplayName("20개 트랜잭션이 같은 stale 요청을 복구해도 한 번만 성공한다")
+    void onlyOneOfTwentyConcurrentRecoveriesSucceeds() throws Exception {
+        // 테스트 목적:
+        // 20개 BE 인스턴스에 해당하는 독립 트랜잭션이 동일한 stale 요청을 동시에 복구해도
+        // retryCount가 정확히 한 번만 증가하고 중복 복구가 발생하지 않는지 실제 MySQL에서 검증한다.
+
+        // given
+        long requestId = createRequest(AiRequestType.DIARIZATION, AiRequestStatus.PROCESSING);
+        LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+        makeStale(requestId, staleBefore.minusMinutes(1), 0L);
+
+        // when
+        List<Integer> results = race(20, () -> recover(requestId, staleBefore, 2L));
+
+        // then
+        assertThat(results).containsOnly(0, 1);
+        assertThat(results.stream().mapToInt(Integer::intValue).sum()).isOne();
+        assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.ACCEPTED);
+        assertThat(retryCountOf(requestId)).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("20개 트랜잭션이 Retry 초과 stale 요청을 처리해도 한 번만 FAILED 전이한다")
+    void onlyOneOfTwentyConcurrentFailuresSucceeds() throws Exception {
+        // 테스트 목적:
+        // 재시도 한도에 도달한 동일 요청을 여러 인스턴스가 동시에 검사해도
+        // FAILED 전이와 retryCount 증가가 정확히 한 번만 발생하는지 실제 MySQL에서 검증한다.
+
+        // given
+        long requestId = createRequest(AiRequestType.METRIC, AiRequestStatus.PROCESSING);
+        LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+        makeStale(requestId, staleBefore.minusMinutes(1), 2L);
+
+        // when
+        List<Integer> results = race(20, () -> fail(requestId, staleBefore, 2L, 3L));
+
+        // then
+        assertThat(results).containsOnly(0, 1);
+        assertThat(results.stream().mapToInt(Integer::intValue).sum()).isOne();
+        assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.FAILED);
+        assertThat(retryCountOf(requestId)).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("여러 stale PROCESSING 요청을 배치 후보로 조회하고 모두 복구한다")
+    void recoversMultipleStaleRequests() {
+        // 테스트 목적:
+        // Summary, Diarization, Metric stale 요청이 함께 존재할 때
+        // 세 요청이 모두 후보로 조회되고 각각 한 번씩 복구되는지 검증한다.
+
+        // given
+        LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+        List<Long> requestIds = List.of(
+                createRequest(AiRequestType.SUMMARY, AiRequestStatus.PROCESSING),
+                createRequest(AiRequestType.DIARIZATION, AiRequestStatus.PROCESSING),
+                createRequest(AiRequestType.METRIC, AiRequestStatus.PROCESSING));
+        requestIds.forEach(id -> makeStale(id, staleBefore.minusMinutes(1), 0L));
+
+        // when
+        List<AiRequestRecoveryCandidate> candidates = transaction.execute(status ->
+                aiRequests.findStaleProcessingCandidates(
+                        List.of(AiRequestType.SUMMARY, AiRequestType.DIARIZATION, AiRequestType.METRIC),
+                        staleBefore, org.springframework.data.domain.Limit.of(100)));
+        int recovered = candidates.stream()
+                .mapToInt(candidate -> recover(candidate.id(), staleBefore, 2L))
+                .sum();
+
+        // then
+        assertThat(candidates).extracting(AiRequestRecoveryCandidate::id).containsExactlyElementsOf(requestIds);
+        assertThat(recovered).isEqualTo(3);
+        assertThat(requestIds).allSatisfy(id -> {
+            assertThat(statusOf(id)).isEqualTo(AiRequestStatus.ACCEPTED);
+            assertThat(retryCountOf(id)).isEqualTo(1L);
+        });
+    }
+
     private long createRequest(AiRequestType requestType, AiRequestStatus status) {
         return transaction.execute(transactionStatus -> {
             User user = User.create();
@@ -231,8 +423,61 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
         return transaction.execute(status -> aiRequests.claimAccepted(requestId));
     }
 
+    private int recover(long requestId, LocalDateTime staleBefore, long lastRetryCount) {
+        return transaction.execute(status ->
+                aiRequests.recoverStaleProcessing(requestId, staleBefore, lastRetryCount));
+    }
+
+    private int fail(long requestId, LocalDateTime staleBefore,
+                     long lastRetryCount, long maxRetryCount) {
+        return transaction.execute(status ->
+                aiRequests.failStaleProcessing(requestId, staleBefore, lastRetryCount, maxRetryCount));
+    }
+
+    private List<Integer> race(int contenderCount, Callable<Integer> contender) throws Exception {
+        CountDownLatch ready = new CountDownLatch(contenderCount);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(contenderCount);
+        try {
+            List<Future<Integer>> futures = new ArrayList<>();
+            for (int index = 0; index < contenderCount; index++) {
+                futures.add(executor.submit(() -> {
+                    ready.countDown();
+                    if (!start.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Stale recovery race did not start");
+                    }
+                    return contender.call();
+                }));
+            }
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            List<Integer> results = new ArrayList<>();
+            for (Future<Integer> future : futures) {
+                results.add(future.get(10, TimeUnit.SECONDS));
+            }
+            return results;
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private void makeStale(long requestId, LocalDateTime updatedAt, long retryCount) {
+        jdbc.update("update ai_requests set updated_at = ?, retry_count = ? where id = ?",
+                updatedAt, retryCount, requestId);
+    }
+
     private AiRequestStatus statusOf(long requestId) {
         return AiRequestStatus.valueOf(jdbc.queryForObject(
                 "select status from ai_requests where id = ?", String.class, requestId));
+    }
+
+    private long retryCountOf(long requestId) {
+        return jdbc.queryForObject(
+                "select retry_count from ai_requests where id = ?", Long.class, requestId);
+    }
+
+    private AiFailureReason failureReasonOf(long requestId) {
+        return AiFailureReason.valueOf(jdbc.queryForObject(
+                "select failure_reason from ai_requests where id = ?", String.class, requestId));
     }
 }

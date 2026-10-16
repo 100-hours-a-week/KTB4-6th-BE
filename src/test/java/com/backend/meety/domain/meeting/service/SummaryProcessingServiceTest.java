@@ -334,6 +334,30 @@ class SummaryProcessingServiceTest {
     }
 
     @Test
+    @DisplayName("stale Summary 최종 실패는 기존 크레딧 복구 정책을 유지한다")
+    void staleFailureRestoresCredit() {
+        // 테스트 목적:
+        // stale 복구 쿼리가 Summary를 FAILED로 전이한 경우에도
+        // 수동 요약 재생성에서 차감한 크레딧이 동일하게 복구되는지 검증한다.
+
+        // given
+        aiRequest.markProcessing();
+        aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
+        TeamCredit teamCredit = credit(team, 977L);
+        when(ledgers.existsByIdempotencyKey("USE:AI_SUMMARY:900")).thenReturn(true);
+        when(credits.findByTeamIdForUpdate(2L)).thenReturn(Optional.of(teamCredit));
+
+        // when
+        service.restoreCreditAfterStaleFailure(900L);
+
+        // then
+        assertThat(teamCredit.getBalance()).isEqualTo(980L);
+        ArgumentCaptor<CreditLedger> captor = ArgumentCaptor.forClass(CreditLedger.class);
+        verify(ledgers).save(captor.capture());
+        assertThat(captor.getValue().getIdempotencyKey()).isEqualTo("RESTORE:AI_SUMMARY:900");
+    }
+
+    @Test
     @DisplayName("무료 첫 요약(차감 원장 없음)은 최종 실패해도 복구하지 않는다")
     void handleFailureSkipsRestoreWhenNotCharged() {
         aiRequest.markProcessing();
