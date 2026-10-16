@@ -7,6 +7,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
+import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.meeting.MetricPolicy;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -36,23 +37,24 @@ public class MetricProcessingScheduler {
     }
 
     private void processOne(Long aiRequestId) {
-        MetricAiRequest request = metricProcessingService.startProcessing(aiRequestId).orElse(null);
-        if (request == null) {
+        AiProcessingAttempt<MetricAiRequest> attempt =
+                metricProcessingService.startProcessing(aiRequestId).orElse(null);
+        if (attempt == null) {
             return;
         }
         MetricAiResponse response;
         try {
-            response = metricAiClient.requestMetric(request);
+            response = metricAiClient.requestMetric(attempt.payload());
         } catch (Exception e) {
             log.warn("AI Metric 호출에 실패했습니다. aiRequestId={}", aiRequestId, e);
             if (isRetryable(e)) {
-                metricProcessingService.handleRetryableFailure(aiRequestId);
+                metricProcessingService.handleRetryableFailure(aiRequestId, attempt.processingToken());
             } else {
-                metricProcessingService.handlePermanentFailure(aiRequestId);
+                metricProcessingService.handlePermanentFailure(aiRequestId, attempt.processingToken());
             }
             return;
         }
-        metricProcessingService.completeProcessing(aiRequestId, response);
+        metricProcessingService.completeProcessing(aiRequestId, attempt.processingToken(), response);
     }
 
     private boolean isRetryable(Exception e) {

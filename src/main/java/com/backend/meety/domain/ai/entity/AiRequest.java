@@ -54,6 +54,9 @@ public class AiRequest extends BaseEntity {
     @Column(name = "retry_count", nullable = false)
     private Long retryCount = 0L;
 
+    @Column(name = "processing_token", length = 36)
+    private String processingToken;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "failure_reason", length = 30)
     private AiFailureReason failureReason;
@@ -84,15 +87,18 @@ public class AiRequest extends BaseEntity {
 
     public void markCompleted() {
         this.status = AiRequestStatus.COMPLETED;
+        this.processingToken = null;
     }
 
     public void markFailed(AiFailureReason failureReason) {
         this.status = AiRequestStatus.FAILED;
         this.failureReason = failureReason;
+        this.processingToken = null;
     }
 
     public void markAccepted() {
         this.status = AiRequestStatus.ACCEPTED;
+        this.processingToken = null;
     }
 
     public void increaseRetryCount() {

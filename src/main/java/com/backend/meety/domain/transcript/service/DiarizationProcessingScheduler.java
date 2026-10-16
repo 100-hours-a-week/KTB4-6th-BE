@@ -7,6 +7,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
+import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.transcript.DiarizationPolicy;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -37,23 +38,24 @@ public class DiarizationProcessingScheduler {
     }
 
     private void processOne(Long aiRequestId) {
-        DiarizationAiRequest request = diarizationService.startProcessing(aiRequestId).orElse(null);
-        if (request == null) {
+        AiProcessingAttempt<DiarizationAiRequest> attempt =
+                diarizationService.startProcessing(aiRequestId).orElse(null);
+        if (attempt == null) {
             return;
         }
         DiarizationAiResponse response;
         try {
-            response = diarizationAiClient.requestDiarization(request);
+            response = diarizationAiClient.requestDiarization(attempt.payload());
         } catch (Exception e) {
             log.warn("AI 화자 분리 호출에 실패했습니다. aiRequestId={}", aiRequestId, e);
             if (isRetryable(e)) {
-                diarizationService.handleRetryableFailure(aiRequestId);
+                diarizationService.handleRetryableFailure(aiRequestId, attempt.processingToken());
             } else {
-                diarizationService.handlePermanentFailure(aiRequestId);
+                diarizationService.handlePermanentFailure(aiRequestId, attempt.processingToken());
             }
             return;
         }
-        diarizationService.completeProcessing(aiRequestId, response);
+        diarizationService.completeProcessing(aiRequestId, attempt.processingToken(), response);
     }
 
     /**

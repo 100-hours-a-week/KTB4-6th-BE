@@ -6,6 +6,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
+import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.meeting.SummaryPolicy;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -35,23 +36,24 @@ public class SummaryProcessingScheduler {
     }
 
     private void processOne(Long aiRequestId) {
-        SummaryAiRequest request = summaryProcessingService.startProcessing(aiRequestId).orElse(null);
-        if (request == null) {
+        AiProcessingAttempt<SummaryAiRequest> attempt =
+                summaryProcessingService.startProcessing(aiRequestId).orElse(null);
+        if (attempt == null) {
             return;
         }
         String content;
         try {
-            content = summaryAiClient.requestSummary(request);
+            content = summaryAiClient.requestSummary(attempt.payload());
         } catch (Exception e) {
             log.warn("AI 요약 호출에 실패했습니다. aiRequestId={}", aiRequestId, e);
             if (isRetryable(e)) {
-                summaryProcessingService.handleRetryableFailure(aiRequestId);
+                summaryProcessingService.handleRetryableFailure(aiRequestId, attempt.processingToken());
             } else {
-                summaryProcessingService.handlePermanentFailure(aiRequestId);
+                summaryProcessingService.handlePermanentFailure(aiRequestId, attempt.processingToken());
             }
             return;
         }
-        summaryProcessingService.completeProcessing(aiRequestId, content);
+        summaryProcessingService.completeProcessing(aiRequestId, attempt.processingToken(), content);
     }
 
 

@@ -121,6 +121,7 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
         // then
         assertThat(affectedRows).isOne();
         assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.PROCESSING);
+        assertThat(processingTokenOf(requestId)).isEqualTo("claim-token-" + requestId);
     }
 
     @ParameterizedTest(name = "{0} 요청은 claim할 수 없다")
@@ -160,6 +161,78 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
         assertThat(first).isOne();
         assertThat(second).isZero();
         assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.PROCESSING);
+    }
+
+    @Test
+    @DisplayName("현재 processingToken만 PROCESSING 요청을 완료할 수 있다")
+    void onlyCurrentAttemptCanComplete() {
+        // 테스트 목적:
+        // DB에 저장된 현재 Attempt token과 다른 이전 token으로 완료를 요청하면
+        // 상태를 유지하고 영향 행 수 0을 반환하는지 실제 MySQL에서 검증한다.
+
+        // given
+        long requestId = createRequest(AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED);
+        assertThat(claim(requestId, "token-b")).isOne();
+
+        // when
+        int affectedRows = complete(requestId, "token-a");
+
+        // then
+        assertThat(affectedRows).isZero();
+        assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.PROCESSING);
+        assertThat(processingTokenOf(requestId)).isEqualTo("token-b");
+    }
+
+    @Test
+    @DisplayName("재선점 이후 이전 Attempt의 늦은 성공 응답은 무시한다")
+    void ignoresLateSuccessAfterRetryClaim() {
+        // 테스트 목적:
+        // token A가 stale 복구된 뒤 token B가 완료한 요청에 token A 성공 응답이 도착해도
+        // COMPLETED 상태와 최신 Attempt 결과 소유권이 유지되는지 검증한다.
+
+        // given
+        long requestId = createRequest(AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED);
+        assertThat(claim(requestId, "token-a")).isOne();
+        LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+        makeStale(requestId, staleBefore.minusMinutes(1), 0L);
+        assertThat(recover(requestId, staleBefore, 2L)).isOne();
+        assertThat(claim(requestId, "token-b")).isOne();
+        assertThat(complete(requestId, "token-b")).isOne();
+
+        // when
+        int oldAttempt = complete(requestId, "token-a");
+
+        // then
+        assertThat(oldAttempt).isZero();
+        assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.COMPLETED);
+        assertThat(processingTokenOf(requestId)).isNull();
+    }
+
+    @Test
+    @DisplayName("재선점 이후 이전 Attempt의 늦은 실패 응답은 상태와 retryCount를 변경하지 않는다")
+    void ignoresLateFailureAfterRetryClaim() {
+        // 테스트 목적:
+        // stale 복구 후 token B가 처리 중일 때 token A의 늦은 실패가 도착해도
+        // 최신 Attempt 상태, token, retryCount를 보존하는지 검증한다.
+
+        // given
+        long requestId = createRequest(AiRequestType.METRIC, AiRequestStatus.ACCEPTED);
+        assertThat(claim(requestId, "token-a")).isOne();
+        LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+        makeStale(requestId, staleBefore.minusMinutes(1), 0L);
+        assertThat(recover(requestId, staleBefore, 2L)).isOne();
+        assertThat(claim(requestId, "token-b")).isOne();
+
+        // when
+        int retried = retry(requestId, "token-a", 2L);
+        int failed = permanentFail(requestId, "token-a");
+
+        // then
+        assertThat(retried).isZero();
+        assertThat(failed).isZero();
+        assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.PROCESSING);
+        assertThat(retryCountOf(requestId)).isEqualTo(1L);
+        assertThat(processingTokenOf(requestId)).isEqualTo("token-b");
     }
 
     @ParameterizedTest(name = "{0} 동시 선점")
@@ -220,6 +293,7 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
         assertThat(affectedRows).isOne();
         assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.ACCEPTED);
         assertThat(retryCountOf(requestId)).isEqualTo(1L);
+        assertThat(processingTokenOf(requestId)).isNull();
     }
 
     @Test
@@ -290,6 +364,7 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
         assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.FAILED);
         assertThat(retryCountOf(requestId)).isEqualTo(3L);
         assertThat(failureReasonOf(requestId)).isEqualTo(AiFailureReason.AI_CALL_FAILED);
+        assertThat(processingTokenOf(requestId)).isNull();
     }
 
     @Test
@@ -359,6 +434,134 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
     }
 
     @Test
+    @DisplayName("Retry 실패 처리와 stale recovery가 경쟁해도 retryCount는 한 번만 증가한다")
+    void retryAndStaleRecoveryCannotBothSucceed() throws Exception {
+        // 테스트 목적:
+        // 같은 stale PROCESSING Attempt에 정상 실패 처리와 stale 복구가 동시에 실행돼도
+        // 하나의 조건부 전이만 성공하고 retryCount가 중복 증가하지 않는지 실제 MySQL에서 검증한다.
+
+        // given
+        int attempts = 20;
+        int successfulRetry = 0;
+        int successfulRecovery = 0;
+
+        // when
+        for (int attempt = 0; attempt < attempts; attempt++) {
+            long requestId = createRequest(AiRequestType.DIARIZATION, AiRequestStatus.ACCEPTED);
+            String token = "retry-race-token-" + attempt;
+            assertThat(claim(requestId, token)).isOne();
+            LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+            makeStale(requestId, staleBefore.minusMinutes(1), 0L);
+
+            List<Integer> results = race(
+                    () -> retry(requestId, token, 2L),
+                    () -> recover(requestId, staleBefore, 2L));
+            successfulRetry += results.get(0);
+            successfulRecovery += results.get(1);
+
+            assertThat(results).containsOnly(0, 1);
+            assertThat(results.stream().mapToInt(Integer::intValue).sum()).isOne();
+            assertThat(statusOf(requestId)).isEqualTo(AiRequestStatus.ACCEPTED);
+            assertThat(retryCountOf(requestId)).isEqualTo(1L);
+            assertThat(processingTokenOf(requestId)).isNull();
+        }
+
+        // then
+        assertThat(successfulRetry + successfulRecovery).isEqualTo(attempts);
+        System.out.printf(
+                "RETRY_VS_RECOVERY attempts=%d successfulRetry=%d successfulRecovery=%d invalidDoubleSuccess=0%n",
+                attempts, successfulRetry, successfulRecovery);
+    }
+
+    @Test
+    @DisplayName("완료 처리와 stale recovery가 경쟁해도 둘 다 성공하지 않는다")
+    void completionAndStaleRecoveryCannotBothSucceed() throws Exception {
+        // 테스트 목적:
+        // 같은 stale PROCESSING Attempt의 성공 응답과 stale 복구가 동시에 실행될 때
+        // 상태 전이가 하나로 직렬화되어 이중 성공하지 않는지 실제 MySQL에서 검증한다.
+
+        // given
+        int attempts = 20;
+        int successfulComplete = 0;
+        int successfulRecovery = 0;
+
+        // when
+        for (int attempt = 0; attempt < attempts; attempt++) {
+            long requestId = createRequest(AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED);
+            String token = "complete-race-token-" + attempt;
+            assertThat(claim(requestId, token)).isOne();
+            LocalDateTime staleBefore = LocalDateTime.now().minusHours(1);
+            makeStale(requestId, staleBefore.minusMinutes(1), 0L);
+
+            List<Integer> results = race(
+                    () -> complete(requestId, token),
+                    () -> recover(requestId, staleBefore, 2L));
+            successfulComplete += results.get(0);
+            successfulRecovery += results.get(1);
+
+            assertThat(results).containsOnly(0, 1);
+            assertThat(results.stream().mapToInt(Integer::intValue).sum()).isOne();
+            assertThat(statusOf(requestId)).isIn(AiRequestStatus.COMPLETED, AiRequestStatus.ACCEPTED);
+            if (statusOf(requestId) == AiRequestStatus.COMPLETED) {
+                assertThat(retryCountOf(requestId)).isZero();
+            } else {
+                assertThat(retryCountOf(requestId)).isEqualTo(1L);
+            }
+            assertThat(processingTokenOf(requestId)).isNull();
+        }
+
+        // then
+        assertThat(successfulComplete + successfulRecovery).isEqualTo(attempts);
+        System.out.printf(
+                "COMPLETE_VS_RECOVERY attempts=%d successfulComplete=%d successfulRecovery=%d "
+                        + "invalidDoubleSuccess=0%n",
+                attempts, successfulComplete, successfulRecovery);
+    }
+
+    @Test
+    @DisplayName("완료 처리와 Retry 실패 처리가 경쟁해도 둘 다 성공하지 않는다")
+    void completionAndRetryCannotBothSucceed() throws Exception {
+        // 테스트 목적:
+        // 같은 PROCESSING Attempt의 성공 응답과 실패 응답이 동시에 처리되더라도
+        // token 조건부 상태 전이 중 하나만 성공하는지 실제 MySQL에서 검증한다.
+
+        // given
+        int attempts = 20;
+        int successfulComplete = 0;
+        int successfulRetry = 0;
+
+        // when
+        for (int attempt = 0; attempt < attempts; attempt++) {
+            long requestId = createRequest(AiRequestType.METRIC, AiRequestStatus.ACCEPTED);
+            String token = "complete-retry-token-" + attempt;
+            assertThat(claim(requestId, token)).isOne();
+
+            List<Integer> results = race(
+                    () -> complete(requestId, token),
+                    () -> retry(requestId, token, 2L));
+            successfulComplete += results.get(0);
+            successfulRetry += results.get(1);
+
+            assertThat(results).containsOnly(0, 1);
+            assertThat(results.stream().mapToInt(Integer::intValue).sum()).isOne();
+            assertThat(statusOf(requestId)).isIn(AiRequestStatus.COMPLETED, AiRequestStatus.ACCEPTED);
+            if (statusOf(requestId) == AiRequestStatus.COMPLETED) {
+                assertThat(retryCountOf(requestId)).isZero();
+            } else {
+                assertThat(retryCountOf(requestId)).isEqualTo(1L);
+            }
+            assertThat(processingTokenOf(requestId)).isNull();
+        }
+
+        // then
+        assertThat(successfulComplete + successfulRetry).isEqualTo(attempts);
+        System.out.printf(
+                "COMPLETE_VS_RETRY attempts=%d successfulComplete=%d successfulRetry=%d "
+                        + "invalidDoubleSuccess=0%n",
+                attempts, successfulComplete, successfulRetry);
+    }
+
+    @Test
     @DisplayName("여러 stale PROCESSING 요청을 배치 후보로 조회하고 모두 복구한다")
     void recoversMultipleStaleRequests() {
         // 테스트 목적:
@@ -392,7 +595,7 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
     }
 
     private long createRequest(AiRequestType requestType, AiRequestStatus status) {
-        return transaction.execute(transactionStatus -> {
+        long requestId = transaction.execute(transactionStatus -> {
             User user = User.create();
             Team team = Team.create("Atomic Claim 테스트");
             entityManager.persist(user);
@@ -405,6 +608,10 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
             entityManager.flush();
             return request.getId();
         });
+        if (status == AiRequestStatus.PROCESSING) {
+            jdbc.update("update ai_requests set processing_token = ? where id = ?", "initial-token", requestId);
+        }
+        return requestId;
     }
 
     private void moveTo(AiRequest request, AiRequestStatus status) {
@@ -420,7 +627,24 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
     }
 
     private int claim(long requestId) {
-        return transaction.execute(status -> aiRequests.claimAccepted(requestId));
+        return claim(requestId, "claim-token-" + requestId);
+    }
+
+    private int claim(long requestId, String processingToken) {
+        return transaction.execute(status -> aiRequests.claimAccepted(requestId, processingToken));
+    }
+
+    private int complete(long requestId, String processingToken) {
+        return transaction.execute(status -> aiRequests.completeProcessing(requestId, processingToken));
+    }
+
+    private int retry(long requestId, String processingToken, long lastRetryCount) {
+        return transaction.execute(status ->
+                aiRequests.retryProcessing(requestId, processingToken, lastRetryCount));
+    }
+
+    private int permanentFail(long requestId, String processingToken) {
+        return transaction.execute(status -> aiRequests.failProcessing(requestId, processingToken));
     }
 
     private int recover(long requestId, LocalDateTime staleBefore, long lastRetryCount) {
@@ -461,6 +685,37 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
         }
     }
 
+    private List<Integer> race(Callable<Integer> firstContender, Callable<Integer> secondContender)
+            throws Exception {
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Callable<Integer> first = synchronizedContender(firstContender, ready, start);
+            Callable<Integer> second = synchronizedContender(secondContender, ready, start);
+            Future<Integer> firstResult = executor.submit(first);
+            Future<Integer> secondResult = executor.submit(second);
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            return List.of(
+                    firstResult.get(10, TimeUnit.SECONDS),
+                    secondResult.get(10, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private Callable<Integer> synchronizedContender(
+            Callable<Integer> contender, CountDownLatch ready, CountDownLatch start) {
+        return () -> {
+            ready.countDown();
+            if (!start.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Atomic transition race did not start");
+            }
+            return contender.call();
+        };
+    }
+
     private void makeStale(long requestId, LocalDateTime updatedAt, long retryCount) {
         jdbc.update("update ai_requests set updated_at = ?, retry_count = ? where id = ?",
                 updatedAt, retryCount, requestId);
@@ -479,5 +734,10 @@ class AiRequestAtomicClaimMySqlIntegrationTest {
     private AiFailureReason failureReasonOf(long requestId) {
         return AiFailureReason.valueOf(jdbc.queryForObject(
                 "select failure_reason from ai_requests where id = ?", String.class, requestId));
+    }
+
+    private String processingTokenOf(long requestId) {
+        return jdbc.queryForObject(
+                "select processing_token from ai_requests where id = ?", String.class, requestId);
     }
 }
