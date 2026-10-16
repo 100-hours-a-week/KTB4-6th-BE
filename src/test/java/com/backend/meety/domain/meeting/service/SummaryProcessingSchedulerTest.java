@@ -5,6 +5,7 @@ import static com.backend.meety.domain.recording.RecordingFixtures.team;
 import static com.backend.meety.domain.recording.RecordingFixtures.withId;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -16,7 +17,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
-import com.backend.meety.domain.meeting.SummaryPolicy;
+import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import java.util.List;
@@ -31,6 +32,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
 
 class SummaryProcessingSchedulerTest {
+
+    private static final String TOKEN = "attempt-token";
 
     private final AiRequestRepository aiRequests = mock(AiRequestRepository.class);
     private final SummaryProcessingService processingService = mock(SummaryProcessingService.class);
@@ -60,13 +63,14 @@ class SummaryProcessingSchedulerTest {
         when(aiRequests.findByRequestTypeAndStatusOrderByIdAsc(
                 AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED, Limit.of(SummaryPolicy.SCHEDULER_BATCH_SIZE)))
                 .thenReturn(List.of(request(900L)));
-        when(processingService.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(processingService.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestSummary(payload)).thenReturn("## 요약");
 
         scheduler.processAcceptedSummaries();
 
-        verify(processingService).completeProcessing(900L, "## 요약");
-        verify(processingService, never()).handleRetryableFailure(anyLong());
+        verify(processingService).completeProcessing(900L, TOKEN, "## 요약");
+        verify(processingService, never()).handleRetryableFailure(anyLong(), anyString());
     }
 
     @Test
@@ -75,15 +79,17 @@ class SummaryProcessingSchedulerTest {
         when(aiRequests.findByRequestTypeAndStatusOrderByIdAsc(
                 AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED, Limit.of(SummaryPolicy.SCHEDULER_BATCH_SIZE)))
                 .thenReturn(List.of(request(900L), request(901L)));
-        when(processingService.startProcessing(anyLong())).thenReturn(Optional.of(payload));
+        when(processingService.startProcessing(anyLong()))
+                .thenAnswer(invocation -> Optional.of(
+                        new AiProcessingAttempt<>(invocation.getArgument(0), TOKEN, payload)));
         when(aiClient.requestSummary(any()))
                 .thenThrow(new RuntimeException("ai down"))
                 .thenReturn("## 요약");
 
         scheduler.processAcceptedSummaries();
 
-        verify(processingService).handleRetryableFailure(900L);
-        verify(processingService).completeProcessing(901L, "## 요약");
+        verify(processingService).handleRetryableFailure(900L, TOKEN);
+        verify(processingService).completeProcessing(901L, TOKEN, "## 요약");
     }
 
     @Test
@@ -92,15 +98,16 @@ class SummaryProcessingSchedulerTest {
         when(aiRequests.findByRequestTypeAndStatusOrderByIdAsc(
                 AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED, Limit.of(SummaryPolicy.SCHEDULER_BATCH_SIZE)))
                 .thenReturn(List.of(request(900L)));
-        when(processingService.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(processingService.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestSummary(payload))
                 .thenThrow(HttpClientErrorException.create(HttpStatus.BAD_REQUEST, "Bad Request",
                         HttpHeaders.EMPTY, new byte[0], null));
 
         scheduler.processAcceptedSummaries();
 
-        verify(processingService).handlePermanentFailure(900L);
-        verify(processingService, never()).handleRetryableFailure(anyLong());
+        verify(processingService).handlePermanentFailure(900L, TOKEN);
+        verify(processingService, never()).handleRetryableFailure(anyLong(), anyString());
     }
 
     @Test
@@ -109,15 +116,16 @@ class SummaryProcessingSchedulerTest {
         when(aiRequests.findByRequestTypeAndStatusOrderByIdAsc(
                 AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED, Limit.of(SummaryPolicy.SCHEDULER_BATCH_SIZE)))
                 .thenReturn(List.of(request(900L)));
-        when(processingService.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(processingService.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestSummary(payload))
                 .thenThrow(HttpClientErrorException.create(HttpStatus.TOO_MANY_REQUESTS, "Too Many Requests",
                         HttpHeaders.EMPTY, new byte[0], null));
 
         scheduler.processAcceptedSummaries();
 
-        verify(processingService).handleRetryableFailure(900L);
-        verify(processingService, never()).handlePermanentFailure(anyLong());
+        verify(processingService).handleRetryableFailure(900L, TOKEN);
+        verify(processingService, never()).handlePermanentFailure(anyLong(), anyString());
     }
 
     @Test

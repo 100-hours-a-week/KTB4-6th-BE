@@ -5,6 +5,7 @@ import static com.backend.meety.domain.recording.RecordingFixtures.team;
 import static com.backend.meety.domain.recording.RecordingFixtures.withId;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -18,6 +19,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
+import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.meeting.MetricPolicy;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
@@ -34,6 +36,8 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
 class MetricProcessingSchedulerTest {
+
+    private static final String TOKEN = "attempt-token";
 
     private final AiRequestRepository aiRequests = mock(AiRequestRepository.class);
     private final MetricProcessingService processingService = mock(MetricProcessingService.class);
@@ -64,15 +68,16 @@ class MetricProcessingSchedulerTest {
         // 응답 저장 처리를 완료 서비스에 위임하는지 검증한다.
 
         // given
-        when(processingService.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(processingService.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestMetric(payload)).thenReturn(response);
 
         // when
         scheduler.processAcceptedMetrics();
 
         // then
-        verify(processingService).completeProcessing(900L, response);
-        verify(processingService, never()).handleRetryableFailure(anyLong());
+        verify(processingService).completeProcessing(900L, TOKEN, response);
+        verify(processingService, never()).handleRetryableFailure(anyLong(), anyString());
     }
 
     @Test
@@ -90,7 +95,7 @@ class MetricProcessingSchedulerTest {
 
         // then
         verify(aiClient, never()).requestMetric(any());
-        verify(processingService, never()).completeProcessing(anyLong(), any());
+        verify(processingService, never()).completeProcessing(anyLong(), anyString(), any());
     }
 
     @Test
@@ -101,7 +106,8 @@ class MetricProcessingSchedulerTest {
         // 같은 입력 재시도 없이 Metric 요청만 영구 실패 처리하는지 검증한다.
 
         // given
-        when(processingService.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(processingService.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestMetric(payload)).thenThrow(HttpClientErrorException.create(
                 HttpStatus.UNPROCESSABLE_ENTITY, "422", HttpHeaders.EMPTY, new byte[0], null));
 
@@ -109,8 +115,8 @@ class MetricProcessingSchedulerTest {
         scheduler.processAcceptedMetrics();
 
         // then
-        verify(processingService).handlePermanentFailure(900L);
-        verify(processingService, never()).handleRetryableFailure(anyLong());
+        verify(processingService).handlePermanentFailure(900L, TOKEN);
+        verify(processingService, never()).handleRetryableFailure(anyLong(), anyString());
     }
 
     @Test
@@ -121,7 +127,8 @@ class MetricProcessingSchedulerTest {
         // 재시도 가능한 실패로 분류되는지 검증한다.
 
         // given
-        when(processingService.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(processingService.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestMetric(payload)).thenThrow(HttpServerErrorException.create(
                 HttpStatus.BAD_GATEWAY, "502", HttpHeaders.EMPTY, new byte[0], null));
 
@@ -129,8 +136,8 @@ class MetricProcessingSchedulerTest {
         scheduler.processAcceptedMetrics();
 
         // then
-        verify(processingService).handleRetryableFailure(900L);
-        verify(processingService, never()).handlePermanentFailure(anyLong());
+        verify(processingService).handleRetryableFailure(900L, TOKEN);
+        verify(processingService, never()).handlePermanentFailure(anyLong(), anyString());
     }
 
     @Test
@@ -141,7 +148,8 @@ class MetricProcessingSchedulerTest {
         // 재시도 가능한 실패로 분류되는지 검증한다.
 
         // given
-        when(processingService.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(processingService.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestMetric(payload)).thenThrow(HttpServerErrorException.create(
                 HttpStatus.GATEWAY_TIMEOUT, "504", HttpHeaders.EMPTY, new byte[0], null));
 
@@ -149,8 +157,8 @@ class MetricProcessingSchedulerTest {
         scheduler.processAcceptedMetrics();
 
         // then
-        verify(processingService).handleRetryableFailure(900L);
-        verify(processingService, never()).handlePermanentFailure(anyLong());
+        verify(processingService).handleRetryableFailure(900L, TOKEN);
+        verify(processingService, never()).handlePermanentFailure(anyLong(), anyString());
     }
 
     @Test
@@ -161,15 +169,16 @@ class MetricProcessingSchedulerTest {
         // 일시 장애로 보고 재시도 처리하는지 검증한다.
 
         // given
-        when(processingService.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(processingService.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestMetric(payload)).thenThrow(new ResourceAccessException("timeout"));
 
         // when
         scheduler.processAcceptedMetrics();
 
         // then
-        verify(processingService).handleRetryableFailure(900L);
-        verify(processingService, never()).handlePermanentFailure(anyLong());
+        verify(processingService).handleRetryableFailure(900L, TOKEN);
+        verify(processingService, never()).handlePermanentFailure(anyLong(), anyString());
     }
 
     private AiRequest request(long id) {

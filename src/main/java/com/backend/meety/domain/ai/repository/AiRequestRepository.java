@@ -23,11 +23,82 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
     @Query("""
             update AiRequest a
             set a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING,
+                a.processingToken = :processingToken,
                 a.updatedAt = CURRENT_TIMESTAMP
             where a.id = :id
               and a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.ACCEPTED
             """)
-    int claimAccepted(@Param("id") Long id);
+    int claimAccepted(
+            @Param("id") Long id,
+            @Param("processingToken") String processingToken);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.COMPLETED,
+                a.processingToken = null,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING
+              and a.processingToken = :processingToken
+            """)
+    int completeProcessing(
+            @Param("id") Long id,
+            @Param("processingToken") String processingToken);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.ACCEPTED,
+                a.retryCount = a.retryCount + 1,
+                a.processingToken = null,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING
+              and a.processingToken = :processingToken
+              and a.retryCount < :lastRetryCount
+            """)
+    int retryProcessing(
+            @Param("id") Long id,
+            @Param("processingToken") String processingToken,
+            @Param("lastRetryCount") long lastRetryCount);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.FAILED,
+                a.retryCount = case
+                    when a.retryCount < :maxRetryCount then a.retryCount + 1
+                    else a.retryCount
+                end,
+                a.failureReason = com.backend.meety.domain.ai.entity.AiFailureReason.AI_CALL_FAILED,
+                a.processingToken = null,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING
+              and a.processingToken = :processingToken
+              and a.retryCount >= :lastRetryCount
+            """)
+    int failRetryExhaustedProcessing(
+            @Param("id") Long id,
+            @Param("processingToken") String processingToken,
+            @Param("lastRetryCount") long lastRetryCount,
+            @Param("maxRetryCount") long maxRetryCount);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.FAILED,
+                a.failureReason = com.backend.meety.domain.ai.entity.AiFailureReason.AI_CALL_FAILED,
+                a.processingToken = null,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING
+              and a.processingToken = :processingToken
+            """)
+    int failProcessing(
+            @Param("id") Long id,
+            @Param("processingToken") String processingToken);
 
     @Query("""
             select new com.backend.meety.domain.ai.repository.AiRequestRecoveryCandidate(a.id, a.requestType)
@@ -48,6 +119,7 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
             update AiRequest a
             set a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.ACCEPTED,
                 a.retryCount = a.retryCount + 1,
+                a.processingToken = null,
                 a.updatedAt = CURRENT_TIMESTAMP
             where a.id = :id
               and a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING
@@ -69,6 +141,7 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
                     else a.retryCount
                 end,
                 a.failureReason = com.backend.meety.domain.ai.entity.AiFailureReason.AI_CALL_FAILED,
+                a.processingToken = null,
                 a.updatedAt = CURRENT_TIMESTAMP
             where a.id = :id
               and a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING

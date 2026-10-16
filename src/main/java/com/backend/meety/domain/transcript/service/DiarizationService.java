@@ -8,6 +8,7 @@ import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
+import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.recording.entity.AudioFile;
@@ -28,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -76,7 +78,7 @@ public class DiarizationService {
      * 오디오가 아직 AVAILABLE이 아니면 ACCEPTED로 두고 다음 폴링을 기다린다. 대기 한도를 넘기면 실패 처리한다.
      */
     @Transactional
-    public Optional<DiarizationAiRequest> startProcessing(Long aiRequestId) {
+    public Optional<AiProcessingAttempt<DiarizationAiRequest>> startProcessing(Long aiRequestId) {
         AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElse(null);
         if (aiRequest == null || !aiRequest.isAccepted()) {
             return Optional.empty();
@@ -114,23 +116,29 @@ public class DiarizationService {
         }
         DiarizationAiRequest request = new DiarizationAiRequest(
                 String.valueOf(aiRequest.getId()), meetingId, audioUrl, segments);
-        if (aiRequestRepository.claimAccepted(aiRequestId) == 0) {
+        String processingToken = UUID.randomUUID().toString();
+        if (aiRequestRepository.claimAccepted(aiRequestId, processingToken) == 0) {
             return Optional.empty();
         }
-        return Optional.of(request);
+        return Optional.of(new AiProcessingAttempt<>(aiRequestId, processingToken, request));
     }
 
     @Transactional
-    public void completeProcessing(Long aiRequestId, DiarizationAiResponse response) {
+    public void completeProcessing(Long aiRequestId, String processingToken, DiarizationAiResponse response) {
         AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
         Long meetingId = DiarizationPolicy.meetingIdOf(aiRequest.getIdempotencyKey());
         Meeting meeting = meetingRepository.findByIdAndDeletedAtIsNull(meetingId).orElse(null);
         if (meeting == null || !meetingId.equals(response.meetingId())) {
-            aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
+            aiRequestRepository.failProcessing(aiRequestId, processingToken);
             log.error("화자 분리 응답이 회의와 일치하지 않습니다. aiRequestId={}, meetingId={}, responseMeetingId={}",
                     aiRequestId, meetingId, response.meetingId());
             return;
         }
+        if (aiRequestRepository.completeProcessing(aiRequestId, processingToken) == 0) {
+            log.info("현재 Attempt가 아닌 화자 분리 성공 응답을 무시합니다. aiRequestId={}", aiRequestId);
+            return;
+        }
+        Meeting resultMeeting = meetingRepository.findByIdAndDeletedAtIsNull(meetingId).orElseThrow();
         Map<Long, TranscriptSegment> segmentsById = transcriptSegmentRepository
                 .findAllByMeetingIdOrderBySequence(meetingId).stream()
                 .collect(Collectors.toMap(TranscriptSegment::getId, Function.identity()));
@@ -146,38 +154,32 @@ public class DiarizationService {
                 continue;
             }
             TranscriptSpeaker speaker = speakersBySpeakerId.computeIfAbsent(result.speakerId(),
-                    speakerId -> TranscriptSpeaker.create(meeting, DiarizationPolicy.speakerLabel(speakerId)));
+                    speakerId -> TranscriptSpeaker.create(resultMeeting, DiarizationPolicy.speakerLabel(speakerId)));
             segment.assignSpeaker(speaker);
         }
         transcriptSpeakerRepository.saveAll(speakersBySpeakerId.values());
-        aiRequest.markCompleted();
         log.info("화자 분리가 완료되었습니다. aiRequestId={}, meetingId={}, speakerCount={}",
                 aiRequestId, meetingId, speakersBySpeakerId.size());
     }
 
     @Transactional
-    public void handleRetryableFailure(Long aiRequestId) {
-        AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
-        aiRequest.increaseRetryCount();
-        if (aiRequest.getRetryCount() < DiarizationPolicy.MAX_RETRY_COUNT) {
-            aiRequest.markAccepted();
-            log.warn("AI 화자 분리 호출에 실패해 재시도합니다. aiRequestId={}, retryCount={}",
-                    aiRequestId, aiRequest.getRetryCount());
+    public void handleRetryableFailure(Long aiRequestId, String processingToken) {
+        long lastRetryCount = DiarizationPolicy.MAX_RETRY_COUNT - 1;
+        if (aiRequestRepository.retryProcessing(aiRequestId, processingToken, lastRetryCount) == 1) {
+            log.warn("AI 화자 분리 호출에 실패해 재시도합니다. aiRequestId={}", aiRequestId);
             return;
         }
-        failPermanently(aiRequest);
+        if (aiRequestRepository.failRetryExhaustedProcessing(
+                aiRequestId, processingToken, lastRetryCount, DiarizationPolicy.MAX_RETRY_COUNT) == 1) {
+            log.error("AI 화자 분리 호출이 최종 실패했습니다. aiRequestId={}", aiRequestId);
+        }
     }
 
     @Transactional
-    public void handlePermanentFailure(Long aiRequestId) {
-        AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
-        failPermanently(aiRequest);
-    }
-
-    private void failPermanently(AiRequest aiRequest) {
-        aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
-        log.error("AI 화자 분리 호출이 최종 실패했습니다. aiRequestId={}, retryCount={}",
-                aiRequest.getId(), aiRequest.getRetryCount());
+    public void handlePermanentFailure(Long aiRequestId, String processingToken) {
+        if (aiRequestRepository.failProcessing(aiRequestId, processingToken) == 1) {
+            log.error("AI 화자 분리 호출이 최종 실패했습니다. aiRequestId={}", aiRequestId);
+        }
     }
 
     private boolean isAudioWaitExceeded(AiRequest aiRequest) {

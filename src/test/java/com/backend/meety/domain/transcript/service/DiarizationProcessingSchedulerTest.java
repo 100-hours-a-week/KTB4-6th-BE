@@ -5,6 +5,7 @@ import static com.backend.meety.domain.recording.RecordingFixtures.team;
 import static com.backend.meety.domain.recording.RecordingFixtures.withId;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -17,6 +18,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
+import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.transcript.DiarizationPolicy;
@@ -33,6 +35,8 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
 class DiarizationProcessingSchedulerTest {
+
+    private static final String TOKEN = "attempt-token";
 
     private final AiRequestRepository aiRequests = mock(AiRequestRepository.class);
     private final DiarizationService service = mock(DiarizationService.class);
@@ -64,12 +68,13 @@ class DiarizationProcessingSchedulerTest {
     @Test
     @DisplayName("성공하면 결과를 반영한다")
     void processesAcceptedRequest() {
-        when(service.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(service.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestDiarization(payload)).thenReturn(response);
 
         scheduler.processAcceptedDiarizations();
 
-        verify(service).completeProcessing(900L, response);
+        verify(service).completeProcessing(900L, TOKEN, response);
     }
 
     @Test
@@ -80,42 +85,45 @@ class DiarizationProcessingSchedulerTest {
         scheduler.processAcceptedDiarizations();
 
         verify(aiClient, never()).requestDiarization(any());
-        verify(service, never()).completeProcessing(anyLong(), any());
+        verify(service, never()).completeProcessing(anyLong(), anyString(), any());
     }
 
     @Test
     @DisplayName("422는 재시도하지 않고 최종 실패한다")
     void unprocessableEntityFailsPermanently() {
-        when(service.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(service.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestDiarization(payload)).thenThrow(HttpClientErrorException.create(
                 HttpStatus.UNPROCESSABLE_ENTITY, "422", HttpHeaders.EMPTY, new byte[0], null));
 
         scheduler.processAcceptedDiarizations();
 
-        verify(service).handlePermanentFailure(900L);
-        verify(service, never()).handleRetryableFailure(anyLong());
+        verify(service).handlePermanentFailure(900L, TOKEN);
+        verify(service, never()).handleRetryableFailure(anyLong(), anyString());
     }
 
     @Test
     @DisplayName("502·504는 재시도한다")
     void serverErrorIsRetryable() {
-        when(service.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(service.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestDiarization(payload)).thenThrow(HttpServerErrorException.create(
                 HttpStatus.BAD_GATEWAY, "502", HttpHeaders.EMPTY, new byte[0], null));
 
         scheduler.processAcceptedDiarizations();
 
-        verify(service).handleRetryableFailure(900L);
+        verify(service).handleRetryableFailure(900L, TOKEN);
     }
 
     @Test
     @DisplayName("통신 오류는 재시도한다")
     void ioErrorIsRetryable() {
-        when(service.startProcessing(900L)).thenReturn(Optional.of(payload));
+        when(service.startProcessing(900L))
+                .thenReturn(Optional.of(new AiProcessingAttempt<>(900L, TOKEN, payload)));
         when(aiClient.requestDiarization(payload)).thenThrow(new ResourceAccessException("timeout"));
 
         scheduler.processAcceptedDiarizations();
 
-        verify(service).handleRetryableFailure(900L);
+        verify(service).handleRetryableFailure(900L, TOKEN);
     }
 }

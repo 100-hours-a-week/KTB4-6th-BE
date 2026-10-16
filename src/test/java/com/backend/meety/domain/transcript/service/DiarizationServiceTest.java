@@ -11,6 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -25,6 +26,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
+import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.recording.entity.AudioFile;
@@ -34,6 +36,7 @@ import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.recording.storage.AudioFileStorage;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.transcript.DiarizationPolicy;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
 import com.backend.meety.domain.transcript.entity.TranscriptSpeaker;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
@@ -82,7 +85,7 @@ class DiarizationServiceTest {
         aiRequest = withId(AiRequest.create(team, member, KEY, AiRequestType.DIARIZATION), AI_REQUEST_ID);
         first = withId(TranscriptSegment.createFinal(meeting, "k-1", 0L, "첫 발화", 0L, 1000L, NOW), 101L);
         second = withId(TranscriptSegment.createFinal(meeting, "k-2", 1L, "둘째 발화", 1000L, null, NOW), 102L);
-        when(aiRequests.claimAccepted(AI_REQUEST_ID)).thenAnswer(invocation -> {
+        when(aiRequests.claimAccepted(eq(AI_REQUEST_ID), anyString())).thenAnswer(invocation -> {
             if (!aiRequest.isAccepted()) {
                 return 0;
             }
@@ -95,6 +98,35 @@ class DiarizationServiceTest {
         when(segments.findAllByMeetingIdOrderBySequence(MEETING_ID)).thenReturn(List.of(first, second));
         when(storage.createDownloadUrl(anyString(), any(Duration.class)))
                 .thenReturn(URI.create("https://bucket.s3.amazonaws.com/meetings/100.mp4?sig=1").toURL());
+        when(aiRequests.completeProcessing(AI_REQUEST_ID, "token-a")).thenAnswer(invocation -> {
+            aiRequest.markCompleted();
+            return 1;
+        });
+        when(aiRequests.retryProcessing(AI_REQUEST_ID, "token-a", DiarizationPolicy.MAX_RETRY_COUNT - 1))
+                .thenAnswer(invocation -> {
+                    if (aiRequest.getRetryCount() >= DiarizationPolicy.MAX_RETRY_COUNT - 1) {
+                        return 0;
+                    }
+                    aiRequest.increaseRetryCount();
+                    aiRequest.markAccepted();
+                    return 1;
+                });
+        when(aiRequests.failRetryExhaustedProcessing(
+                AI_REQUEST_ID, "token-a", DiarizationPolicy.MAX_RETRY_COUNT - 1,
+                DiarizationPolicy.MAX_RETRY_COUNT)).thenAnswer(invocation -> {
+                    if (aiRequest.getRetryCount() < DiarizationPolicy.MAX_RETRY_COUNT - 1) {
+                        return 0;
+                    }
+                    if (aiRequest.getRetryCount() < DiarizationPolicy.MAX_RETRY_COUNT) {
+                        aiRequest.increaseRetryCount();
+                    }
+                    aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
+                    return 1;
+                });
+        when(aiRequests.failProcessing(eq(AI_REQUEST_ID), anyString())).thenAnswer(invocation -> {
+            aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
+            return 1;
+        });
     }
 
     private AudioFile availableAudio() {
@@ -154,17 +186,18 @@ class DiarizationServiceTest {
         when(audioFiles.findByMeetingIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.of(availableAudio()));
 
         // when
-        Optional<DiarizationAiRequest> request = service.startProcessing(AI_REQUEST_ID);
+        Optional<AiProcessingAttempt<DiarizationAiRequest>> request = service.startProcessing(AI_REQUEST_ID);
 
         // then
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.PROCESSING);
         assertThat(request).isPresent();
-        assertThat(request.get().requestId()).isEqualTo("900");
-        assertThat(request.get().meetingId()).isEqualTo(MEETING_ID);
-        assertThat(request.get().audioUrl()).startsWith("https://");
-        assertThat(request.get().segments()).hasSize(2);
-        assertThat(request.get().segments().get(0).segmentId()).isEqualTo(101L);
-        assertThat(request.get().segments().get(1).endedAtMs()).isEqualTo(1000L);
+        assertThat(request.get().processingToken()).isNotBlank();
+        assertThat(request.get().payload().requestId()).isEqualTo("900");
+        assertThat(request.get().payload().meetingId()).isEqualTo(MEETING_ID);
+        assertThat(request.get().payload().audioUrl()).startsWith("https://");
+        assertThat(request.get().payload().segments()).hasSize(2);
+        assertThat(request.get().payload().segments().get(0).segmentId()).isEqualTo(101L);
+        assertThat(request.get().payload().segments().get(1).endedAtMs()).isEqualTo(1000L);
     }
 
     @Test
@@ -179,12 +212,12 @@ class DiarizationServiceTest {
         when(audioFiles.findByMeetingIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.empty());
 
         // when
-        Optional<DiarizationAiRequest> result = service.startProcessing(AI_REQUEST_ID);
+        Optional<AiProcessingAttempt<DiarizationAiRequest>> result = service.startProcessing(AI_REQUEST_ID);
 
         // then
         assertThat(result).isEmpty();
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
-        verify(aiRequests, never()).claimAccepted(anyLong());
+        verify(aiRequests, never()).claimAccepted(anyLong(), anyString());
         verify(storage, never()).createDownloadUrl(anyString(), any());
     }
 
@@ -200,13 +233,13 @@ class DiarizationServiceTest {
         when(segments.findAllByMeetingIdOrderBySequence(MEETING_ID)).thenReturn(List.of());
 
         // when
-        Optional<DiarizationAiRequest> result = service.startProcessing(AI_REQUEST_ID);
+        Optional<AiProcessingAttempt<DiarizationAiRequest>> result = service.startProcessing(AI_REQUEST_ID);
 
         // then
         assertThat(result).isEmpty();
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
         assertThat(aiRequest.getFailureReason()).isEqualTo(AiFailureReason.TRANSCRIPT_EMPTY);
-        verify(aiRequests, never()).claimAccepted(anyLong());
+        verify(aiRequests, never()).claimAccepted(anyLong(), anyString());
         verify(storage, never()).createDownloadUrl(anyString(), any());
     }
 
@@ -219,10 +252,10 @@ class DiarizationServiceTest {
 
         // given
         when(audioFiles.findByMeetingIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.of(availableAudio()));
-        doReturn(0).when(aiRequests).claimAccepted(AI_REQUEST_ID);
+        doReturn(0).when(aiRequests).claimAccepted(eq(AI_REQUEST_ID), anyString());
 
         // when
-        Optional<DiarizationAiRequest> result = service.startProcessing(AI_REQUEST_ID);
+        Optional<AiProcessingAttempt<DiarizationAiRequest>> result = service.startProcessing(AI_REQUEST_ID);
 
         // then
         assertThat(result).isEmpty();
@@ -258,7 +291,7 @@ class DiarizationServiceTest {
                 new DiarizationAiResultSegment(101L, "첫 발화", 0L, 1000L, 1L),
                 new DiarizationAiResultSegment(102L, "둘째 발화", 1000L, 1000L, 0L)));
 
-        service.completeProcessing(AI_REQUEST_ID, response);
+        service.completeProcessing(AI_REQUEST_ID, "token-a", response);
 
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.COMPLETED);
         assertThat(first.getTranscriptSpeaker().getSpeakerLabel()).isEqualTo("화자 2");
@@ -277,7 +310,7 @@ class DiarizationServiceTest {
                 new DiarizationAiResultSegment(101L, "첫 발화", 0L, 1000L, null),
                 new DiarizationAiResultSegment(999L, "없는 구간", 0L, 1L, 0L)));
 
-        service.completeProcessing(AI_REQUEST_ID, response);
+        service.completeProcessing(AI_REQUEST_ID, "token-a", response);
 
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.COMPLETED);
         assertThat(first.getTranscriptSpeaker()).isNull();
@@ -289,7 +322,8 @@ class DiarizationServiceTest {
     void completeProcessingFailsOnMeetingMismatch() {
         aiRequest.markProcessing();
 
-        service.completeProcessing(AI_REQUEST_ID, new DiarizationAiResponse(MEETING_ID + 1, List.of()));
+        service.completeProcessing(
+                AI_REQUEST_ID, "token-a", new DiarizationAiResponse(MEETING_ID + 1, List.of()));
 
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
         assertThat(aiRequest.getFailureReason()).isEqualTo(AiFailureReason.AI_CALL_FAILED);
@@ -301,7 +335,7 @@ class DiarizationServiceTest {
     void retryableFailureRequeuesBelowLimit() {
         aiRequest.markProcessing();
 
-        service.handleRetryableFailure(AI_REQUEST_ID);
+        service.handleRetryableFailure(AI_REQUEST_ID, "token-a");
 
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
         assertThat(aiRequest.getRetryCount()).isEqualTo(1L);
@@ -314,9 +348,52 @@ class DiarizationServiceTest {
         aiRequest.increaseRetryCount();
         aiRequest.increaseRetryCount();
 
-        service.handleRetryableFailure(AI_REQUEST_ID);
+        service.handleRetryableFailure(AI_REQUEST_ID, "token-a");
 
         assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
         assertThat(aiRequest.getFailureReason()).isEqualTo(AiFailureReason.AI_CALL_FAILED);
+    }
+
+    @Test
+    @DisplayName("이전 Attempt의 늦은 화자 분리 성공 응답은 최신 화자 매핑을 덮어쓰지 않는다")
+    void lateSuccessDoesNotOverwriteCurrentSpeakerMapping() {
+        // 테스트 목적:
+        // 재시도 Attempt가 반영한 화자 매핑이 있는 상태에서 이전 token의 성공 응답이 도착해도
+        // 기존 TranscriptSegment 매핑과 화자 결과가 유지되는지 검증한다.
+
+        // given
+        aiRequest.markProcessing();
+        TranscriptSpeaker currentSpeaker = TranscriptSpeaker.create(meeting, "최신 화자");
+        first.assignSpeaker(currentSpeaker);
+        when(aiRequests.completeProcessing(AI_REQUEST_ID, "old-token")).thenReturn(0);
+        DiarizationAiResponse oldResponse = new DiarizationAiResponse(MEETING_ID, List.of(
+                new DiarizationAiResultSegment(101L, "첫 발화", 0L, 1000L, 9L)));
+
+        // when
+        service.completeProcessing(AI_REQUEST_ID, "old-token", oldResponse);
+
+        // then
+        assertThat(first.getTranscriptSpeaker()).isSameAs(currentSpeaker);
+        assertThat(first.getTranscriptSpeaker().getSpeakerLabel()).isEqualTo("최신 화자");
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.PROCESSING);
+        verify(speakers, never()).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("이전 Attempt의 늦은 화자 분리 실패 응답은 최신 Attempt를 변경하지 않는다")
+    void lateFailureDoesNotChangeCurrentDiarizationAttempt() {
+        // 테스트 목적:
+        // 최신 화자 분리 Attempt가 PROCESSING인 동안 이전 token의 실패 응답이 도착해도
+        // 상태와 retryCount가 유지되는지 검증한다.
+
+        // given
+        aiRequest.markProcessing();
+
+        // when
+        service.handleRetryableFailure(AI_REQUEST_ID, "old-token");
+
+        // then
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.PROCESSING);
+        assertThat(aiRequest.getRetryCount()).isZero();
     }
 }
