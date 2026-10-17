@@ -26,7 +26,7 @@ public class OpenApiConfig {
             .toList();
 
     @Bean
-    public OpenAPI openAPI() {
+    public OpenAPI openAPI(AuthCookieProperties authCookieProperties) {
         return new OpenAPI()
                 .info(new Info()
                         .title("Meety API")
@@ -36,7 +36,7 @@ public class OpenApiConfig {
                         .addSecuritySchemes(COOKIE_AUTH, new SecurityScheme()
                                 .type(SecurityScheme.Type.APIKEY)
                                 .in(SecurityScheme.In.COOKIE)
-                                .name("accessToken")));
+                                .name(authCookieProperties.accessTokenCookieName())));
     }
 
     @Bean

@@ -1,5 +1,6 @@
 package com.backend.meety.global.security;
 
+import com.backend.meety.global.config.AuthCookieProperties;
 import com.backend.meety.global.config.CorsProperties;
 import com.backend.meety.global.config.InternalApiProperties;
 import jakarta.servlet.http.HttpServletRequest;
@@ -47,6 +48,7 @@ public class SecurityConfig {
     private final ObjectProvider<ManagementServerProperties> managementServerProperties;
     private final Environment environment;
     private final InternalApiProperties internalApiProperties;
+    private final AuthCookieProperties authCookieProperties;
 
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -89,7 +91,7 @@ public class SecurityConfig {
                             .anyRequest().authenticated();
                 })
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(authenticationEntryPoint))
-                .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider, accessTokenBlacklist),
+                .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider, accessTokenBlacklist, authCookieProperties),
                         UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

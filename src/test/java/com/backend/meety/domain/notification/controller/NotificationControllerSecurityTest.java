@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.backend.meety.domain.notification.realtime.NotificationSseService;
 import com.backend.meety.domain.notification.service.NotificationService;
+import com.backend.meety.global.config.AuthCookieProperties;
 import com.backend.meety.global.config.CorsProperties;
 import com.backend.meety.global.config.InternalApiProperties;
 import com.backend.meety.global.security.AccessTokenBlacklist;
@@ -51,6 +52,9 @@ class NotificationControllerSecurityTest {
 
     @MockitoBean
     private CorsProperties corsProperties;
+
+    @MockitoBean
+    private AuthCookieProperties authCookieProperties;
 
     @MockitoBean
     private InternalApiProperties internalApiProperties;

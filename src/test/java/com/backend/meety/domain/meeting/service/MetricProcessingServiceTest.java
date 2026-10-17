@@ -7,6 +7,9 @@ import static com.backend.meety.domain.recording.RecordingFixtures.withId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -21,6 +24,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
+import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.meeting.MetricPolicy;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingMetric;
@@ -68,9 +72,46 @@ class MetricProcessingServiceTest {
                 AiRequest.create(team, member, MetricPolicy.idempotencyKey(502L), AiRequestType.METRIC), 900L);
         summary = withId(MeetingSummary.createPending(summaryRequest, team, meeting, 2L, null), 502L);
         summary.complete("# 회의 요약");
+        when(aiRequests.claimAccepted(eq(900L), anyString())).thenAnswer(invocation -> {
+            if (!metricRequest.isAccepted()) {
+                return 0;
+            }
+            metricRequest.markProcessing();
+            return 1;
+        });
         when(aiRequests.findById(900L)).thenReturn(Optional.of(metricRequest));
         when(summaries.findById(502L)).thenReturn(Optional.of(summary));
         when(transcripts.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(segment(101L, 0L)));
+        when(aiRequests.completeProcessing(anyLong(), anyString())).thenAnswer(invocation -> {
+            AiRequest request = aiRequests.findById(invocation.getArgument(0)).orElseThrow();
+            request.markCompleted();
+            return 1;
+        });
+        when(aiRequests.retryProcessing(900L, "token-a", MetricPolicy.MAX_RETRY_COUNT - 1))
+                .thenAnswer(invocation -> {
+                    if (metricRequest.getRetryCount() >= MetricPolicy.MAX_RETRY_COUNT - 1) {
+                        return 0;
+                    }
+                    metricRequest.increaseRetryCount();
+                    metricRequest.markAccepted();
+                    return 1;
+                });
+        when(aiRequests.failRetryExhaustedProcessing(
+                900L, "token-a", MetricPolicy.MAX_RETRY_COUNT - 1, MetricPolicy.MAX_RETRY_COUNT))
+                .thenAnswer(invocation -> {
+                    if (metricRequest.getRetryCount() < MetricPolicy.MAX_RETRY_COUNT - 1) {
+                        return 0;
+                    }
+                    if (metricRequest.getRetryCount() < MetricPolicy.MAX_RETRY_COUNT) {
+                        metricRequest.increaseRetryCount();
+                    }
+                    metricRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
+                    return 1;
+                });
+        when(aiRequests.failProcessing(eq(900L), anyString())).thenAnswer(invocation -> {
+            metricRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
+            return 1;
+        });
     }
 
     @Test
@@ -83,14 +124,15 @@ class MetricProcessingServiceTest {
         // given
 
         // when
-        Optional<MetricAiRequest> result = service.startProcessing(900L);
+        Optional<AiProcessingAttempt<MetricAiRequest>> result = service.startProcessing(900L);
 
         // then
         assertThat(result).isPresent();
         assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.PROCESSING);
-        assertThat(result.get().requestId()).isEqualTo("900");
-        assertThat(result.get().summary()).isEqualTo("# 회의 요약");
-        assertThat(result.get().segments()).hasSize(1);
+        assertThat(result.get().processingToken()).isNotBlank();
+        assertThat(result.get().payload().requestId()).isEqualTo("900");
+        assertThat(result.get().payload().summary()).isEqualTo("# 회의 요약");
+        assertThat(result.get().payload().segments()).hasSize(1);
     }
 
     @Test
@@ -104,12 +146,52 @@ class MetricProcessingServiceTest {
         when(summaries.findById(502L)).thenReturn(Optional.empty());
 
         // when
-        Optional<MetricAiRequest> result = service.startProcessing(900L);
+        Optional<AiProcessingAttempt<MetricAiRequest>> result = service.startProcessing(900L);
 
         // then
         assertThat(result).isEmpty();
         assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
         assertThat(metricRequest.getFailureReason()).isEqualTo(AiFailureReason.AI_CALL_FAILED);
+        verify(aiRequests, never()).claimAccepted(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("다른 인스턴스가 먼저 선점한 Metric 요청은 건너뛴다")
+    void startProcessingSkipsClaimMiss() {
+        // 테스트 목적:
+        // 처리 가능한 Metric 요청이라도 다른 인스턴스의 조건부 UPDATE가 먼저 성공하면
+        // DTO를 만들거나 AI 호출 대상으로 반환하지 않는지 검증한다.
+
+        // given
+        doReturn(0).when(aiRequests).claimAccepted(eq(900L), anyString());
+
+        // when
+        Optional<AiProcessingAttempt<MetricAiRequest>> result = service.startProcessing(900L);
+
+        // then
+        assertThat(result).isEmpty();
+        assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
+        verify(transcripts, never()).findAllByMeetingIdOrderBySequence(anyLong());
+    }
+
+    @Test
+    @DisplayName("재시도로 ACCEPTED가 된 Metric 요청은 다시 선점할 수 있다")
+    void retryableRequestCanBeClaimedAgain() {
+        // 테스트 목적:
+        // AI 호출 실패로 ACCEPTED 상태에 재등록된 Metric 요청이
+        // 다음 폴링에서 원자적 선점 후 다시 AI 요청으로 만들어지는지 검증한다.
+
+        // given
+        metricRequest.markProcessing();
+        service.handleRetryableFailure(900L, "token-a");
+
+        // when
+        Optional<AiProcessingAttempt<MetricAiRequest>> result = service.startProcessing(900L);
+
+        // then
+        assertThat(result).isPresent();
+        assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.PROCESSING);
+        assertThat(metricRequest.getRetryCount()).isEqualTo(1L);
     }
 
     @Test
@@ -125,7 +207,7 @@ class MetricProcessingServiceTest {
                 "900", 100L, new MetricAiOffTopic(0L), List.of(new MetricAiAgenda("배포 일정", 2500L)));
 
         // when
-        service.completeProcessing(900L, response);
+        service.completeProcessing(900L, "token-a", response);
 
         // then
         ArgumentCaptor<MeetingMetric> captor = ArgumentCaptor.forClass(MeetingMetric.class);
@@ -152,7 +234,7 @@ class MetricProcessingServiceTest {
         MetricAiResponse response = new MetricAiResponse("900", 100L, null, null);
 
         // when
-        service.completeProcessing(900L, response);
+        service.completeProcessing(900L, "token-a", response);
 
         // then
         ArgumentCaptor<MeetingMetric> captor = ArgumentCaptor.forClass(MeetingMetric.class);
@@ -173,7 +255,7 @@ class MetricProcessingServiceTest {
         MetricAiResponse response = new MetricAiResponse("900", 100L, new MetricAiOffTopic(null), List.of());
 
         // when
-        service.completeProcessing(900L, response);
+        service.completeProcessing(900L, "token-a", response);
 
         // then
         ArgumentCaptor<MeetingMetric> captor = ArgumentCaptor.forClass(MeetingMetric.class);
@@ -194,7 +276,7 @@ class MetricProcessingServiceTest {
         MetricAiResponse response = new MetricAiResponse("901", 100L, new MetricAiOffTopic(1L), List.of());
 
         // when
-        service.completeProcessing(900L, response);
+        service.completeProcessing(900L, "token-a", response);
 
         // then
         assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
@@ -213,7 +295,7 @@ class MetricProcessingServiceTest {
         MetricAiResponse response = new MetricAiResponse("900", 101L, new MetricAiOffTopic(1L), List.of());
 
         // when
-        service.completeProcessing(900L, response);
+        service.completeProcessing(900L, "token-a", response);
 
         // then
         assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
@@ -233,7 +315,7 @@ class MetricProcessingServiceTest {
         MetricAiResponse response = new MetricAiResponse("900", 100L, new MetricAiOffTopic(1L), List.of());
 
         // when
-        service.completeProcessing(900L, response);
+        service.completeProcessing(900L, "token-a", response);
 
         // then
         assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.COMPLETED);
@@ -261,7 +343,7 @@ class MetricProcessingServiceTest {
                 "901", 100L, new MetricAiOffTopic(2000L), List.of(new MetricAiAgenda("품질", 3000L)));
 
         // when
-        service.completeProcessing(901L, response);
+        service.completeProcessing(901L, "token-a", response);
 
         // then
         ArgumentCaptor<MeetingMetric> captor = ArgumentCaptor.forClass(MeetingMetric.class);
@@ -282,7 +364,7 @@ class MetricProcessingServiceTest {
         metricRequest.markProcessing();
 
         // when
-        service.handleRetryableFailure(900L);
+        service.handleRetryableFailure(900L, "token-a");
 
         // then
         assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
@@ -302,11 +384,50 @@ class MetricProcessingServiceTest {
         metricRequest.increaseRetryCount();
 
         // when
-        service.handleRetryableFailure(900L);
+        service.handleRetryableFailure(900L, "token-a");
 
         // then
         assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
         assertThat(metricRequest.getFailureReason()).isEqualTo(AiFailureReason.AI_CALL_FAILED);
+    }
+
+    @Test
+    @DisplayName("이전 Attempt의 늦은 Metric 성공 응답은 결과를 저장하지 않는다")
+    void lateSuccessDoesNotStoreOldMetricResult() {
+        // 테스트 목적:
+        // 재시도 이후 최신 token이 활성화된 상태에서 이전 token의 Metric 성공 응답이 도착해도
+        // 오래된 MeetingMetric 행을 저장하지 않는지 검증한다.
+
+        // given
+        metricRequest.markProcessing();
+        doReturn(0).when(aiRequests).completeProcessing(900L, "old-token");
+        MetricAiResponse oldResponse = new MetricAiResponse(
+                "900", 100L, new MetricAiOffTopic(9999L), List.of(new MetricAiAgenda("오래된 결과", 9999L)));
+
+        // when
+        service.completeProcessing(900L, "old-token", oldResponse);
+
+        // then
+        assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.PROCESSING);
+        verify(metrics, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("이전 Attempt의 늦은 Metric 실패 응답은 최신 Attempt를 변경하지 않는다")
+    void lateFailureDoesNotChangeCurrentMetricAttempt() {
+        // 테스트 목적:
+        // 최신 Metric Attempt가 PROCESSING인 동안 이전 token의 실패 응답이 도착해도
+        // 상태와 retryCount가 유지되는지 검증한다.
+
+        // given
+        metricRequest.markProcessing();
+
+        // when
+        service.handleRetryableFailure(900L, "old-token");
+
+        // then
+        assertThat(metricRequest.getStatus()).isEqualTo(AiRequestStatus.PROCESSING);
+        assertThat(metricRequest.getRetryCount()).isZero();
     }
 
     private TranscriptSegment segment(Long id, Long sequenceNumber) {
