@@ -52,15 +52,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     private void authenticate(HttpServletRequest request, String token) {
-        if (accessTokenBlacklist.contains(token)) {
-            request.setAttribute(TokenConstants.AUTH_FAILURE_ATTRIBUTE, AuthErrorCode.INVALID_ACCESS_TOKEN);
-            return;
-        }
         try {
             Claims claims = jwtTokenProvider.validateAndDecode(token);
             Long userId = Long.valueOf(claims.getSubject());
             String role = claims.get(TokenConstants.ROLE_CLAIM, String.class);
-            if (role == null) {
+            if (role == null || accessTokenBlacklist.contains(token)) {
                 request.setAttribute(TokenConstants.AUTH_FAILURE_ATTRIBUTE, AuthErrorCode.INVALID_ACCESS_TOKEN);
                 return;
             }

@@ -31,17 +31,18 @@ public class WebSocketCookieAuthentication {
         if (token == null) {
             throw new AuthException(AuthErrorCode.AUTHENTICATION_REQUIRED);
         }
-        if (accessTokenBlacklist.contains(token)) {
-            throw new AuthException(AuthErrorCode.INVALID_ACCESS_TOKEN);
-        }
+        Claims claims;
         try {
-            Claims claims = jwtTokenProvider.validateAndDecode(token);
-            return Long.valueOf(claims.getSubject());
+            claims = jwtTokenProvider.validateAndDecode(token);
         } catch (ExpiredJwtException e) {
             throw new AuthException(AuthErrorCode.EXPIRED_ACCESS_TOKEN);
         } catch (JwtException | IllegalArgumentException e) {
             throw new AuthException(AuthErrorCode.INVALID_ACCESS_TOKEN);
         }
+        if (accessTokenBlacklist.contains(token)) {
+            throw new AuthException(AuthErrorCode.INVALID_ACCESS_TOKEN);
+        }
+        return Long.valueOf(claims.getSubject());
     }
 
     private String resolveToken(HttpServletRequest request) {
