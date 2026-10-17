@@ -18,6 +18,7 @@ import com.backend.meety.domain.user.exception.UserErrorCode;
 import com.backend.meety.domain.user.repository.UserAuthAccountRepository;
 import com.backend.meety.domain.user.repository.UserRepository;
 import com.backend.meety.global.exception.BusinessException;
+import com.backend.meety.global.security.AccessTokenBlacklist;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -47,12 +48,17 @@ class UserServiceTest {
     @Mock
     private OAuthProviderClient kakaoOAuthClient;
 
+    @Mock
+    private AccessTokenBlacklist accessTokenBlacklist;
+
+    private static final String ACCESS_TOKEN = "access-token";
+
     private UserService userService;
 
     @BeforeEach
     void setUp() {
         userService = new UserService(userRepository, userAuthAccountRepository,
-                userAccountService, teamMemberRepository, Map.of("kakao", kakaoOAuthClient));
+                userAccountService, teamMemberRepository, Map.of("kakao", kakaoOAuthClient), accessTokenBlacklist);
     }
 
     @Test
@@ -64,10 +70,11 @@ class UserServiceTest {
                 .willReturn(List.of(UserAuthAccount.of(user, "kakao", "12345")));
         given(kakaoOAuthClient.unlink("12345")).willReturn(true);
 
-        userService.withdraw(1L);
+        userService.withdraw(1L, ACCESS_TOKEN);
 
         then(kakaoOAuthClient).should().unlink("12345");
         then(userAccountService).should().withdraw(1L);
+        then(accessTokenBlacklist).should().register(ACCESS_TOKEN);
     }
 
     @Test
@@ -77,10 +84,11 @@ class UserServiceTest {
         user.withdraw(LocalDateTime.now());
         given(userRepository.findById(1L)).willReturn(Optional.of(user));
 
-        userService.withdraw(1L);
+        userService.withdraw(1L, ACCESS_TOKEN);
 
         then(kakaoOAuthClient).shouldHaveNoInteractions();
         then(userAccountService).should(never()).withdraw(1L);
+        then(accessTokenBlacklist).shouldHaveNoInteractions();
     }
 
     @Test
@@ -92,10 +100,11 @@ class UserServiceTest {
                 .willReturn(List.of(UserAuthAccount.of(user, "kakao", "12345")));
         given(kakaoOAuthClient.unlink("12345")).willReturn(false);
 
-        assertThatThrownBy(() -> userService.withdraw(1L))
+        assertThatThrownBy(() -> userService.withdraw(1L, ACCESS_TOKEN))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(UserErrorCode.USER_DELETE_FAILED));
         then(userAccountService).should(never()).withdraw(1L);
+        then(accessTokenBlacklist).shouldHaveNoInteractions();
     }
 
     @Test
@@ -103,7 +112,7 @@ class UserServiceTest {
     void failOnUnknownUser() {
         given(userRepository.findById(1L)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userService.withdraw(1L))
+        assertThatThrownBy(() -> userService.withdraw(1L, ACCESS_TOKEN))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(UserErrorCode.USER_DELETE_FAILED));
     }
@@ -116,7 +125,7 @@ class UserServiceTest {
         given(userAuthAccountRepository.findAllByUserId(1L))
                 .willReturn(List.of(UserAuthAccount.of(user, "naver", "999")));
 
-        assertThatThrownBy(() -> userService.withdraw(1L))
+        assertThatThrownBy(() -> userService.withdraw(1L, ACCESS_TOKEN))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(UserErrorCode.USER_DELETE_FAILED));
         then(userAccountService).should(never()).withdraw(1L);
@@ -131,7 +140,7 @@ class UserServiceTest {
         given(teamMemberRepository.findByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
                 .willReturn(Optional.of(TeamMember.createLeader(user, team, "팀장")));
 
-        assertThatThrownBy(() -> userService.withdraw(1L))
+        assertThatThrownBy(() -> userService.withdraw(1L, ACCESS_TOKEN))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(TeamErrorCode.LEADER_MUST_TRANSFER_OR_DELETE_TEAM);
@@ -152,7 +161,7 @@ class UserServiceTest {
                 .willReturn(List.of(UserAuthAccount.of(user, "kakao", "12345")));
         given(kakaoOAuthClient.unlink("12345")).willReturn(true);
 
-        userService.withdraw(1L);
+        userService.withdraw(1L, ACCESS_TOKEN);
 
         then(userAccountService).should().withdraw(1L);
     }
@@ -166,7 +175,7 @@ class UserServiceTest {
                 .willReturn(Optional.empty());
         given(userAuthAccountRepository.findAllByUserId(1L)).willReturn(List.of());
 
-        userService.withdraw(1L);
+        userService.withdraw(1L, ACCESS_TOKEN);
 
         then(userAccountService).should().withdraw(1L);
     }
