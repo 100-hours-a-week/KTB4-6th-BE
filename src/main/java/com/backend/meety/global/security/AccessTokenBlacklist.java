@@ -48,8 +48,8 @@ public class AccessTokenBlacklist {
         try {
             return Boolean.TRUE.equals(redisTemplate.hasKey(key(accessToken)));
         } catch (DataAccessException e) {
-            log.warn("AT 블랙리스트 조회에 실패해 토큰을 차단합니다.", e);
-            return true;
+            log.warn("AT 블랙리스트 조회에 실패해 토큰을 통과시킵니다.", e);
+            return false;
         }
     }
 
