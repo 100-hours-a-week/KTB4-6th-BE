@@ -121,10 +121,10 @@ class AccessTokenBlacklistTest {
     }
 
     @Test
-    @DisplayName("Redis 조회에 실패하면 AT를 통과시킨다")
-    void failOpenWhenRedisUnavailable() {
+    @DisplayName("Redis 조회에 실패하면 AT를 차단한다")
+    void failClosedWhenRedisUnavailable() {
         when(redisTemplate.hasKey(anyString())).thenThrow(new RedisConnectionFailureException("down"));
 
-        assertThat(blacklist.contains(jwtTokenProvider.createAccessToken(1L))).isFalse();
+        assertThat(blacklist.contains(jwtTokenProvider.createAccessToken(1L))).isTrue();
     }
 }
