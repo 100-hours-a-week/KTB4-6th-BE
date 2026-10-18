@@ -5,7 +5,9 @@ import java.time.LocalDate;
 public record DashboardChartPointResponse(
         LocalDate startDate,
         LocalDate endDate,
+        Long meetingCount,
         Long targetDurationSeconds,
-        Long actualDurationSeconds
+        Long actualDurationSeconds,
+        Long overtimeMeetings
 ) {
 }

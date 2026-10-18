@@ -1,6 +1,7 @@
 package com.backend.meety.domain.dashboard.service;
 
 import com.backend.meety.domain.dashboard.dto.DashboardChartPointResponse;
+import com.backend.meety.domain.dashboard.dto.DashboardMeetingResponse;
 import com.backend.meety.domain.dashboard.dto.DashboardResponse;
 import com.backend.meety.domain.dashboard.dto.DashboardSummaryResponse;
 import com.backend.meety.domain.dashboard.dto.DashboardTopicResponse;
@@ -22,16 +23,17 @@ import com.backend.meety.domain.team.repository.TeamRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,8 +47,8 @@ import tools.jackson.databind.ObjectMapper;
 public class DashboardService {
 
     private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
-    private static final Set<Integer> SUPPORTED_PERIOD_DAYS = Set.of(7, 14, 21, 28);
-    private static final int CHART_BUCKET_COUNT = 7;
+    private static final int DAILY_PERIOD_DAYS = 1;
+    private static final int WEEKLY_PERIOD_DAYS = 7;
     private static final BigDecimal ONE_HUNDRED = BigDecimal.valueOf(100);
     private static final BigDecimal ONE_THOUSAND = BigDecimal.valueOf(1000);
 
@@ -59,11 +61,11 @@ public class DashboardService {
     private final Clock clock;
 
     @Transactional(readOnly = true)
-    public DashboardResponse getDashboard(Long userId, Long teamId, Integer days) {
-        DashboardPeriod period = resolvePeriod(days);
+    public DashboardResponse getDashboard(Long userId, Long teamId, LocalDate from, LocalDate to) {
+        DashboardPeriod period = resolvePeriod(from, to);
         validateTeamAccess(userId, teamId);
 
-        List<DashboardMeetingDuration> durations = deduplicateByMeeting(
+        List<DashboardMeetingDuration> durations = period.isEntirelyFuture() ? List.of() : deduplicateByMeeting(
                 recordingSessionRepository.findDashboardCompletedSessions(
                         teamId, period.startDateTime(), period.endExclusiveDateTime()));
         Map<Long, DashboardMeetingDuration> durationByMeetingId = durations.stream()
@@ -81,17 +83,26 @@ public class DashboardService {
                 period.endDate(),
                 summary,
                 chart,
+                buildMeetings(period, durations),
                 topics
         );
     }
 
-    private DashboardPeriod resolvePeriod(Integer days) {
-        if (days == null || !SUPPORTED_PERIOD_DAYS.contains(days)) {
+    private DashboardPeriod resolvePeriod(LocalDate from, LocalDate to) {
+        if (from == null || to == null) {
             throw new DashboardException(DashboardErrorCode.INVALID_DASHBOARD_PERIOD);
         }
-        LocalDate endDate = LocalDate.now(clock.withZone(KST_ZONE_ID));
-        LocalDate startDate = endDate.minusDays(days - 1L);
-        return new DashboardPeriod(days, startDate, endDate);
+        long days = ChronoUnit.DAYS.between(from, to) + 1;
+        boolean daily = days == DAILY_PERIOD_DAYS;
+        boolean weekly = days == WEEKLY_PERIOD_DAYS
+                && from.getDayOfWeek() == DayOfWeek.MONDAY
+                && to.getDayOfWeek() == DayOfWeek.SUNDAY;
+        if (!daily && !weekly) {
+            throw new DashboardException(DashboardErrorCode.INVALID_DASHBOARD_PERIOD);
+        }
+        LocalDate today = LocalDate.now(clock.withZone(KST_ZONE_ID));
+        LocalDate queryEndDate = to.isAfter(today) ? today : to;
+        return new DashboardPeriod((int) days, from, to, queryEndDate);
     }
 
     private void validateTeamAccess(Long userId, Long teamId) {
@@ -166,16 +177,9 @@ public class DashboardService {
         long averageMeetingDurationSeconds = totalMeetings == 0
                 ? 0L
                 : Math.ceilDiv(totalMeetingDurationSeconds, totalMeetings);
-        List<DashboardMeetingDuration> overtimeDurations = durations.stream()
+        long overtimeMeetings = durations.stream()
                 .filter(DashboardMeetingDuration::isOvertime)
-                .toList();
-        long overtimeMeetings = overtimeDurations.size();
-        long overtimeDurationSeconds = overtimeDurations.stream()
-                .mapToLong(DashboardMeetingDuration::overtimeDurationSeconds)
-                .sum();
-        long overtimeTargetDurationSeconds = overtimeDurations.stream()
-                .mapToLong(DashboardMeetingDuration::targetDurationSeconds)
-                .sum();
+                .count();
 
         MetricContextOutAggregate contextOut = aggregateContextOut(latestMetrics, durationByMeetingId);
         return new DashboardSummaryResponse(
@@ -184,7 +188,6 @@ public class DashboardService {
                 averageMeetingDurationSeconds,
                 overtimeMeetings,
                 percentage(overtimeMeetings, totalMeetings),
-                percentage(overtimeDurationSeconds, overtimeTargetDurationSeconds),
                 msToSeconds(contextOut.contextOutDurationMs()),
                 percentage(contextOut.contextOutDurationMs(), contextOut.meetingDurationMs())
         );
@@ -215,24 +218,45 @@ public class DashboardService {
             DashboardPeriod period,
             List<DashboardMeetingDuration> durations
     ) {
-        int bucketDays = period.days() / CHART_BUCKET_COUNT;
         List<DashboardChartPointResponse> chart = new ArrayList<>();
-        for (int i = 0; i < CHART_BUCKET_COUNT; i++) {
-            LocalDate bucketStart = period.startDate().plusDays((long) i * bucketDays);
-            LocalDate bucketEnd = bucketStart.plusDays(bucketDays - 1L);
+        for (int i = 0; i < period.days(); i++) {
+            LocalDate date = period.startDate().plusDays(i);
+            long meetingCount = 0L;
             long targetDurationSeconds = 0L;
             long actualDurationSeconds = 0L;
+            long overtimeMeetings = 0L;
             for (DashboardMeetingDuration duration : durations) {
-                if (duration.endedDate().isBefore(bucketStart) || duration.endedDate().isAfter(bucketEnd)) {
+                if (!duration.endedDate().equals(date)) {
                     continue;
                 }
+                meetingCount++;
                 targetDurationSeconds += duration.targetDurationSeconds();
                 actualDurationSeconds += duration.actualDurationSeconds();
+                if (duration.isOvertime()) {
+                    overtimeMeetings++;
+                }
             }
             chart.add(new DashboardChartPointResponse(
-                    bucketStart, bucketEnd, targetDurationSeconds, actualDurationSeconds));
+                    date, date, meetingCount, targetDurationSeconds, actualDurationSeconds, overtimeMeetings));
         }
         return chart;
+    }
+
+    private List<DashboardMeetingResponse> buildMeetings(
+            DashboardPeriod period,
+            List<DashboardMeetingDuration> durations
+    ) {
+        if (period.days() != DAILY_PERIOD_DAYS) {
+            return List.of();
+        }
+        return durations.stream()
+                .sorted(Comparator.comparing(DashboardMeetingDuration::startedAt,
+                                Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(DashboardMeetingDuration::meetingId))
+                .map(duration -> new DashboardMeetingResponse(
+                        duration.meetingId(), duration.title(),
+                        duration.targetDurationSeconds(), duration.actualDurationSeconds()))
+                .toList();
     }
 
     private List<DashboardTopicResponse> buildTopics(List<MeetingMetric> metrics) {
@@ -275,19 +299,25 @@ public class DashboardService {
                 .stripTrailingZeros();
     }
 
-    private record DashboardPeriod(Integer days, LocalDate startDate, LocalDate endDate) {
+    private record DashboardPeriod(Integer days, LocalDate startDate, LocalDate endDate, LocalDate queryEndDate) {
+
+        boolean isEntirelyFuture() {
+            return startDate.isAfter(queryEndDate);
+        }
 
         LocalDateTime startDateTime() {
             return startDate.atStartOfDay();
         }
 
         LocalDateTime endExclusiveDateTime() {
-            return endDate.plusDays(1).atStartOfDay();
+            return queryEndDate.plusDays(1).atStartOfDay();
         }
     }
 
     private record DashboardMeetingDuration(
             Long meetingId,
+            String title,
+            LocalDateTime startedAt,
             LocalDate endedDate,
             Long targetDurationSeconds,
             Long actualDurationSeconds,
@@ -300,6 +330,8 @@ public class DashboardService {
                     session.getStartedAt(), session.getEndedAt()).toMillis());
             return new DashboardMeetingDuration(
                     meeting.getId(),
+                    meeting.getTitle(),
+                    meeting.getStartedAt(),
                     meeting.getEndedAt().toLocalDate(),
                     meeting.getTargetDurationMinutes() * 60L,
                     actualDurationMs / 1000L,
@@ -309,10 +341,6 @@ public class DashboardService {
 
         boolean isOvertime() {
             return actualDurationSeconds > targetDurationSeconds;
-        }
-
-        long overtimeDurationSeconds() {
-            return Math.max(0L, actualDurationSeconds - targetDurationSeconds);
         }
     }
 
