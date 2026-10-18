@@ -13,6 +13,8 @@ import static org.mockito.Mockito.times;
 import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.TeamCredit;
+import com.backend.meety.domain.credit.event.CreditEarnedEvent;
+import com.backend.meety.domain.credit.event.CreditEarnedReason;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import com.backend.meety.domain.team.dto.InvitationCodeResponse;
@@ -47,6 +49,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -77,13 +80,16 @@ class TeamServiceTest {
     @Mock
     private CreditLedgerRepository creditLedgerRepository;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private TeamService teamService;
 
     @BeforeEach
     void setUp() {
         teamService = new TeamService(teamRepository, teamMemberRepository,
                 teamInvitationCodeRepository, userRepository, teamCreditRepository,
-                creditLedgerRepository, FIXED_CLOCK, TestCreditPolicy.DEFAULT);
+                creditLedgerRepository, FIXED_CLOCK, TestCreditPolicy.DEFAULT, eventPublisher);
     }
 
     /**
@@ -108,8 +114,7 @@ class TeamServiceTest {
         given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.existsByCode(anyString())).willReturn(false);
-        given(teamCreditRepository.save(any(TeamCredit.class)))
-                .willAnswer(invocation -> invocation.getArgument(0));
+        givenInitialCreditSaveSucceeds();
 
         TeamCreateResponse response = teamService.create(1L, new TeamCreateRequest("Meety Team", "jay"));
 
@@ -175,8 +180,7 @@ class TeamServiceTest {
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.existsByCode(anyString()))
                 .willReturn(true, false);
-        given(teamCreditRepository.save(any(TeamCredit.class)))
-                .willAnswer(invocation -> invocation.getArgument(0));
+        givenInitialCreditSaveSucceeds();
 
         TeamCreateResponse response = teamService.create(1L, new TeamCreateRequest("Meety Team", "jay"));
 
@@ -491,15 +495,56 @@ class TeamServiceTest {
         given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
                 .willAnswer(invocation -> invocation.getArgument(0));
         given(teamInvitationCodeRepository.existsByCode(anyString())).willReturn(false);
-        given(teamCreditRepository.save(any(TeamCredit.class)))
-                .willAnswer(invocation -> invocation.getArgument(0));
+        givenInitialCreditSaveSucceeds();
 
         teamService.create(1L, new TeamCreateRequest("Meety Team", "jay"));
 
         ArgumentCaptor<TeamCredit> creditCaptor = ArgumentCaptor.forClass(TeamCredit.class);
         then(teamCreditRepository).should().save(creditCaptor.capture());
         assertThat(creditCaptor.getValue().getBalance()).isEqualTo(TestCreditPolicy.TEAM_CREATE_GRANT);
-        then(creditLedgerRepository).should().save(any(CreditLedger.class));
+        ArgumentCaptor<CreditLedger> ledgerCaptor = ArgumentCaptor.forClass(CreditLedger.class);
+        then(creditLedgerRepository).should().save(ledgerCaptor.capture());
+        assertThat(ledgerCaptor.getValue().getIdempotencyKey()).isEqualTo("EARN:TEAM_CREATE:7");
+        ArgumentCaptor<CreditEarnedEvent> eventCaptor = ArgumentCaptor.forClass(CreditEarnedEvent.class);
+        then(eventPublisher).should().publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getValue()).isEqualTo(new CreditEarnedEvent(
+                7L, "EARN:TEAM_CREATE:7", TestCreditPolicy.TEAM_CREATE_GRANT, CreditEarnedReason.TEAM_CREATE));
+    }
+
+    @Test
+    @DisplayName("팀 생성 초기 크레딧 원장 저장에 실패하면 적립 이벤트를 발행하지 않는다")
+    void initialCreditLedgerFailureDoesNotPublishCreditEarnedEvent() {
+        // 테스트 목적:
+        // 팀 생성 트랜잭션에서 초기 크레딧 원장 저장이 실패해 rollback되는 경우
+        // CREDIT_EARNED 알림 생성을 위한 이벤트가 발행되지 않는지 검증한다.
+
+        // given
+        given(userRepository.findByIdForUpdate(1L)).willReturn(Optional.of(User.create()));
+        given(teamMemberRepository.existsByUserIdAndMembershipStatus(1L, MembershipStatus.ACTIVE))
+                .willReturn(false);
+        given(teamRepository.save(any(Team.class))).willAnswer(TeamServiceTest::saveTeamWithId);
+        given(teamMemberRepository.save(any(TeamMember.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        given(teamInvitationCodeRepository.save(any(TeamInvitationCode.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        given(teamInvitationCodeRepository.existsByCode(anyString())).willReturn(false);
+        given(teamCreditRepository.save(any(TeamCredit.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        given(creditLedgerRepository.save(any(CreditLedger.class)))
+                .willThrow(new DataIntegrityViolationException("ledger insert failed"));
+
+        // when, then
+        assertThatThrownBy(() -> teamService.create(1L, new TeamCreateRequest("Meety Team", "jay")))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(TeamErrorCode.TEAM_CREATE_FAILED));
+        then(eventPublisher).should(never()).publishEvent(any(CreditEarnedEvent.class));
+    }
+
+    private void givenInitialCreditSaveSucceeds() {
+        given(teamCreditRepository.save(any(TeamCredit.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        given(creditLedgerRepository.save(any(CreditLedger.class)))
+                .willAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test

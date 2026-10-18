@@ -10,6 +10,8 @@ import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamBlock;
 import com.backend.meety.domain.team.entity.TeamInvitationCode;
 import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.event.TeamMemberJoinedEvent;
+import com.backend.meety.domain.team.event.TeamMemberJoinType;
 import com.backend.meety.domain.team.exception.TeamErrorCode;
 import com.backend.meety.domain.team.exception.TeamException;
 import com.backend.meety.domain.team.repository.TeamBlockRepository;
@@ -23,9 +25,11 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -43,6 +47,7 @@ public class TeamMemberService {
     private final TeamInvitationCodeRepository teamInvitationCodeRepository;
     private final TeamBlockRepository teamBlockRepository;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public MyTeamResponse join(Long userId, TeamJoinRequest request) {
@@ -56,12 +61,20 @@ public class TeamMemberService {
         validateCapacity(team.getId());
         validateDisplayNameAvailable(team.getId(), userId, request.displayName());
         try {
-            teamMemberRepository.findByTeamIdAndUserId(team.getId(), userId)
-                    .ifPresentOrElse(
-                            existing -> existing.rejoin(request.displayName()),
-                            () -> teamMemberRepository.save(
-                                    TeamMember.createMember(user, team, request.displayName())));
+            TeamMemberJoinType joinType;
+            TeamMember joinedMember;
+            Optional<TeamMember> existingMember = teamMemberRepository.findByTeamIdAndUserId(team.getId(), userId);
+            if (existingMember.isPresent()) {
+                joinedMember = existingMember.get();
+                joinedMember.rejoin(request.displayName());
+                joinType = TeamMemberJoinType.REJOIN;
+            } else {
+                joinedMember = teamMemberRepository.save(TeamMember.createMember(user, team, request.displayName()));
+                joinType = TeamMemberJoinType.NEW;
+            }
             teamMemberRepository.flush();
+            eventPublisher.publishEvent(TeamMemberJoinedEvent.create(
+                    team.getId(), joinedMember.getId(), userId, joinedMember.getDisplayName(), joinType));
             return MyTeamResponse.of(team.getId());
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.TEAM_MEMBERSHIP_CREATE_FAILED);

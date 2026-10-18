@@ -1,5 +1,8 @@
 package com.backend.meety.domain.meeting.realtime;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -8,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -17,6 +21,13 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class MeetingSseRegistry {
 
     private final ConcurrentHashMap<Long, ConcurrentHashMap<Long, SseEmitter>> emitters = new ConcurrentHashMap<>();
+    private final Timer sendDuration;
+    private final Counter sendFailures;
+
+    public MeetingSseRegistry(MeterRegistry meters) {
+        sendDuration = meters.timer("meeting.sse.emitter.send");
+        sendFailures = meters.counter("meeting.sse.emitter.failures");
+    }
 
     public Optional<SseEmitter> register(Long meetingId, Long userId, SseEmitter emitter) {
         ConcurrentHashMap<Long, SseEmitter> meetingEmitters =
@@ -121,10 +132,9 @@ public class MeetingSseRegistry {
             return;
         }
         try {
-            emitter.send(SseEmitter.event()
-                    .name(eventName)
-                    .data(data));
+            sendEmitter(emitter, eventName, data);
         } catch (IOException | RuntimeException e) {
+            sendFailures.increment();
             log.warn("SSE 이벤트 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
                     meetingId, userId, eventName, e);
         } finally {
@@ -144,14 +154,22 @@ public class MeetingSseRegistry {
             return;
         }
         try {
-            emitter.send(SseEmitter.event()
-                    .name(eventName)
-                    .data(data));
+            sendEmitter(emitter, eventName, data);
         } catch (IOException | RuntimeException e) {
+            sendFailures.increment();
             log.warn("SSE broadcast 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
                     meetingId, userId, eventName, e);
             completeEmitter(meetingId, userId, emitter);
             remove(meetingId, userId, emitter);
+        }
+    }
+
+    private void sendEmitter(SseEmitter emitter, String eventName, Object data) throws IOException {
+        long started = System.nanoTime();
+        try {
+            emitter.send(SseEmitter.event().name(eventName).data(data));
+        } finally {
+            sendDuration.record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
         }
     }
 }

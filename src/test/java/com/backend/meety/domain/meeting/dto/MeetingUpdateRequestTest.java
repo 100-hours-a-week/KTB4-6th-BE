@@ -59,6 +59,15 @@ class MeetingUpdateRequestTest {
     }
 
     @Test
+    @DisplayName("회의 수정 요청은 제목을 2자부터 20자까지 허용한다")
+    void validateTitleLength() {
+        assertThat(validator.validate(new MeetingUpdateRequest("주간", null, null, null, null))).isEmpty();
+        assertThat(validator.validate(new MeetingUpdateRequest("A", null, null, null, null)))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .containsExactly("title");
+    }
+
+    @Test
     @DisplayName("회의 수정 요청은 note 빈 문자열을 허용한다")
     void validateEmptyNoteAllowed() {
         MeetingUpdateRequest request = new MeetingUpdateRequest(null, null, "", null, null);

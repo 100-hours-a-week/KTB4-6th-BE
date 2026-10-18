@@ -12,6 +12,7 @@ import com.backend.meety.domain.user.exception.UserErrorCode;
 import com.backend.meety.domain.user.exception.UserException;
 import com.backend.meety.domain.user.repository.UserAuthAccountRepository;
 import com.backend.meety.domain.user.repository.UserRepository;
+import com.backend.meety.global.security.AccessTokenBlacklist;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -25,8 +26,9 @@ public class UserService {
     private final UserAccountService userAccountService;
     private final TeamMemberRepository teamMemberRepository;
     private final Map<String, OAuthProviderClient> oAuthProviderClients;
+    private final AccessTokenBlacklist accessTokenBlacklist;
 
-    public void withdraw(Long userId) {
+    public void withdraw(Long userId, String accessToken) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserException(UserErrorCode.USER_DELETE_FAILED));
         if (user.isWithdrawn()) {
@@ -35,6 +37,7 @@ public class UserService {
         validateNotTeamLeader(userId);
         unlinkProviders(userId);
         userAccountService.withdraw(userId);
+        accessTokenBlacklist.register(accessToken);
     }
 
     private void validateNotTeamLeader(Long userId) {

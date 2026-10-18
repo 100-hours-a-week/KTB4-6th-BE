@@ -14,7 +14,7 @@ public class RestDiarizationAiClient implements DiarizationAiClient {
     @Override
     public DiarizationAiResponse requestDiarization(DiarizationAiRequest request) {
         return diarizationRestClient.post()
-                .uri("/v1/diarization")
+                .uri(AiApiPath.DIARIZATION)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)
                 .retrieve()

@@ -14,7 +14,7 @@ public class RestSummaryAiClient implements SummaryAiClient {
     @Override
     public String requestSummary(SummaryAiRequest request) {
         return aiRestClient.post()
-                .uri("/v1/summary")
+                .uri(AiApiPath.SUMMARY)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)
                 .retrieve()

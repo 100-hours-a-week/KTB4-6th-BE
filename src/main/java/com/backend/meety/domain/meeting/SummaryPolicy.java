@@ -19,4 +19,8 @@ public final class SummaryPolicy {
     public static String firstSummaryIdempotencyKey(Long meetingId) {
         return "SUMMARY:MEETING:" + meetingId;
     }
+
+    public static boolean isFirstSummaryIdempotencyKey(Long meetingId, String idempotencyKey) {
+        return firstSummaryIdempotencyKey(meetingId).equals(idempotencyKey);
+    }
 }

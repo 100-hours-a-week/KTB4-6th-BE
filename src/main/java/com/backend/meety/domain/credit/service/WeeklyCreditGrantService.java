@@ -2,11 +2,14 @@ package com.backend.meety.domain.credit.service;
 
 import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
+import com.backend.meety.domain.credit.event.CreditEarnedEvent;
+import com.backend.meety.domain.credit.event.CreditEarnedReason;
 import com.backend.meety.domain.credit.entity.TeamCredit;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +21,7 @@ public class WeeklyCreditGrantService {
     private final TeamCreditRepository teamCreditRepository;
     private final CreditLedgerRepository creditLedgerRepository;
     private final CreditPolicy creditPolicy;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public boolean grant(Long teamId, String weekKey) {
@@ -33,8 +37,10 @@ public class WeeklyCreditGrantService {
         if (earned == 0) {
             return false;
         }
-        creditLedgerRepository.save(
+        CreditLedger ledger = creditLedgerRepository.save(
                 CreditLedger.earnForSchedule(credit.getTeam(), weekKey, earned, credit.getBalance()));
+        eventPublisher.publishEvent(new CreditEarnedEvent(
+                teamId, ledger.getIdempotencyKey(), earned, CreditEarnedReason.SCHEDULE));
         return true;
     }
 }

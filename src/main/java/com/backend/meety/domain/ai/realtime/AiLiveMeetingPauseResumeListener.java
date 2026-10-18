@@ -1,6 +1,8 @@
 package com.backend.meety.domain.ai.realtime;
 
 import com.backend.meety.domain.recording.event.RecordingPausedEvent;
+import com.backend.meety.domain.recording.owner.RecordingCommand;
+import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.event.RecordingResumedEvent;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -11,15 +13,15 @@ import org.springframework.transaction.event.TransactionalEventListener;
 @RequiredArgsConstructor
 public class AiLiveMeetingPauseResumeListener {
 
-    private final AiLiveMeetingConnectionService connectionService;
+    private final RecordingOwnerService ownerService;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void pauseAiLiveMeeting(RecordingPausedEvent event) {
-        connectionService.pause(event.recordingSessionId());
+        ownerService.dispatch(event.recordingSessionId(), RecordingCommand.PAUSE);
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void resumeAiLiveMeeting(RecordingResumedEvent event) {
-        connectionService.resume(event.recordingSessionId());
+        ownerService.dispatch(event.recordingSessionId(), RecordingCommand.RESUME);
     }
 }

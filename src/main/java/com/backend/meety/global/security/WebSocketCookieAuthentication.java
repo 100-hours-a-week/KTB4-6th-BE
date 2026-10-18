@@ -2,6 +2,7 @@ package com.backend.meety.global.security;
 
 import com.backend.meety.domain.auth.exception.AuthErrorCode;
 import com.backend.meety.domain.auth.exception.AuthException;
+import com.backend.meety.global.config.AuthCookieProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -18,6 +19,7 @@ public class WebSocketCookieAuthentication {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final AccessTokenBlacklist accessTokenBlacklist;
+    private final AuthCookieProperties authCookieProperties;
 
     public Long authenticate(ServerHttpRequest request) {
         if (!(request instanceof ServletServerHttpRequest servletRequest)) {
@@ -31,17 +33,18 @@ public class WebSocketCookieAuthentication {
         if (token == null) {
             throw new AuthException(AuthErrorCode.AUTHENTICATION_REQUIRED);
         }
-        if (accessTokenBlacklist.contains(token)) {
-            throw new AuthException(AuthErrorCode.INVALID_ACCESS_TOKEN);
-        }
+        Claims claims;
         try {
-            Claims claims = jwtTokenProvider.validateAndDecode(token);
-            return Long.valueOf(claims.getSubject());
+            claims = jwtTokenProvider.validateAndDecode(token);
         } catch (ExpiredJwtException e) {
             throw new AuthException(AuthErrorCode.EXPIRED_ACCESS_TOKEN);
         } catch (JwtException | IllegalArgumentException e) {
             throw new AuthException(AuthErrorCode.INVALID_ACCESS_TOKEN);
         }
+        if (accessTokenBlacklist.contains(token)) {
+            throw new AuthException(AuthErrorCode.INVALID_ACCESS_TOKEN);
+        }
+        return Long.valueOf(claims.getSubject());
     }
 
     private String resolveToken(HttpServletRequest request) {
@@ -50,7 +53,7 @@ public class WebSocketCookieAuthentication {
             return null;
         }
         for (Cookie cookie : cookies) {
-            if (TokenConstants.ACCESS_TOKEN_COOKIE.equals(cookie.getName())) {
+            if (authCookieProperties.accessTokenCookieName().equals(cookie.getName())) {
                 return cookie.getValue();
             }
         }

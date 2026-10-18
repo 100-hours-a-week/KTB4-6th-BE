@@ -6,6 +6,8 @@ import static org.mockito.Mockito.verify;
 
 import com.backend.meety.domain.recording.event.RecordingPausedEvent;
 import com.backend.meety.domain.recording.event.RecordingResumedEvent;
+import com.backend.meety.domain.recording.owner.RecordingCommand;
+import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import java.lang.reflect.Method;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,15 +16,15 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 class AiLiveMeetingPauseResumeListenerTest {
 
-    private final AiLiveMeetingConnectionService connectionService = mock(AiLiveMeetingConnectionService.class);
-    private final AiLiveMeetingPauseResumeListener listener = new AiLiveMeetingPauseResumeListener(connectionService);
+    private final RecordingOwnerService ownerService = mock(RecordingOwnerService.class);
+    private final AiLiveMeetingPauseResumeListener listener = new AiLiveMeetingPauseResumeListener(ownerService);
 
     @Test
-    @DisplayName("녹음 일시정지 커밋 이후 AI pause를 요청한다")
+    @DisplayName("녹음 일시정지 커밋 이후 Owner 서버로 PAUSE 명령을 보낸다")
     void pauseAiLiveMeetingAfterRecordingPausedCommit() {
         // 테스트 목적:
         // RecordingPausedEvent가 처리되면 RecordingService 트랜잭션 커밋 이후
-        // 기존 AI connection에 session.pause 요청이 위임되는지 검증한다.
+        // Owner 서버로 PAUSE 명령 전달이 위임되는지 검증한다.
 
         // given
         RecordingPausedEvent event = new RecordingPausedEvent(42L, 88L);
@@ -31,15 +33,15 @@ class AiLiveMeetingPauseResumeListenerTest {
         listener.pauseAiLiveMeeting(event);
 
         // then
-        verify(connectionService).pause(88L);
+        verify(ownerService).dispatch(88L, RecordingCommand.PAUSE);
     }
 
     @Test
-    @DisplayName("녹음 재개 커밋 이후 AI resume을 요청한다")
+    @DisplayName("녹음 재개 커밋 이후 Owner 서버로 RESUME 명령을 보낸다")
     void resumeAiLiveMeetingAfterRecordingResumedCommit() {
         // 테스트 목적:
         // RecordingResumedEvent가 처리되면 RecordingService 트랜잭션 커밋 이후
-        // 기존 AI connection에 session.resume 요청이 위임되는지 검증한다.
+        // Owner 서버로 RESUME 명령 전달이 위임되는지 검증한다.
 
         // given
         RecordingResumedEvent event = new RecordingResumedEvent(42L, 88L);
@@ -48,7 +50,7 @@ class AiLiveMeetingPauseResumeListenerTest {
         listener.resumeAiLiveMeeting(event);
 
         // then
-        verify(connectionService).resume(88L);
+        verify(ownerService).dispatch(88L, RecordingCommand.RESUME);
     }
 
     @Test

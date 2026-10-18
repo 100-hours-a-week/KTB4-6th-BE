@@ -201,6 +201,59 @@ class MeetingParticipantServiceTest {
     }
 
     @Test
+    @DisplayName("생성 시 지정한 참석자가 처음 입장하면 기존 row를 JOINED로 바꾸고 참석자 지정은 유지한다")
+    void joinDesignatedAttendee() {
+        Meeting meeting = meeting(MeetingStatus.WAITING);
+        TeamMember teamMember = teamMember("홍길동");
+        MeetingParticipant attendee = MeetingParticipant.createAttendee(meeting, teamMember);
+        ReflectionTestUtils.setField(attendee, "id", PARTICIPANT_ID);
+        setUpMeetingAndActiveTeamMember(meeting, teamMember);
+        when(meetingParticipantRepository.findByMeetingIdAndTeamMemberId(MEETING_ID, TEAM_MEMBER_ID))
+                .thenReturn(Optional.of(attendee));
+
+        MeetingParticipantResponse response = meetingParticipantService.joinMeeting(USER_ID, MEETING_ID);
+
+        assertThat(response.participantId()).isEqualTo(PARTICIPANT_ID);
+        assertThat(response.participationStatus()).isEqualTo(ParticipationStatus.JOINED);
+        assertThat(attendee.isAttendee()).isTrue();
+        verify(meetingParticipantRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("생성 시 지정하지 않은 팀원은 참석자가 아닌 새 row로 입장한다")
+    void joinNonAttendeeCreatesNewRow() {
+        Meeting meeting = meeting(MeetingStatus.WAITING);
+        TeamMember teamMember = teamMember("홍길동");
+        setUpMeetingAndActiveTeamMember(meeting, teamMember);
+        when(meetingParticipantRepository.findByMeetingIdAndTeamMemberId(MEETING_ID, TEAM_MEMBER_ID))
+                .thenReturn(Optional.empty());
+        when(meetingParticipantRepository.save(any(MeetingParticipant.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        meetingParticipantService.joinMeeting(USER_ID, MEETING_ID);
+
+        ArgumentCaptor<MeetingParticipant> captor = ArgumentCaptor.forClass(MeetingParticipant.class);
+        verify(meetingParticipantRepository).save(captor.capture());
+        assertThat(captor.getValue().isAttendee()).isFalse();
+        assertThat(captor.getValue().getParticipationStatus()).isEqualTo(ParticipationStatus.JOINED);
+    }
+
+    @Test
+    @DisplayName("지정만 되고 입장하지 않은 참석자는 나갈 수 없다")
+    void leaveNotEnteredAttendeeFails() {
+        Meeting meeting = meeting(MeetingStatus.WAITING);
+        TeamMember teamMember = teamMember("홍길동");
+        setUpMeetingAndActiveTeamMember(meeting, teamMember);
+        when(meetingParticipantRepository.findByMeetingIdAndTeamMemberId(MEETING_ID, TEAM_MEMBER_ID))
+                .thenReturn(Optional.of(MeetingParticipant.createAttendee(meeting, teamMember)));
+
+        assertThatThrownBy(() -> meetingParticipantService.leaveMeeting(USER_ID, MEETING_ID))
+                .isInstanceOf(MeetingException.class)
+                .extracting("errorCode")
+                .isEqualTo(MeetingErrorCode.PARTICIPANT_STATUS_CONFLICT);
+    }
+
+    @Test
     @DisplayName("DISCONNECTED 상태이면 참여 상태 충돌 예외를 던진다")
     void joinDisconnectedParticipantFails() {
         Meeting meeting = meeting(MeetingStatus.WAITING);

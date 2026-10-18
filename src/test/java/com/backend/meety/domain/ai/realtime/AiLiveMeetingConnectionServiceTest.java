@@ -1,13 +1,22 @@
 package com.backend.meety.domain.ai.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
+import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.meeting.entity.MeetingParticipant;
+import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
+import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
+import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -44,6 +53,8 @@ class AiLiveMeetingConnectionServiceTest {
     private final TestAiStopTimeoutScheduler timeoutScheduler = new TestAiStopTimeoutScheduler();
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final TranscriptService transcriptService = mock(TranscriptService.class);
+    private final RecordingOwnerService ownerService = mock(RecordingOwnerService.class);
+    private final MeetingParticipantRepository meetingParticipantRepository = mock(MeetingParticipantRepository.class);
     private final AiLiveMeetingConnectionService service = new AiLiveMeetingConnectionService(
             registry,
             client,
@@ -52,7 +63,9 @@ class AiLiveMeetingConnectionServiceTest {
             timeoutScheduler,
             objectMapper,
             readyEvents::add,
-            transcriptService
+            transcriptService,
+            ownerService,
+            meetingParticipantRepository
     );
 
     @Test
@@ -69,8 +82,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "start-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {
                     "status": "READY",
                     "inputAudioFormat": "webm_opus",
@@ -142,8 +155,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "%s",
-                  "meetingId": "%s",
-                  "recordingSessionId": "%s",
+                  "meetingId": %s,
+                  "recordingSessionId": %s,
                   "payload": {"status": "READY"}
                 }
                 """, requestId, meetingId, recordingSessionId));
@@ -183,6 +196,28 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     @Test
+    @DisplayName("session.start에 회의 생성 시 지정한 참석자와 참석자 수를 담는다")
+    void sessionStartIncludesAttendees() throws Exception {
+        Meeting meeting = mock(Meeting.class);
+        TeamMember member = mock(TeamMember.class);
+        when(member.getId()).thenReturn(10L);
+        when(member.getDisplayName()).thenReturn("김지우");
+        when(meetingParticipantRepository.findAttendeesByMeetingId(42L)).thenReturn(List.of(
+                MeetingParticipant.createAttendee(meeting, member),
+                MeetingParticipant.createCustomAttendee(meeting, "외부 디자이너")));
+
+        service.start(context(AudioFormat.WEBM_OPUS));
+
+        JsonNode root = objectMapper.readTree(client.session.sentMessages.getFirst());
+        assertThat(root.path("participantCount").asInt()).isEqualTo(2);
+        assertThat(root.path("participants").get(0).path("teamMemberId").asLong()).isEqualTo(10L);
+        assertThat(root.path("participants").get(0).path("name").asText()).isEqualTo("김지우");
+        assertThat(root.path("participants").get(1).has("teamMemberId")).isTrue();
+        assertThat(root.path("participants").get(1).path("teamMemberId").isNull()).isTrue();
+        assertThat(root.path("participants").get(1).path("name").asText()).isEqualTo("외부 디자이너");
+    }
+
+    @Test
     void stopSendsSessionStopThenEndedClosesAndCleansRegistry() throws Exception {
         AiLiveMeetingConnection connection = readyConnection();
 
@@ -196,8 +231,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ended",
                   "requestId": "stop-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {
                     "status": "ENDED",
                     "lastSequence": null,
@@ -429,8 +464,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ended",
                   "requestId": "%s",
-                  "meetingId": "%s",
-                  "recordingSessionId": "%s",
+                  "meetingId": %s,
+                  "recordingSessionId": %s,
                   "payload": {"status": "%s"}
                 }
                 """, requestId, meetingId, recordingSessionId, status));
@@ -448,8 +483,8 @@ class AiLiveMeetingConnectionServiceTest {
         client.receive("""
                 {
                   "type": "transcript.committed",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {
                     "sequenceNumber": 99,
                     "content": "last transcript",
@@ -472,8 +507,8 @@ class AiLiveMeetingConnectionServiceTest {
         client.receive("""
                 {
                   "type": "transcript.committed",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {
                     "sequenceNumber": 31,
                     "content": "final text",
@@ -508,8 +543,8 @@ class AiLiveMeetingConnectionServiceTest {
         client.receive("""
                 {
                   "type": "transcript.committed",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {
                     "sequenceNumber": 32,
                     "content": "last final text",
@@ -561,6 +596,95 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     @Test
+    @DisplayName("session.ended로 종료되면 요약 이벤트를 발행한 뒤 자신의 Owner를 해제한다")
+    void releasesOwnerAfterTranscriptFinalizedOnSessionEnded() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+        doAnswer(invocation -> {
+            assertThat(readyEvents).contains(new MeetingTranscriptFinalizedEvent(42L, 88L));
+            return null;
+        }).when(ownerService).release(88L, "server-a:1");
+        service.stop(88L);
+
+        client.receive(sessionEnded());
+
+        verify(ownerService).release(88L, "server-a:1");
+    }
+
+    @Test
+    @DisplayName("session.ended를 30초 안에 받지 못해도 요약 이벤트를 발행한 뒤 Owner를 해제한다")
+    void releasesOwnerOnStopTimeout() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+        service.stop(88L);
+
+        timeoutScheduler.runScheduledTask();
+
+        verify(ownerService).release(88L, "server-a:1");
+    }
+
+    @Test
+    @DisplayName("녹음 중 AI 오류로 정리되면 Owner를 해제하지 않는다")
+    void keepsOwnerWhenAiErrorDuringRecording() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+
+        client.receive("""
+                {
+                  "type": "error",
+                  "requestId": "start-test",
+                  "payload": {
+                    "code": "provider_unavailable",
+                    "message": "provider is unavailable",
+                    "retryable": true
+                  }
+                }
+                """);
+
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.CLOSED);
+        verify(ownerService, never()).release(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("session.ended 없이 AI가 연결을 닫으면 Owner를 해제하지 않는다")
+    void keepsOwnerWhenRemoteClosesBeforeSessionEnded() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+        service.stop(88L);
+
+        client.closeFromRemote(CloseStatus.NORMAL);
+
+        verify(ownerService, never()).release(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("Owner를 기록하지 않은 연결은 종료해도 해제를 요청하지 않는다")
+    void skipsReleaseWhenConnectionHasNoOwner() throws Exception {
+        readyConnection();
+        service.stop(88L);
+
+        client.receive(sessionEnded());
+
+        verify(ownerService, never()).release(anyLong(), anyString());
+    }
+
+    private String sessionEnded() {
+        return """
+                {
+                  "type": "session.ended",
+                  "requestId": "stop-test",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
+                  "payload": {
+                    "status": "ENDED",
+                    "lastSequence": null,
+                    "audioDurationMs": 3600000
+                  }
+                }
+                """;
+    }
+
+    @Test
     void remoteCloseBeforeSessionEndedIsNotNormalEndedAndCleansRegistry() throws Exception {
         AiLiveMeetingConnection connection = readyConnection();
         service.stop(88L);
@@ -580,8 +704,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ended",
                   "requestId": "stop-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {"status": "ENDED", "audioDurationMs": 1}
                 }
                 """);
@@ -599,8 +723,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "start-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {"status": "READY"}
                 }
                 """);
@@ -782,8 +906,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "other-request",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": { "status": "READY" }
                 }
                 """);
@@ -802,8 +926,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "start-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": { "status": "READY" }
                 }
                 """);
@@ -833,8 +957,8 @@ class AiLiveMeetingConnectionServiceTest {
                 {
                   "type": "session.ready",
                   "requestId": "start-test",
-                  "meetingId": "42",
-                  "recordingSessionId": "88",
+                  "meetingId": 42,
+                  "recordingSessionId": 88,
                   "payload": {"status": "READY"}
                 }
                 """);
@@ -1024,14 +1148,17 @@ class AiLiveMeetingConnectionServiceTest {
 
     private void assertSessionStart(String json) throws Exception {
         JsonNode root = objectMapper.readTree(json);
-        assertThat(root.size()).isEqualTo(4);
+        assertThat(root.size()).isEqualTo(6);
         assertThat(root.path("type").asText()).isEqualTo("session.start");
         assertThat(root.path("requestId").asText()).isEqualTo("start-test");
-        assertThat(root.path("meetingId").isTextual()).isTrue();
-        assertThat(root.path("meetingId").asText()).isEqualTo("42");
-        assertThat(root.path("recordingSessionId").isTextual()).isTrue();
-        assertThat(root.path("recordingSessionId").asText()).isEqualTo("88");
+        assertThat(root.path("meetingId").isIntegralNumber()).isTrue();
+        assertThat(root.path("meetingId").asLong()).isEqualTo(42L);
+        assertThat(root.path("recordingSessionId").isIntegralNumber()).isTrue();
+        assertThat(root.path("recordingSessionId").asLong()).isEqualTo(88L);
         assertThat(root.has("payload")).isFalse();
+        assertThat(root.path("participantCount").asInt()).isZero();
+        assertThat(root.path("participants").isArray()).isTrue();
+        assertThat(root.path("participants")).isEmpty();
     }
 
     private void assertSessionStop(String json) throws Exception {

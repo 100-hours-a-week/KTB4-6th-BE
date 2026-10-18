@@ -25,9 +25,49 @@ spring:
 kakao:
   unlink-uri: https://kapi.kakao.com/v1/user/unlink
 
+auth:
+  access-token-cookie-name: ${AUTH_ACCESS_TOKEN_COOKIE_NAME:accessToken}
+
 jwt:
   access-token-validity: 30m
   refresh-token-validity: 14d
+
+notification:
+  executor:
+    core-pool-size: ${NOTIFICATION_EXECUTOR_CORE_POOL_SIZE:4}
+    max-pool-size: ${NOTIFICATION_EXECUTOR_MAX_POOL_SIZE:4}
+    queue-capacity: ${NOTIFICATION_EXECUTOR_QUEUE_CAPACITY:100}
+
+recording:
+  owner:
+    ttl: ${RECORDING_OWNER_TTL:30s}
+    heartbeat-interval: ${RECORDING_OWNER_HEARTBEAT_INTERVAL:10s}
+  sequence:
+    ttl: ${RECORDING_SEQUENCE_TTL:90m}
+
+meeting-sse:
+  # Initial isolation defaults, not load-tested sizing: workers/queue follow the existing notification executor.
+  executor:
+    core-pool-size: ${MEETING_SSE_EXECUTOR_CORE_POOL_SIZE:4}
+    max-pool-size: ${MEETING_SSE_EXECUTOR_MAX_POOL_SIZE:4}
+    queue-capacity: ${MEETING_SSE_EXECUTOR_QUEUE_CAPACITY:100}
+    shutdown-await-seconds: ${MEETING_SSE_EXECUTOR_SHUTDOWN_AWAIT_SECONDS:10}
+  queue:
+    max-pending-per-meeting: ${MEETING_SSE_MAX_PENDING_PER_MEETING:100}
+    max-pending-total: ${MEETING_SSE_MAX_PENDING_TOTAL:1000}
+
+chat:
+  executor:
+    core-pool-size: ${CHAT_EXECUTOR_CORE_POOL_SIZE:8}
+    max-pool-size: ${CHAT_EXECUTOR_MAX_POOL_SIZE:8}
+    queue-capacity: ${CHAT_EXECUTOR_QUEUE_CAPACITY:1000}
+
+ai:
+  request:
+    recovery:
+      processing-timeout: ${AI_REQUEST_PROCESSING_TIMEOUT:70m}
+      poll-delay: ${AI_REQUEST_RECOVERY_POLL_DELAY:1m}
+      batch-size: ${AI_REQUEST_RECOVERY_BATCH_SIZE:100}
 
 sentry:
   dsn: ${SENTRY_DSN:}

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -36,7 +37,9 @@ class MeetingCreateRequestTest {
                 "",
                 "a".repeat(101),
                 "a".repeat(201),
-                null
+                null,
+                List.of(),
+                List.of()
         );
 
         Set<ConstraintViolation<MeetingCreateRequest>> violations = validator.validate(request);
@@ -46,12 +49,33 @@ class MeetingCreateRequestTest {
                 .contains("title", "purpose", "note", "targetDurationMinutes");
     }
 
+    @Test
+    @DisplayName("회의 생성 요청은 제목을 2자부터 20자까지 허용한다")
+    void validateTitleLength() {
+        assertThat(validator.validate(createRequestWithTitle("주간"))).isEmpty();
+        assertThat(validator.validate(createRequestWithTitle("a".repeat(20)))).isEmpty();
+
+        assertThat(validator.validate(createRequestWithTitle("A")))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .containsExactly("title");
+        assertThat(validator.validate(createRequestWithTitle("a".repeat(21))))
+                .extracting(violation -> violation.getPropertyPath().toString())
+                .containsExactly("title");
+    }
+
+    private MeetingCreateRequest createRequestWithTitle(String title) {
+        return new MeetingCreateRequest(
+                title, "진행 상황과 이슈 공유", "API 명세 검토", 30, List.of(), List.of());
+    }
+
     private MeetingCreateRequest createRequest(Integer targetDurationMinutes) {
         return new MeetingCreateRequest(
                 "주간 스프린트 회의",
                 "진행 상황과 이슈 공유",
                 "API 명세 검토",
-                targetDurationMinutes
+                targetDurationMinutes,
+                List.of(),
+                List.of()
         );
     }
 }

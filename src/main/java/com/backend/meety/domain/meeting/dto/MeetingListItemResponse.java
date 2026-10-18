@@ -11,7 +11,8 @@ public record MeetingListItemResponse(
         LocalDateTime startedAt,
         LocalDateTime endedAt,
         Integer targetDurationMinutes,
-        MeetingStatus status
+        MeetingStatus status,
+        Long createdByTeamMemberId
 ) {
 
     public static MeetingListItemResponse from(Meeting meeting) {
@@ -22,7 +23,8 @@ public record MeetingListItemResponse(
                 meeting.getStartedAt(),
                 meeting.getEndedAt(),
                 meeting.getTargetDurationMinutes(),
-                meeting.getStatus()
+                meeting.getStatus(),
+                meeting.getCreatedByTeamMember().getId()
         );
     }
 }

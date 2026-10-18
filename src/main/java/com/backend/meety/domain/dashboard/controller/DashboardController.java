@@ -1,0 +1,33 @@
+package com.backend.meety.domain.dashboard.controller;
+
+import com.backend.meety.domain.dashboard.dto.DashboardResponse;
+import com.backend.meety.domain.dashboard.service.DashboardService;
+import com.backend.meety.global.response.ApiResponse;
+import java.time.LocalDate;
+import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/api/v1")
+public class DashboardController {
+
+    private final DashboardService dashboardService;
+
+    @GetMapping("/teams/{teamId}/dashboard")
+    public ResponseEntity<ApiResponse<DashboardResponse>> getDashboard(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long teamId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(dashboardService.getDashboard(userId, teamId, from, to)));
+    }
+}

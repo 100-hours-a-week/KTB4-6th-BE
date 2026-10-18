@@ -1,9 +1,11 @@
 package com.backend.meety.domain.meeting.service;
 
 import com.backend.meety.domain.ai.client.SummaryAiRequest;
-import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
+import com.backend.meety.domain.ai.entity.AiRequestStatus;
+import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
+import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.CreditSourceType;
@@ -11,12 +13,17 @@ import com.backend.meety.domain.credit.entity.CreditTransactionType;
 import com.backend.meety.domain.credit.entity.TeamCredit;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
+import com.backend.meety.domain.meeting.MetricPolicy;
 import com.backend.meety.domain.meeting.SummaryPolicy;
 import com.backend.meety.domain.meeting.entity.MeetingSummary;
+import com.backend.meety.domain.meeting.event.SummaryReadyEvent;
 import com.backend.meety.domain.meeting.repository.MeetingSummaryRepository;
 import java.util.Optional;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,57 +38,101 @@ public class SummaryProcessingService {
     private final CreditLedgerRepository creditLedgerRepository;
     private final CreditPolicy creditPolicy;
     private final SummaryAiRequestFactory summaryAiRequestFactory;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
-    public Optional<SummaryAiRequest> startProcessing(Long aiRequestId) {
+    public Optional<AiProcessingAttempt<SummaryAiRequest>> startProcessing(Long aiRequestId) {
+        String processingToken = UUID.randomUUID().toString();
+        if (aiRequestRepository.claimAccepted(aiRequestId, processingToken) == 0) {
+            return Optional.empty();
+        }
         AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElse(null);
-        if (aiRequest == null || !aiRequest.isAccepted()) {
+        if (aiRequest == null) {
             return Optional.empty();
         }
         MeetingSummary summary = meetingSummaryRepository.findByAiRequestId(aiRequestId).orElse(null);
         if (summary == null) {
             log.error("요약 회차 행이 없어 처리할 수 없습니다. aiRequestId={}", aiRequestId);
-            aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
+            aiRequestRepository.failProcessing(aiRequestId, processingToken);
             return Optional.empty();
         }
-        aiRequest.markProcessing();
-        return Optional.of(summaryAiRequestFactory.create(aiRequest, summary));
+        return Optional.of(new AiProcessingAttempt<>(
+                aiRequestId, processingToken, summaryAiRequestFactory.create(aiRequest, summary)));
     }
 
     @Transactional
-    public void completeProcessing(Long aiRequestId, String content) {
+    public void completeProcessing(Long aiRequestId, String processingToken, String content) {
+        if (aiRequestRepository.completeProcessing(aiRequestId, processingToken) == 0) {
+            log.info("현재 Attempt가 아닌 요약 성공 응답을 무시합니다. aiRequestId={}", aiRequestId);
+            return;
+        }
         AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
         MeetingSummary summary = meetingSummaryRepository.findByAiRequestId(aiRequestId).orElseThrow();
         summary.complete(content);
-        aiRequest.markCompleted();
+        registerMetricRequest(summary, aiRequest);
+        if (!SummaryPolicy.isFirstSummaryIdempotencyKey(
+                summary.getMeeting().getId(), aiRequest.getIdempotencyKey())) {
+            eventPublisher.publishEvent(new SummaryReadyEvent(
+                    summary.getTeam().getId(),
+                    summary.getMeeting().getId(),
+                    aiRequest.getId(),
+                    summary.getMeeting().getTitle()
+            ));
+        }
         log.info("회의 요약이 완료되었습니다. aiRequestId={}, summaryId={}, contentLength={}",
                 aiRequestId, summary.getId(), content.length());
     }
 
     @Transactional
-    public void handleRetryableFailure(Long aiRequestId) {
-        AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
-        aiRequest.increaseRetryCount();
-        if (aiRequest.getRetryCount() < SummaryPolicy.MAX_RETRY_COUNT) {
-            aiRequest.markAccepted();
-            log.warn("AI 요약 호출에 실패해 재시도합니다. aiRequestId={}, retryCount={}",
-                    aiRequestId, aiRequest.getRetryCount());
+    public void handleRetryableFailure(Long aiRequestId, String processingToken) {
+        long lastRetryCount = SummaryPolicy.MAX_RETRY_COUNT - 1;
+        if (aiRequestRepository.retryProcessing(aiRequestId, processingToken, lastRetryCount) == 1) {
+            log.warn("AI 요약 호출에 실패해 재시도합니다. aiRequestId={}", aiRequestId);
             return;
         }
-        failPermanently(aiRequest);
+        if (aiRequestRepository.failRetryExhaustedProcessing(
+                aiRequestId, processingToken, lastRetryCount, SummaryPolicy.MAX_RETRY_COUNT) == 1) {
+            AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
+            restoreCreditIfCharged(aiRequest);
+            log.error("AI 요약 호출이 최종 실패했습니다. aiRequestId={}, retryCount={}",
+                    aiRequest.getId(), aiRequest.getRetryCount());
+        }
     }
 
     @Transactional
-    public void handlePermanentFailure(Long aiRequestId) {
+    public void handlePermanentFailure(Long aiRequestId, String processingToken) {
+        if (aiRequestRepository.failProcessing(aiRequestId, processingToken) == 0) {
+            return;
+        }
         AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
-        failPermanently(aiRequest);
-    }
-
-    private void failPermanently(AiRequest aiRequest) {
-        aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
         restoreCreditIfCharged(aiRequest);
         log.error("AI 요약 호출이 최종 실패했습니다. aiRequestId={}, retryCount={}",
                 aiRequest.getId(), aiRequest.getRetryCount());
+    }
+
+    @Transactional
+    public void restoreCreditAfterStaleFailure(Long aiRequestId) {
+        AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElse(null);
+        if (aiRequest == null
+                || aiRequest.getRequestType() != AiRequestType.SUMMARY
+                || aiRequest.getStatus() != AiRequestStatus.FAILED) {
+            return;
+        }
+        restoreCreditIfCharged(aiRequest);
+    }
+
+    private void registerMetricRequest(MeetingSummary summary, AiRequest summaryRequest) {
+        String idempotencyKey = MetricPolicy.idempotencyKey(summary.getId());
+        if (aiRequestRepository.findByIdempotencyKey(idempotencyKey).isPresent()) {
+            return;
+        }
+        try {
+            aiRequestRepository.save(AiRequest.create(
+                    summary.getTeam(), summaryRequest.getTeamMember(), idempotencyKey, AiRequestType.METRIC));
+        } catch (DataIntegrityViolationException e) {
+            log.warn("Metric 요청이 이미 등록되어 건너뜁니다. summaryId={}, idempotencyKey={}",
+                    summary.getId(), idempotencyKey, e);
+        }
     }
 
     private void restoreCreditIfCharged(AiRequest aiRequest) {

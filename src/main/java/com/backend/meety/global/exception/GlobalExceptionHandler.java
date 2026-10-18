@@ -1,5 +1,7 @@
 package com.backend.meety.global.exception;
 
+import com.backend.meety.domain.ai.dto.ChatCreateRequest;
+import com.backend.meety.domain.ai.exception.AiChatErrorCode;
 import com.backend.meety.domain.recording.dto.RecordingStatusUpdateRequest;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
 import com.backend.meety.global.response.ApiResponse;
@@ -34,6 +36,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleValidationException(MethodArgumentNotValidException e) {
         if (e.getParameter().getParameterType() == RecordingStatusUpdateRequest.class) {
             RecordingErrorCode errorCode = RecordingErrorCode.INVALID_RECORDING_STATUS;
+            return ResponseEntity.status(errorCode.getHttpStatus()).body(ApiResponse.error(errorCode));
+        }
+        if (e.getParameter().getParameterType() == ChatCreateRequest.class) {
+            AiChatErrorCode errorCode = "question".equals(e.getBindingResult().getFieldError().getField())
+                    ? AiChatErrorCode.INVALID_QUESTION_LENGTH
+                    : AiChatErrorCode.INVALID_INPUT_TYPE;
             return ResponseEntity.status(errorCode.getHttpStatus()).body(ApiResponse.error(errorCode));
         }
         String message = e.getBindingResult().getFieldErrors().stream()
