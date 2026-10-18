@@ -20,12 +20,14 @@ import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.global.exception.BusinessException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
@@ -42,7 +44,7 @@ class MeetingSseServiceTest {
     private final TeamMemberRepository teamMemberRepository = mock(TeamMemberRepository.class);
     private final MeetingParticipantRepository meetingParticipantRepository =
             mock(MeetingParticipantRepository.class);
-    private final MeetingSseRegistry registry = new MeetingSseRegistry();
+    private final MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
     private final TestMeetingSseEmitterFactory emitterFactory = new TestMeetingSseEmitterFactory();
     private final MeetingSseService service = new MeetingSseService(
             meetingRepository,
@@ -65,11 +67,18 @@ class MeetingSseServiceTest {
     }
 
     @Test
+    @DisplayName("회의 SSE 연결은 등록 후 CONNECTED 이벤트를 반환한다")
     void connectRegistersEmitterAndSendsConnectedEvent() {
+        // 테스트 목적:
+        // 회의 SSE 연결은 등록 후 CONNECTED 이벤트를 반환한다.
+
+        // given
         TestSseEmitter emitter = emitterFactory.next();
 
+        // when
         SseEmitter result = service.connect(USER_ID, MEETING_ID);
 
+        // then
         assertThat(result).isSameAs(emitter);
         assertThat(registry.find(MEETING_ID, USER_ID)).contains(emitter);
         assertThat(emitter.sentData)
@@ -79,20 +88,32 @@ class MeetingSseServiceTest {
     }
 
     @Test
+    @DisplayName("회의에 참여하지 않은 사용자의 SSE 연결을 거부한다")
     void connectFailsBeforeParticipantJoined() {
+        // 테스트 목적:
+        // 회의에 참여하지 않은 사용자의 SSE 연결을 거부한다.
+
+        // given
         when(meetingParticipantRepository.existsByMeetingIdAndTeamMemberIdAndParticipationStatusAndDeletedAtIsNull(
                 MEETING_ID, TEAM_MEMBER_ID, ParticipationStatus.JOINED)).thenReturn(false);
 
+        // when, then
         assertCode(() -> service.connect(USER_ID, MEETING_ID), MeetingErrorCode.MEETING_PARTICIPANT_REQUIRED);
 
         assertThat(registry.countAll()).isZero();
     }
 
     @Test
+    @DisplayName("ACTIVE 팀 멤버가 아닌 사용자의 SSE 연결을 거부한다")
     void connectFailsWhenUserIsNotActiveTeamMember() {
+        // 테스트 목적:
+        // ACTIVE 팀 멤버가 아닌 사용자의 SSE 연결을 거부한다.
+
+        // given
         when(teamMemberRepository.findByTeamIdAndUserIdAndMembershipStatus(
                 TEAM_ID, USER_ID, MembershipStatus.ACTIVE)).thenReturn(Optional.empty());
 
+        // when, then
         assertCode(() -> service.connect(USER_ID, MEETING_ID), MeetingErrorCode.MEETING_ACCESS_DENIED);
 
         verify(meetingParticipantRepository, never())
@@ -100,41 +121,67 @@ class MeetingSseServiceTest {
     }
 
     @Test
+    @DisplayName("존재하지 않는 회의의 SSE 연결을 거부한다")
     void connectFailsWhenMeetingDoesNotExist() {
+        // 테스트 목적:
+        // 존재하지 않는 회의의 SSE 연결을 거부한다.
+
+        // given
         when(meetingRepository.findByIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.empty());
 
+        // when, then
         assertCode(() -> service.connect(USER_ID, MEETING_ID), MeetingErrorCode.MEETING_NOT_FOUND);
 
         verify(teamMemberRepository, never()).findByTeamIdAndUserIdAndMembershipStatus(any(), any(), any());
     }
 
     @Test
+    @DisplayName("삭제된 회의의 SSE 연결을 거부한다")
     void connectFailsWhenMeetingWasDeleted() {
+        // 테스트 목적:
+        // 삭제된 회의의 SSE 연결을 거부한다.
+
+        // given
         when(meetingRepository.findByIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.empty());
 
+        // when, then
         assertCode(() -> service.connect(USER_ID, MEETING_ID), MeetingErrorCode.MEETING_NOT_FOUND);
 
         assertThat(registry.countAll()).isZero();
     }
 
     @Test
+    @DisplayName("재연결은 이전 emitter를 종료하고 새 연결을 유지한다")
     void duplicateConnectCompletesPreviousEmitterAndKeepsCurrentEmitter() {
+        // 테스트 목적:
+        // 재연결은 이전 emitter를 종료하고 새 연결을 유지한다.
+
+        // given
         TestSseEmitter previous = emitterFactory.next();
         service.connect(USER_ID, MEETING_ID);
         TestSseEmitter current = emitterFactory.next();
 
+        // when
         service.connect(USER_ID, MEETING_ID);
 
+        // then
         assertThat(previous.completed).isTrue();
         assertThat(registry.find(MEETING_ID, USER_ID)).contains(current);
         assertThat(registry.count(MEETING_ID)).isOne();
     }
 
     @Test
+    @DisplayName("완료·timeout·error 콜백은 해당 SSE 연결을 정리한다")
     void cleanupCallbacksRemoveEmitter() {
+        // 테스트 목적:
+        // 완료·timeout·error 콜백은 해당 SSE 연결을 정리한다.
+
+        // given
         TestSseEmitter completion = emitterFactory.next();
+        // when
         service.connect(USER_ID, MEETING_ID);
         completion.completion.run();
+        // then
         assertThat(registry.find(MEETING_ID, USER_ID)).isEmpty();
 
         TestSseEmitter timeout = emitterFactory.next();
@@ -149,13 +196,20 @@ class MeetingSseServiceTest {
     }
 
     @Test
+    @DisplayName("SSE 연결 정리는 회의 참가 상태를 변경하지 않는다")
     void cleanupDoesNotChangeParticipantState() {
+        // 테스트 목적:
+        // SSE 연결 정리는 회의 참가 상태를 변경하지 않는다.
+
+        // given
         TestSseEmitter emitter = emitterFactory.next();
         MeetingParticipant participant = MeetingParticipant.create(meeting, teamMember);
 
+        // when
         service.connect(USER_ID, MEETING_ID);
         emitter.completion.run();
 
+        // then
         assertThat(participant.getParticipationStatus()).isEqualTo(ParticipationStatus.JOINED);
         assertThat(participant.getDeletedAt()).isNull();
         verify(meetingParticipantRepository, never()).save(any());
@@ -163,22 +217,35 @@ class MeetingSseServiceTest {
     }
 
     @Test
+    @DisplayName("이전 연결의 늦은 콜백은 재연결된 emitter를 제거하지 않는다")
     void removeStaleEmitterDoesNotRemoveNewEmitter() {
+        // 테스트 목적:
+        // 이전 연결의 늦은 콜백은 재연결된 emitter를 제거하지 않는다.
+
+        // given
         TestSseEmitter stale = emitterFactory.next();
         service.connect(USER_ID, MEETING_ID);
         TestSseEmitter current = emitterFactory.next();
         service.connect(USER_ID, MEETING_ID);
 
+        // when
         stale.completion.run();
 
+        // then
         assertThat(registry.find(MEETING_ID, USER_ID)).contains(current);
     }
 
     @Test
+    @DisplayName("최초 CONNECTED 전송 실패 시 연결을 오류로 종료하고 제거한다")
     void sendConnectedEventFailureRemovesEmitter() {
+        // 테스트 목적:
+        // 최초 CONNECTED 전송 실패 시 연결을 오류로 종료하고 제거한다.
+
+        // given
         TestSseEmitter emitter = emitterFactory.next();
         emitter.sendFailure = new IOException("send failed");
 
+        // when, then
         assertThatThrownBy(() -> service.connect(USER_ID, MEETING_ID))
                 .isInstanceOf(IllegalStateException.class);
 
