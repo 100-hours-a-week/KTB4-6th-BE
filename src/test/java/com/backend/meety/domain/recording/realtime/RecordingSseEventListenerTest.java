@@ -8,9 +8,11 @@ import com.backend.meety.domain.recording.event.RecordingCompletedEvent;
 import com.backend.meety.domain.recording.event.RecordingPausedEvent;
 import com.backend.meety.domain.recording.event.RecordingResumedEvent;
 import com.backend.meety.domain.recording.event.RecordingStartedEvent;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.Set;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -20,8 +22,13 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 class RecordingSseEventListenerTest {
 
     @Test
+    @DisplayName("녹음 시작 이벤트는 해당 회의 참가자에게 전달되고 연결을 유지한다")
     void startedEventBroadcastsToAllMeetingEmittersAndKeepsConnections() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 녹음 시작 이벤트는 해당 회의 참가자에게 전달되고 연결을 유지한다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter starter = new TestSseEmitter();
         TestSseEmitter participant = new TestSseEmitter();
         TestSseEmitter otherMeeting = new TestSseEmitter();
@@ -30,9 +37,11 @@ class RecordingSseEventListenerTest {
         registry.register(200L, 30L, otherMeeting);
         RecordingSseEventListener listener = new RecordingSseEventListener(MeetingSseLoopback.publisher(registry));
 
+        // when
         listener.broadcastStarted(new RecordingStartedEvent(100L, 700L));
 
         RecordingStatusSseEvent expected = new RecordingStatusSseEvent("RECORDING_STARTED", 100L, 700L);
+        // then
         assertReceived(starter, "RECORDING_STARTED", expected);
         assertReceived(participant, "RECORDING_STARTED", expected);
         assertThat(otherMeeting.sentData).isNull();
@@ -44,15 +53,22 @@ class RecordingSseEventListenerTest {
     }
 
     @Test
+    @DisplayName("녹음 일시정지·재개·완료는 기존 SSE 이벤트 이름을 유지한다")
     void pausedResumedAndCompletedUseExpectedEventNames() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 녹음 일시정지·재개·완료는 기존 SSE 이벤트 이름을 유지한다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter paused = new TestSseEmitter();
         TestSseEmitter resumed = new TestSseEmitter();
         TestSseEmitter completed = new TestSseEmitter();
         RecordingSseEventListener listener = new RecordingSseEventListener(MeetingSseLoopback.publisher(registry));
 
+        // when
         registry.register(100L, 10L, paused);
         listener.broadcastPaused(new RecordingPausedEvent(100L, 700L));
+        // then
         assertReceived(paused, "RECORDING_PAUSED", new RecordingStatusSseEvent("RECORDING_PAUSED", 100L, 700L));
 
         registry.register(101L, 10L, resumed);
@@ -66,8 +82,13 @@ class RecordingSseEventListenerTest {
     }
 
     @Test
+    @DisplayName("녹음 상태 전송 실패는 해당 emitter만 정리한다")
     void failedEmitterDoesNotBlockOtherEmitters() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 녹음 상태 전송 실패는 해당 emitter만 정리한다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter user10 = new TestSseEmitter();
         TestSseEmitter user20 = new TestSseEmitter();
         TestSseEmitter user30 = new TestSseEmitter();
@@ -77,9 +98,11 @@ class RecordingSseEventListenerTest {
         registry.register(100L, 30L, user30);
         RecordingSseEventListener listener = new RecordingSseEventListener(MeetingSseLoopback.publisher(registry));
 
+        // when
         listener.broadcastPaused(new RecordingPausedEvent(100L, 700L));
 
         RecordingStatusSseEvent expected = new RecordingStatusSseEvent("RECORDING_PAUSED", 100L, 700L);
+        // then
         assertReceived(user10, "RECORDING_PAUSED", expected);
         assertThat(user20.sendAttempted).isTrue();
         assertThat(user20.completed).isTrue();
@@ -90,7 +113,12 @@ class RecordingSseEventListenerTest {
     }
 
     @Test
+    @DisplayName("녹음 상태 SSE는 DB Commit 이후 발행하도록 유지한다")
     void recordingSseListenersRunAfterCommit() throws Exception {
+        // 테스트 목적:
+        // 녹음 상태 SSE는 DB Commit 이후 발행하도록 유지한다.
+
+        // given
         Method started = RecordingSseEventListener.class
                 .getMethod("broadcastStarted", RecordingStartedEvent.class);
         Method paused = RecordingSseEventListener.class
@@ -100,6 +128,7 @@ class RecordingSseEventListenerTest {
         Method completed = RecordingSseEventListener.class
                 .getMethod("broadcastCompleted", RecordingCompletedEvent.class);
 
+        // when, then
         assertThat(started.getAnnotation(TransactionalEventListener.class).phase())
                 .isEqualTo(TransactionPhase.AFTER_COMMIT);
         assertThat(paused.getAnnotation(TransactionalEventListener.class).phase())

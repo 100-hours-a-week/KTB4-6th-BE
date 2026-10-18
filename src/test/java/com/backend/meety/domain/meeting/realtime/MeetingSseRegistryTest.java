@@ -2,8 +2,10 @@ package com.backend.meety.domain.meeting.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.util.Set;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -11,16 +13,23 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 class MeetingSseRegistryTest {
 
     @Test
+    @DisplayName("회의·사용자별로 emitter를 분리해 관리한다")
     void separatesEmittersByMeetingAndUser() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 회의·사용자별로 emitter를 분리해 관리한다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter meetingOneUserOne = new TestSseEmitter();
         TestSseEmitter meetingOneUserTwo = new TestSseEmitter();
         TestSseEmitter meetingTwoUserOne = new TestSseEmitter();
 
+        // when
         registry.register(100L, 10L, meetingOneUserOne);
         registry.register(100L, 20L, meetingOneUserTwo);
         registry.register(200L, 10L, meetingTwoUserOne);
 
+        // then
         assertThat(registry.find(100L, 10L)).contains(meetingOneUserOne);
         assertThat(registry.find(100L, 20L)).contains(meetingOneUserTwo);
         assertThat(registry.find(200L, 10L)).contains(meetingTwoUserOne);
@@ -30,11 +39,17 @@ class MeetingSseRegistryTest {
     }
 
     @Test
+    @DisplayName("같은 회의·사용자의 재연결은 이전 emitter를 교체한다")
     void replacesSameMeetingUserEmitterAndReturnsPreviousEmitter() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 같은 회의·사용자의 재연결은 이전 emitter를 교체한다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         SseEmitter previous = new SseEmitter();
         SseEmitter current = new SseEmitter();
 
+        // when, then
         assertThat(registry.register(100L, 10L, previous)).isEmpty();
 
         assertThat(registry.register(100L, 10L, current)).contains(previous);
@@ -43,14 +58,21 @@ class MeetingSseRegistryTest {
     }
 
     @Test
+    @DisplayName("이전 emitter 제거가 새 연결을 지우지 않고 반복 제거도 안전하다")
     void removeIsIdempotentAndDoesNotRemoveCurrentEmitterWithStaleEmitter() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 이전 emitter 제거가 새 연결을 지우지 않고 반복 제거도 안전하다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         SseEmitter stale = new SseEmitter();
         SseEmitter current = new SseEmitter();
         registry.register(100L, 10L, current);
 
+        // when
         registry.remove(100L, 10L, stale);
 
+        // then
         assertThat(registry.find(100L, 10L)).contains(current);
 
         registry.remove(100L, 10L, current);
@@ -61,8 +83,13 @@ class MeetingSseRegistryTest {
     }
 
     @Test
+    @DisplayName("한 참가자의 연결 종료는 다른 참가자 연결을 유지한다")
     void completeOneEmitterKeepsOtherParticipantsInSameMeeting() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 한 참가자의 연결 종료는 다른 참가자 연결을 유지한다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter user10 = new TestSseEmitter();
         TestSseEmitter user20 = new TestSseEmitter();
         TestSseEmitter user30 = new TestSseEmitter();
@@ -70,8 +97,10 @@ class MeetingSseRegistryTest {
         registry.register(100L, 20L, user20);
         registry.register(100L, 30L, user30);
 
+        // when
         registry.complete(100L, 20L);
 
+        // then
         assertThat(user20.completed).isTrue();
         assertThat(registry.find(100L, 20L)).isEmpty();
         assertThat(registry.find(100L, 10L)).contains(user10);
@@ -80,17 +109,29 @@ class MeetingSseRegistryTest {
     }
 
     @Test
+    @DisplayName("존재하지 않는 참가자 연결 종료는 오류 없이 무시한다")
     void completeMissingEmitterIsNoop() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 존재하지 않는 참가자 연결 종료는 오류 없이 무시한다.
 
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
+
+        // when
         registry.complete(100L, 10L);
 
+        // then
         assertThat(registry.countAll()).isZero();
     }
 
     @Test
+    @DisplayName("전체 종료는 개별 종료 실패와 무관하게 모든 연결을 정리한다")
     void completeAllRemovesMeetingAndCompletesEachEmitterIndependently() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 전체 종료는 개별 종료 실패와 무관하게 모든 연결을 정리한다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter user10 = new TestSseEmitter();
         TestSseEmitter user20 = new TestSseEmitter();
         TestSseEmitter user30 = new TestSseEmitter();
@@ -99,8 +140,10 @@ class MeetingSseRegistryTest {
         registry.register(100L, 20L, user20);
         registry.register(100L, 30L, user30);
 
+        // when
         registry.completeAll(100L);
 
+        // then
         assertThat(user10.completed).isTrue();
         assertThat(user20.completeAttempted).isTrue();
         assertThat(user30.completed).isTrue();
@@ -109,8 +152,13 @@ class MeetingSseRegistryTest {
     }
 
     @Test
+    @DisplayName("회의 삭제 이벤트를 전송한 뒤 전체 연결을 종료한다")
     void sendAndCompleteAllSendsEventThenCompletesAndRemovesMeeting() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 회의 삭제 이벤트를 전송한 뒤 전체 연결을 종료한다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter user10 = new TestSseEmitter();
         TestSseEmitter user20 = new TestSseEmitter();
         TestSseEmitter user30 = new TestSseEmitter();
@@ -119,8 +167,10 @@ class MeetingSseRegistryTest {
         registry.register(100L, 20L, user20);
         registry.register(100L, 30L, user30);
 
+        // when
         registry.sendAndCompleteAll(100L, "MEETING_DELETED", event);
 
+        // then
         assertThat(user10.sentData)
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
                 .contains(event)
@@ -141,8 +191,13 @@ class MeetingSseRegistryTest {
     }
 
     @Test
+    @DisplayName("삭제 이벤트 전송 실패가 다른 참가자 전송과 전체 정리를 막지 않는다")
     void sendAndCompleteAllContinuesWhenOneEmitterSendFails() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 삭제 이벤트 전송 실패가 다른 참가자 전송과 전체 정리를 막지 않는다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter user10 = new TestSseEmitter();
         TestSseEmitter user20 = new TestSseEmitter();
         TestSseEmitter user30 = new TestSseEmitter();
@@ -152,8 +207,10 @@ class MeetingSseRegistryTest {
         registry.register(100L, 20L, user20);
         registry.register(100L, 30L, user30);
 
+        // when
         registry.sendAndCompleteAll(100L, "MEETING_DELETED", event);
 
+        // then
         assertThat(user10.sentData)
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
                 .contains(event);
@@ -169,17 +226,29 @@ class MeetingSseRegistryTest {
     }
 
     @Test
+    @DisplayName("연결이 없는 회의의 삭제 이벤트와 종료는 안전하게 무시한다")
     void sendAndCompleteAllMissingMeetingIsNoop() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 연결이 없는 회의의 삭제 이벤트와 종료는 안전하게 무시한다.
 
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
+
+        // when
         registry.sendAndCompleteAll(100L, "MEETING_DELETED", MeetingSseDeletedEvent.deleted(100L));
 
+        // then
         assertThat(registry.countAll()).isZero();
     }
 
     @Test
+    @DisplayName("브로드캐스트는 해당 회의의 모든 연결에 전송하고 연결을 유지한다")
     void broadcastSendsEventToAllMeetingEmittersAndKeepsConnections() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 브로드캐스트는 해당 회의의 모든 연결에 전송하고 연결을 유지한다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter user10 = new TestSseEmitter();
         TestSseEmitter user20 = new TestSseEmitter();
         TestSseEmitter otherMeetingUser = new TestSseEmitter();
@@ -188,8 +257,10 @@ class MeetingSseRegistryTest {
         registry.register(100L, 20L, user20);
         registry.register(200L, 30L, otherMeetingUser);
 
+        // when
         int emitterCount = registry.broadcast(100L, "TRANSCRIPT_CREATED", event);
 
+        // then
         assertThat(emitterCount).isEqualTo(2);
         assertThat(user10.sentData)
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
@@ -207,8 +278,13 @@ class MeetingSseRegistryTest {
     }
 
     @Test
+    @DisplayName("전송 실패 emitter만 제거하고 나머지 참가자 전송을 계속한다")
     void broadcastRemovesOnlyFailedEmitterAndContinues() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 전송 실패 emitter만 제거하고 나머지 참가자 전송을 계속한다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter user10 = new TestSseEmitter();
         TestSseEmitter user20 = new TestSseEmitter();
         TestSseEmitter user30 = new TestSseEmitter();
@@ -218,8 +294,10 @@ class MeetingSseRegistryTest {
         registry.register(100L, 20L, user20);
         registry.register(100L, 30L, user30);
 
+        // when
         int emitterCount = registry.broadcast(100L, "TRANSCRIPT_CREATED", event);
 
+        // then
         assertThat(emitterCount).isEqualTo(3);
         assertThat(user10.sentData)
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
@@ -237,26 +315,40 @@ class MeetingSseRegistryTest {
     }
 
     @Test
+    @DisplayName("전체 전송·종료 이후 늦은 제거 콜백은 안전하다")
     void callbackRemoveAfterSendAndCompleteAllIsSafe() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 전체 전송·종료 이후 늦은 제거 콜백은 안전하다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter emitter = new TestSseEmitter();
         registry.register(100L, 10L, emitter);
 
+        // when
         registry.sendAndCompleteAll(100L, "MEETING_DELETED", MeetingSseDeletedEvent.deleted(100L));
         registry.remove(100L, 10L, emitter);
 
+        // then
         assertThat(registry.countAll()).isZero();
     }
 
     @Test
+    @DisplayName("명시적 종료 이후 늦은 제거 콜백은 안전하다")
     void callbackRemoveAfterExplicitCompleteIsSafe() {
-        MeetingSseRegistry registry = new MeetingSseRegistry();
+        // 테스트 목적:
+        // 명시적 종료 이후 늦은 제거 콜백은 안전하다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
         TestSseEmitter emitter = new TestSseEmitter();
         registry.register(100L, 10L, emitter);
 
+        // when
         registry.complete(100L, 10L);
         registry.remove(100L, 10L, emitter);
 
+        // then
         assertThat(registry.countAll()).isZero();
     }
 
