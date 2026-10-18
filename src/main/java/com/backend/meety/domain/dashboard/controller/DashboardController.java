@@ -3,7 +3,9 @@ package com.backend.meety.domain.dashboard.controller;
 import com.backend.meety.domain.dashboard.dto.DashboardResponse;
 import com.backend.meety.domain.dashboard.service.DashboardService;
 import com.backend.meety.global.response.ApiResponse;
+import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,8 +25,9 @@ public class DashboardController {
     public ResponseEntity<ApiResponse<DashboardResponse>> getDashboard(
             @AuthenticationPrincipal Long userId,
             @PathVariable Long teamId,
-            @RequestParam(defaultValue = "28") Integer days
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) {
-        return ResponseEntity.ok(ApiResponse.success(dashboardService.getDashboard(userId, teamId, days)));
+        return ResponseEntity.ok(ApiResponse.success(dashboardService.getDashboard(userId, teamId, from, to)));
     }
 }

@@ -8,7 +8,6 @@ public record DashboardSummaryResponse(
         Long averageMeetingDurationSeconds,
         Long overtimeMeetings,
         BigDecimal overtimeMeetingRate,
-        BigDecimal overtimeDurationRate,
         BigDecimal totalContextOutSeconds,
         BigDecimal contextOutRate
 ) {

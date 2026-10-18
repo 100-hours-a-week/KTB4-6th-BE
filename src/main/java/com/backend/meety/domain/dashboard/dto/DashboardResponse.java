@@ -9,6 +9,7 @@ public record DashboardResponse(
         LocalDate endDate,
         DashboardSummaryResponse summary,
         List<DashboardChartPointResponse> chart,
+        List<DashboardMeetingResponse> meetings,
         List<DashboardTopicResponse> topics
 ) {
 }
