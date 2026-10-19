@@ -3,16 +3,14 @@ package com.backend.meety.global.security;
 import com.backend.meety.global.config.AuthCookieProperties;
 import com.backend.meety.global.config.CorsProperties;
 import com.backend.meety.global.config.InternalApiProperties;
-import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.actuate.autoconfigure.web.server.ManagementServerProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.env.Environment;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -45,7 +43,6 @@ public class SecurityConfig {
     private final AccessTokenBlacklist accessTokenBlacklist;
     private final CustomAuthenticationEntryPoint authenticationEntryPoint;
     private final CorsProperties corsProperties;
-    private final ObjectProvider<ManagementServerProperties> managementServerProperties;
     private final Environment environment;
     private final InternalApiProperties internalApiProperties;
     private final AuthCookieProperties authCookieProperties;
@@ -87,7 +84,7 @@ public class SecurityConfig {
                         auth.requestMatchers(SWAGGER_UI_URLS).denyAll();
                     }
                     auth.requestMatchers(PermitAllUrls.URLS).permitAll()
-                            .requestMatchers(this::isManagementPortMetricsRequest).permitAll()
+                            .requestMatchers(HttpMethod.GET, PROMETHEUS_ENDPOINT).permitAll()
                             .anyRequest().authenticated();
                 })
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(authenticationEntryPoint))
@@ -99,14 +96,6 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
-    }
-
-    private boolean isManagementPortMetricsRequest(HttpServletRequest request) {
-        ManagementServerProperties properties = managementServerProperties.getIfAvailable();
-        Integer managementPort = properties == null ? null : properties.getPort();
-        return managementPort != null
-                && request.getLocalPort() == managementPort
-                && PROMETHEUS_ENDPOINT.equals(request.getRequestURI());
     }
 
     private boolean isApiDocsEnabled() {
