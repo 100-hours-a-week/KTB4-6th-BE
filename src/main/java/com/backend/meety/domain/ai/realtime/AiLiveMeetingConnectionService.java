@@ -34,6 +34,7 @@ public class AiLiveMeetingConnectionService {
     private final RecordingOwnerService ownerService;
     private final MeetingParticipantRepository meetingParticipantRepository;
     private final AiAudioAckService audioAckService;
+    private final AiHeartbeatService heartbeatService;
 
     void notifyTranscriptFinalized(AiLiveMeetingConnection connection) {
         eventPublisher.publishEvent(new MeetingTranscriptFinalizedEvent(
@@ -148,6 +149,10 @@ public class AiLiveMeetingConnectionService {
 
     void receiveAudioAck(AiLiveMeetingConnection connection, tools.jackson.databind.JsonNode message) {
         audioAckService.receive(connection, message, objectMapper);
+    }
+
+    void receiveHeartbeatPong(AiLiveMeetingConnection connection, tools.jackson.databind.JsonNode message) {
+        heartbeatService.receivePong(connection, message);
     }
 
     public Optional<AiLiveMeetingConnectionState> findState(Long recordingSessionId) {

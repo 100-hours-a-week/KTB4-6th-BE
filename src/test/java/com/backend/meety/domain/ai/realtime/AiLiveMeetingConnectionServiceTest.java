@@ -68,7 +68,8 @@ class AiLiveMeetingConnectionServiceTest {
             new AiAudioAckService(registry, new com.backend.meety.domain.recording.realtime.AudioWebSocketRegistry(),
                     mock(com.backend.meety.domain.recording.realtime.AudioSequenceRepository.class),
                     new AiAudioAckProperties(Duration.ofSeconds(5), Duration.ofSeconds(1), 1024),
-                    java.time.Clock.systemUTC(), new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), readyEvents::add)
+                    java.time.Clock.systemUTC(), new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), readyEvents::add),
+            mock(AiHeartbeatService.class)
     );
 
     @Test
