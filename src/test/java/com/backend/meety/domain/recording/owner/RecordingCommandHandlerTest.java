@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnection;
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionRegistry;
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionService;
-import com.backend.meety.domain.ai.realtime.AudioFormat;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketCloser;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -90,7 +89,7 @@ class RecordingCommandHandlerTest {
     }
 
     private void givenLocalOwner(String owner) {
-        AiLiveMeetingConnection connection = new AiLiveMeetingConnection(88L, 42L, AudioFormat.PCM_S16LE, "start-1");
+        AiLiveMeetingConnection connection = new AiLiveMeetingConnection(88L, 42L, "start-1");
         connection.assignOwner(owner);
         aiConnectionRegistry.reserve(connection);
     }

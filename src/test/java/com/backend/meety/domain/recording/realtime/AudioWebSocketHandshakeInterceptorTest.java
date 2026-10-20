@@ -67,13 +67,13 @@ class AudioWebSocketHandshakeInterceptorTest {
     }
 
     @Test
-    @DisplayName("같은 녹음 세션의 이전 소켓을 닫고 AI 연결을 준비한 뒤 현재 스트림 세대를 컨텍스트에 담는다")
-    void supersedesPreviousSocketAndStoresStreamEpoch() throws Exception {
+    @DisplayName("같은 녹음 세션의 이전 소켓을 닫고 AI 연결을 준비한 뒤 컨텍스트를 담는다")
+    void supersedesPreviousSocketAndStoresContext() throws Exception {
         ServerHttpRequest request = request("ws://localhost/ws/v1/recordings/88/audio?audioFormat=pcm_s16le");
         AudioWebSocketContext context = new AudioWebSocketContext(7L, 42L, 88L, AudioFormat.PCM_S16LE);
         org.mockito.Mockito.when(authentication.authenticate(request)).thenReturn(7L);
         org.mockito.Mockito.when(accessService.validate(7L, 88L, AudioFormat.PCM_S16LE)).thenReturn(context);
-        org.mockito.Mockito.when(aiConnectionService.prepareStream(context)).thenReturn(OptionalLong.of(2L));
+        org.mockito.Mockito.when(aiConnectionService.prepareStream(context)).thenReturn(true);
         org.mockito.Mockito.when(ownerService.register(88L)).thenReturn(true);
         WebSocketSession previous = mock(WebSocketSession.class);
         registry.replace(88L, previous);
@@ -87,7 +87,7 @@ class AudioWebSocketHandshakeInterceptorTest {
         assertThat(registry.find(88L)).isEmpty();
         AudioWebSocketContext stored =
                 (AudioWebSocketContext) attributes.get(AudioWebSocketHandshakeInterceptor.CONTEXT_ATTRIBUTE);
-        assertThat(stored.streamEpoch()).isEqualTo(2L);
+        assertThat(stored).isEqualTo(context);
         verify(ownerService).register(88L);
     }
 
@@ -98,7 +98,7 @@ class AudioWebSocketHandshakeInterceptorTest {
         AudioWebSocketContext context = new AudioWebSocketContext(7L, 42L, 88L, AudioFormat.PCM_S16LE);
         org.mockito.Mockito.when(authentication.authenticate(request)).thenReturn(7L);
         org.mockito.Mockito.when(accessService.validate(7L, 88L, AudioFormat.PCM_S16LE)).thenReturn(context);
-        org.mockito.Mockito.when(aiConnectionService.prepareStream(context)).thenReturn(OptionalLong.empty());
+        org.mockito.Mockito.when(aiConnectionService.prepareStream(context)).thenReturn(false);
         TestServerHttpResponse response = new TestServerHttpResponse();
 
         boolean result = interceptor.beforeHandshake(
@@ -202,7 +202,7 @@ class AudioWebSocketHandshakeInterceptorTest {
         AudioWebSocketContext context = new AudioWebSocketContext(7L, 42L, 88L, AudioFormat.PCM_S16LE);
         org.mockito.Mockito.when(authentication.authenticate(request)).thenReturn(7L);
         org.mockito.Mockito.when(accessService.validate(7L, 88L, AudioFormat.PCM_S16LE)).thenReturn(context);
-        org.mockito.Mockito.when(aiConnectionService.prepareStream(context)).thenReturn(OptionalLong.of(0L));
+        org.mockito.Mockito.when(aiConnectionService.prepareStream(context)).thenReturn(true);
         return request;
     }
 
