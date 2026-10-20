@@ -63,6 +63,10 @@ chat:
     queue-capacity: ${CHAT_EXECUTOR_QUEUE_CAPACITY:1000}
 
 ai:
+  audio-ack:
+    timeout: ${AI_AUDIO_ACK_TIMEOUT:5s}
+    poll-delay: ${AI_AUDIO_ACK_POLL_DELAY:1s}
+    max-pending-chunks: ${AI_AUDIO_ACK_MAX_PENDING_CHUNKS:1024}
   request:
     recovery:
       processing-timeout: ${AI_REQUEST_PROCESSING_TIMEOUT:70m}

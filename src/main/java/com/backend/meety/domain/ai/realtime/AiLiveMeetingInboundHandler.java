@@ -32,10 +32,14 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        log.info("AI 메시지 수신: {}", message.getPayload());
         try {
             JsonNode root = objectMapper.readTree(message.getPayload());
             String type = root.path("type").asText();
+            if ("audio.ack".equals(type)) {
+                connectionService.receiveAudioAck(connection, root);
+                return;
+            }
+            log.info("AI 메시지 수신: {}", message.getPayload());
             if (SESSION_READY.equals(type)) {
                 handleSessionReady(root);
                 return;

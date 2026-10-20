@@ -45,6 +45,23 @@ public class AudioWebSocketRegistry {
     }
 
     public void removeStreamState(Long recordingSessionId) {
-        streamStates.remove(recordingSessionId);
+        AudioStreamState state = streamStates.get(recordingSessionId);
+        if (state != null) {
+            synchronized (state) {
+                state.close();
+                streamStates.remove(recordingSessionId, state);
+            }
+        }
+    }
+
+    public Optional<AudioStreamState> findStreamState(Long recordingSessionId) {
+        return Optional.ofNullable(streamStates.get(recordingSessionId));
+    }
+
+    public void removeStreamState(Long recordingSessionId, AudioStreamState expected) {
+        synchronized (expected) {
+            expected.close();
+            streamStates.remove(recordingSessionId, expected);
+        }
     }
 }
