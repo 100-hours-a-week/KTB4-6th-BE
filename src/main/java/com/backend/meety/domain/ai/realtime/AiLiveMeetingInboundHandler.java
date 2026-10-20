@@ -39,6 +39,10 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                 connectionService.receiveAudioAck(connection, root);
                 return;
             }
+            if ("heartbeat.pong".equals(type)) {
+                connectionService.receiveHeartbeatPong(connection, root);
+                return;
+            }
             log.info("AI 메시지 수신: {}", message.getPayload());
             if (SESSION_READY.equals(type)) {
                 handleSessionReady(root);

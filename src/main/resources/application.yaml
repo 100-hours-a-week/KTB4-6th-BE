@@ -63,6 +63,10 @@ chat:
     queue-capacity: ${CHAT_EXECUTOR_QUEUE_CAPACITY:1000}
 
 ai:
+  heartbeat:
+    interval: ${AI_HEARTBEAT_INTERVAL:5s}
+    pong-timeout: ${AI_HEARTBEAT_PONG_TIMEOUT:5s}
+    failure-threshold: ${AI_HEARTBEAT_FAILURE_THRESHOLD:2}
   audio-ack:
     timeout: ${AI_AUDIO_ACK_TIMEOUT:5s}
     poll-delay: ${AI_AUDIO_ACK_POLL_DELAY:1s}
