@@ -262,7 +262,7 @@ class AudioWebSocketHandlerTest {
         WebSocketSession session = connected();
         handler.handleBinaryMessage(session, frame(1, 16));
         handler.handleBinaryMessage(session, frame(2, 16));
-        when(aiConnectionService.resetStream(88L, AudioFormat.WEBM_OPUS)).thenReturn(OptionalLong.of(1L));
+        when(aiConnectionService.resetStream(88L, AudioFormat.PCM_S16LE)).thenReturn(OptionalLong.of(1L));
         when(aiConnectionService.forwardAudio(eq(88L), eq(1L), any(byte[].class))).thenReturn(true);
 
         handler.handleTextMessage(session, recoveryFinished(2));
@@ -295,7 +295,7 @@ class AudioWebSocketHandlerTest {
     @DisplayName("새 스트림으로 전환하지 못하면 연결을 닫는다")
     void closesWhenStreamResetFails() throws Exception {
         WebSocketSession session = connected();
-        when(aiConnectionService.resetStream(88L, AudioFormat.WEBM_OPUS)).thenReturn(OptionalLong.empty());
+        when(aiConnectionService.resetStream(88L, AudioFormat.PCM_S16LE)).thenReturn(OptionalLong.empty());
 
         handler.handleTextMessage(session, recoveryFinished(0));
 
@@ -307,12 +307,12 @@ class AudioWebSocketHandlerTest {
     @DisplayName("이미 스트리밍 중인 소켓의 recovery.finished는 무시한다")
     void ignoresRecoveryFinishedWhenStreaming() throws Exception {
         WebSocketSession session = connected();
-        when(aiConnectionService.resetStream(88L, AudioFormat.WEBM_OPUS)).thenReturn(OptionalLong.of(1L));
+        when(aiConnectionService.resetStream(88L, AudioFormat.PCM_S16LE)).thenReturn(OptionalLong.of(1L));
         handler.handleTextMessage(session, recoveryFinished(0));
 
         handler.handleTextMessage(session, recoveryFinished(0));
 
-        verify(aiConnectionService).resetStream(88L, AudioFormat.WEBM_OPUS);
+        verify(aiConnectionService).resetStream(88L, AudioFormat.PCM_S16LE);
     }
 
     @Test
@@ -392,7 +392,7 @@ class AudioWebSocketHandlerTest {
     }
 
     private AudioWebSocketContext context() {
-        return new AudioWebSocketContext(7L, 42L, 88L, AudioFormat.WEBM_OPUS);
+        return new AudioWebSocketContext(7L, 42L, 88L, AudioFormat.PCM_S16LE);
     }
 
     private WebSocketSession session(AudioWebSocketContext context) {

@@ -90,7 +90,7 @@ class RecordingCommandHandlerTest {
     }
 
     private void givenLocalOwner(String owner) {
-        AiLiveMeetingConnection connection = new AiLiveMeetingConnection(88L, 42L, AudioFormat.WEBM_OPUS, "start-1");
+        AiLiveMeetingConnection connection = new AiLiveMeetingConnection(88L, 42L, AudioFormat.PCM_S16LE, "start-1");
         connection.assignOwner(owner);
         aiConnectionRegistry.reserve(connection);
     }
