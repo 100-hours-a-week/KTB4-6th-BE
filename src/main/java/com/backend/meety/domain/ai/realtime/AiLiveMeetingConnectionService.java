@@ -33,6 +33,7 @@ public class AiLiveMeetingConnectionService {
     private final TranscriptService transcriptService;
     private final RecordingOwnerService ownerService;
     private final MeetingParticipantRepository meetingParticipantRepository;
+    private final AiAudioAckService audioAckService;
 
     void notifyTranscriptFinalized(AiLiveMeetingConnection connection) {
         eventPublisher.publishEvent(new MeetingTranscriptFinalizedEvent(
@@ -132,17 +133,21 @@ public class AiLiveMeetingConnectionService {
         return registry.find(recordingSessionId).filter(found -> !found.isClosed());
     }
 
-    public boolean forwardAudio(Long recordingSessionId, byte[] audio) {
+    public boolean forwardAudio(Long recordingSessionId, long feSequence, byte[] audio) {
         AiLiveMeetingConnection connection = registry.find(recordingSessionId).orElse(null);
         if (connection == null) {
             return false;
         }
         try {
-            return connection.forwardAudio(objectMapper, audio);
+            return audioAckService.forwardAudio(connection, objectMapper, feSequence, audio);
         } catch (Exception e) {
             log.warn("AI WebSocket 오디오 전달에 실패했습니다. recordingSessionId={}", recordingSessionId, e);
             return false;
         }
+    }
+
+    void receiveAudioAck(AiLiveMeetingConnection connection, tools.jackson.databind.JsonNode message) {
+        audioAckService.receive(connection, message, objectMapper);
     }
 
     public Optional<AiLiveMeetingConnectionState> findState(Long recordingSessionId) {
@@ -243,7 +248,7 @@ public class AiLiveMeetingConnectionService {
 
     void cleanup(AiLiveMeetingConnection connection) {
         connection.cancelStopTimeout();
-        connection.close();
+        audioAckService.cleanup(connection);
         WebSocketSession aiSession = connection.webSocketSession();
         if (aiSession != null && aiSession.isOpen()) {
             try {

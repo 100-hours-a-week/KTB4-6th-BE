@@ -24,7 +24,9 @@ public class AiLiveMeetingConnectionRegistry {
     }
 
     public void remove(Long recordingSessionId, AiLiveMeetingConnection connection) {
-        connections.remove(recordingSessionId, connection);
+        if (connections.remove(recordingSessionId, connection)) {
+            connection.close();
+        }
     }
 
     public List<AiLiveMeetingConnection> findAll() {

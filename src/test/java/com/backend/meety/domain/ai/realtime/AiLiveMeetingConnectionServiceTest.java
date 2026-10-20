@@ -64,7 +64,11 @@ class AiLiveMeetingConnectionServiceTest {
             readyEvents::add,
             transcriptService,
             ownerService,
-            meetingParticipantRepository
+            meetingParticipantRepository,
+            new AiAudioAckService(registry, new com.backend.meety.domain.recording.realtime.AudioWebSocketRegistry(),
+                    mock(com.backend.meety.domain.recording.realtime.AudioSequenceRepository.class),
+                    new AiAudioAckProperties(Duration.ofSeconds(5), Duration.ofSeconds(1), 1024),
+                    java.time.Clock.systemUTC(), new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), readyEvents::add)
     );
 
     @Test
@@ -747,7 +751,7 @@ class AiLiveMeetingConnectionServiceTest {
     void forwardAudioSendsMetaThenBinaryWhenReady() throws Exception {
         AiLiveMeetingConnection connection = readyConnection();
 
-        boolean forwarded = service.forwardAudio(88L, new byte[]{1, 2, 3});
+        boolean forwarded = forwardAudio(88L, new byte[]{1, 2, 3});
 
         assertThat(forwarded).isTrue();
         JsonNode meta = objectMapper.readTree(client.session.sentMessages.getLast());
@@ -769,9 +773,9 @@ class AiLiveMeetingConnectionServiceTest {
         AiLiveMeetingConnection connection = pausedConnection();
 
         // when
-        boolean pausedForwarded = service.forwardAudio(88L, new byte[]{1});
+        boolean pausedForwarded = forwardAudio(88L, new byte[]{1});
         service.resume(88L);
-        boolean resumeSentForwarded = service.forwardAudio(88L, new byte[]{2});
+        boolean resumeSentForwarded = forwardAudio(88L, new byte[]{2});
 
         // then
         assertThat(pausedForwarded).isFalse();
@@ -790,10 +794,10 @@ class AiLiveMeetingConnectionServiceTest {
 
         // given
         readyConnection();
-        service.forwardAudio(88L, new byte[]{1});
+        forwardAudio(88L, new byte[]{1});
         pauseCurrentReadyConnection();
         service.resume(88L);
-        service.forwardAudio(88L, new byte[]{2});
+        forwardAudio(88L, new byte[]{2});
 
         // when
         client.receive("""
@@ -803,7 +807,7 @@ class AiLiveMeetingConnectionServiceTest {
                   "payload": {"status": "READY"}
                 }
                 """);
-        boolean forwarded = service.forwardAudio(88L, new byte[]{3});
+        boolean forwarded = forwardAudio(88L, new byte[]{3});
 
         // then
         assertThat(forwarded).isTrue();
@@ -829,7 +833,7 @@ class AiLiveMeetingConnectionServiceTest {
         };
 
         // when
-        boolean forwarded = service.forwardAudio(88L, new byte[]{1});
+        boolean forwarded = forwardAudio(88L, new byte[]{1});
         pauseThread.get().join(3_000);
 
         // then
@@ -843,9 +847,9 @@ class AiLiveMeetingConnectionServiceTest {
     void forwardAudioIncrementsSequence() throws Exception {
         readyConnection();
 
-        service.forwardAudio(88L, new byte[]{1});
-        service.forwardAudio(88L, new byte[]{2});
-        service.forwardAudio(88L, new byte[]{3});
+        forwardAudio(88L, new byte[]{1});
+        forwardAudio(88L, new byte[]{2});
+        forwardAudio(88L, new byte[]{3});
 
         List<Long> sequences = new ArrayList<>();
         for (String message : client.session.sentMessages) {
@@ -863,7 +867,7 @@ class AiLiveMeetingConnectionServiceTest {
     void forwardAudioRejectedBeforeReady() throws Exception {
         service.start(context(AudioFormat.PCM_S16LE));
 
-        boolean forwarded = service.forwardAudio(88L, new byte[]{1, 2, 3});
+        boolean forwarded = forwardAudio(88L, new byte[]{1, 2, 3});
 
         assertThat(forwarded).isFalse();
         assertThat(client.session.sentBinaries).isEmpty();
@@ -872,7 +876,7 @@ class AiLiveMeetingConnectionServiceTest {
     @Test
     @DisplayName("AI 연결이 없으면 오디오를 전달하지 않는다")
     void forwardAudioRejectedWhenConnectionMissing() {
-        boolean forwarded = service.forwardAudio(88L, new byte[]{1, 2, 3});
+        boolean forwarded = forwardAudio(88L, new byte[]{1, 2, 3});
 
         assertThat(forwarded).isFalse();
     }
@@ -1004,6 +1008,12 @@ class AiLiveMeetingConnectionServiceTest {
     @DisplayName("AI 연결이 없으면 스트림을 받을 수 없다")
     void awaitStreamableFailsWithoutConnection() {
         assertThat(service.awaitStreamable(88L)).isFalse();
+    }
+
+    private long feSequence;
+
+    private boolean forwardAudio(Long id, byte[] bytes) {
+        return service.forwardAudio(id, ++feSequence, bytes);
     }
 
     private void awaitSentType(String type) throws InterruptedException {
