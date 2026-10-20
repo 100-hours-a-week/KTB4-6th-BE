@@ -7,7 +7,7 @@ import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 
 @Configuration
-@EnableConfigurationProperties(AiLiveMeetingProperties.class)
+@EnableConfigurationProperties({AiLiveMeetingProperties.class, AiAudioAckProperties.class})
 public class AiWebSocketClientConfig {
 
     @Bean

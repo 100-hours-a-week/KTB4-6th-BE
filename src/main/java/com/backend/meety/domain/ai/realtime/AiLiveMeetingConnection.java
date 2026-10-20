@@ -1,12 +1,17 @@
 package com.backend.meety.domain.ai.realtime;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.NavigableMap;
 import java.util.OptionalLong;
+import java.util.TreeMap;
+import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -15,7 +20,8 @@ import tools.jackson.databind.ObjectMapper;
 public class AiLiveMeetingConnection {
 
     private final Object sendLock = new Object();
-    private final AtomicLong audioSequence = new AtomicLong();
+    // Next sequence to reserve for an outgoing audio attempt; all access is under sendLock.
+    private long nextAudioSequence;
     private final CountDownLatch readyLatch = new CountDownLatch(1);
 
     private final Long recordingSessionId;
@@ -33,6 +39,24 @@ public class AiLiveMeetingConnection {
     private long streamEpoch;
     private volatile ScheduledFuture<?> stopTimeoutFuture;
     private volatile String owner;
+    private final NavigableMap<Long, Long> pendingAudio = new TreeMap<>();
+    private long lastSentSequence = -1;
+    private long lastAckedSequence = -1;
+    private Instant lastAckReceivedAt;
+    private Instant lastAckProgressAt;
+    private boolean ackTimeoutReported;
+    private long requiredFeSequence = -1;
+
+    public enum AckResult {
+        ADVANCED, DUPLICATE, STALE, INVALID, CLOSED
+    }
+
+    public record AckSnapshot(long nextAudioSequence, long lastSentSequence, long lastAckedSequence,
+                              Instant lastAckReceivedAt, Instant lastAckProgressAt) {
+        public long lag() {
+            return Math.max(0, lastSentSequence - lastAckedSequence);
+        }
+    }
 
     public AiLiveMeetingConnection(Long recordingSessionId, Long meetingId,
                                    AudioFormat audioFormat, String sessionStartRequestId) {
@@ -88,7 +112,8 @@ public class AiLiveMeetingConnection {
     /**
      * audio.meta와 바이너리 프레임을 한 쌍으로 전송한다. 현재 스트림 세대가 아니거나 READY가 아니면 전송하지 않고 false를 반환한다.
      */
-    public boolean forwardAudio(ObjectMapper objectMapper, long streamEpoch, byte[] audio) throws IOException {
+    public boolean forwardAudio(ObjectMapper objectMapper, long streamEpoch, byte[] audio,
+                                long feSequence, Clock clock, int maxPendingChunks) throws IOException {
         synchronized (sendLock) {
             if (streamEpoch != this.streamEpoch || state() != AiLiveMeetingConnectionState.READY) {
                 return false;
@@ -97,10 +122,87 @@ public class AiLiveMeetingConnection {
             if (session == null || !session.isOpen()) {
                 return false;
             }
-            AiAudioMetaMessage meta = AiAudioMetaMessage.of(audioSequence.getAndIncrement());
+            if (requiredFeSequence >= 0 && feSequence != requiredFeSequence) {
+                return false;
+            }
+            if (pendingAudio.size() >= maxPendingChunks) {
+                requiredFeSequence = feSequence;
+                return false;
+            }
+            // Do not cumulatively acknowledge past a chunk rejected by our own pending limit/write failure.
+            requiredFeSequence = feSequence;
+            long sequence = nextAudioSequence++;
+            AiAudioMetaMessage meta = AiAudioMetaMessage.of(sequence);
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(meta)));
             session.sendMessage(new BinaryMessage(audio));
+            Instant now = clock.instant();
+            if (lastSentSequence == lastAckedSequence) {
+                lastAckProgressAt = now;
+            }
+            lastSentSequence = sequence;
+            pendingAudio.put(sequence, feSequence);
+            requiredFeSequence = -1;
             return true;
+        }
+    }
+
+    /** Caller also holds the FE stream-state lock: stream state -> sendLock is the global lock order. */
+    public AckResult acknowledge(long sequence, Instant now, BiPredicate<Long, Integer> checkpoint) {
+        synchronized (sendLock) {
+            if (state() == AiLiveMeetingConnectionState.CLOSED || state() == AiLiveMeetingConnectionState.STOP_SENT
+                    || state() == AiLiveMeetingConnectionState.ENDED) {
+                return AckResult.CLOSED;
+            }
+            if (sequence < 0 || sequence > lastSentSequence) {
+                return AckResult.INVALID;
+            }
+            if (sequence < lastAckedSequence) {
+                return AckResult.STALE;
+            }
+            boolean duplicate = sequence == lastAckedSequence;
+            Long feSequence = pendingAudio.get(sequence);
+            if (!duplicate && feSequence == null) {
+                return AckResult.INVALID;
+            }
+            if (!duplicate) {
+                lastAckedSequence = sequence;
+                lastAckReceivedAt = now;
+                lastAckProgressAt = lastSentSequence > lastAckedSequence ? now : null;
+                ackTimeoutReported = false;
+            }
+            if (feSequence != null) {
+                NavigableMap<Long, Long> confirmed = pendingAudio.headMap(sequence, true);
+                if (checkpoint.test(feSequence, confirmed.size())) {
+                    confirmed.clear();
+                }
+            }
+            return duplicate ? AckResult.DUPLICATE : AckResult.ADVANCED;
+        }
+    }
+
+    public AckSnapshot ackSnapshot() {
+        synchronized (sendLock) {
+            return new AckSnapshot(nextAudioSequence, lastSentSequence, lastAckedSequence,
+                    lastAckReceivedAt, lastAckProgressAt);
+        }
+    }
+
+    public int pendingAudioCount() {
+        synchronized (sendLock) {
+            return pendingAudio.size();
+        }
+    }
+
+    public void detectAckTimeout(Instant now, Duration timeout, Consumer<AckSnapshot> onTimeout) {
+        synchronized (sendLock) {
+            if (state() == AiLiveMeetingConnectionState.CLOSED
+                    || lastSentSequence <= lastAckedSequence || ackTimeoutReported) {
+                return;
+            }
+            if (lastAckProgressAt != null && !now.isBefore(lastAckProgressAt.plus(timeout))) {
+                ackTimeoutReported = true;
+                onTimeout.accept(ackSnapshot());
+            }
         }
     }
 
@@ -172,6 +274,7 @@ public class AiLiveMeetingConnection {
             this.sessionStopRequestId = requestId;
             this.state = AiLiveMeetingConnectionState.STOP_SENT;
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiSessionStopMessage.of(this))));
+            clearAudioAckState();
             return true;
         }
     }
@@ -282,10 +385,25 @@ public class AiLiveMeetingConnection {
         return state == AiLiveMeetingConnectionState.CLOSED;
     }
 
-    public synchronized void close() {
-        this.state = AiLiveMeetingConnectionState.CLOSED;
-        readyLatch.countDown();
-        decoderReadyLatch.countDown();
-        notifyAll();
+    public void close() {
+        synchronized (sendLock) {
+            synchronized (this) {
+                this.state = AiLiveMeetingConnectionState.CLOSED;
+                clearAudioAckState();
+                readyLatch.countDown();
+                decoderReadyLatch.countDown();
+                notifyAll();
+            }
+        }
+    }
+
+    private void clearAudioAckState() {
+        pendingAudio.clear();
+        lastSentSequence = -1;
+        lastAckedSequence = -1;
+        lastAckReceivedAt = null;
+        lastAckProgressAt = null;
+        ackTimeoutReported = false;
+        requiredFeSequence = -1;
     }
 }
