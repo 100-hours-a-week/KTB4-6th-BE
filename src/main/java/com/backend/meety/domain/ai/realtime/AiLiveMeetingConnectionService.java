@@ -9,7 +9,6 @@ import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.net.URI;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalLong;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -79,7 +78,6 @@ public class AiLiveMeetingConnectionService {
         AiLiveMeetingConnection connection = new AiLiveMeetingConnection(
                 context.recordingSessionId(),
                 context.meetingId(),
-                context.audioFormat(),
                 requestIdGenerator.sessionStartRequestId()
         );
         if (!registry.reserve(connection)) {
@@ -102,18 +100,11 @@ public class AiLiveMeetingConnectionService {
         }
     }
 
-    public OptionalLong prepareStream(AudioWebSocketContext context) {
-        AiLiveMeetingConnection connection = openConnection(context.recordingSessionId()).orElse(null);
-        if (connection == null) {
-            if (!startAndAwaitReady(context)) {
-                return OptionalLong.empty();
-            }
-            connection = registry.find(context.recordingSessionId()).orElse(null);
-            if (connection == null) {
-                return OptionalLong.empty();
-            }
+    public boolean prepareStream(AudioWebSocketContext context) {
+        if (openConnection(context.recordingSessionId()).isPresent()) {
+            return true;
         }
-        return OptionalLong.of(connection.streamEpoch());
+        return startAndAwaitReady(context);
     }
 
     public boolean hasOpenConnection(Long recordingSessionId) {
@@ -137,56 +128,17 @@ public class AiLiveMeetingConnectionService {
         }
     }
 
-    public OptionalLong resetStream(Long recordingSessionId, AudioFormat audioFormat) {
-        return openConnection(recordingSessionId)
-                .map(connection -> resetDecoder(connection, audioFormat))
-                .orElse(OptionalLong.empty());
-    }
-
     private Optional<AiLiveMeetingConnection> openConnection(Long recordingSessionId) {
         return registry.find(recordingSessionId).filter(found -> !found.isClosed());
     }
 
-    private OptionalLong resetDecoder(AiLiveMeetingConnection connection, AudioFormat audioFormat) {
-        OptionalLong streamEpoch;
-        try {
-            streamEpoch = connection.sendDecoderReset(
-                    objectMapper, requestIdGenerator.decoderResetRequestId(), audioFormat);
-        } catch (Exception e) {
-            log.warn("AI WebSocket decoder.reset 전송에 실패했습니다. recordingSessionId={}",
-                    connection.recordingSessionId(), e);
-            cleanup(connection);
-            return OptionalLong.empty();
-        }
-        if (streamEpoch.isEmpty()) {
-            log.warn("AI WebSocket decoder.reset을 보낼 수 없는 상태입니다. recordingSessionId={}, state={}",
-                    connection.recordingSessionId(), connection.state());
-            return OptionalLong.empty();
-        }
-        try {
-            if (connection.awaitDecoderReady(AiLiveMeetingPolicy.READY_TIMEOUT)) {
-                return streamEpoch;
-            }
-            log.warn("AI WebSocket decoder.ready를 받지 못했습니다. recordingSessionId={}, state={}",
-                    connection.recordingSessionId(), connection.state());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("AI WebSocket decoder.ready 대기가 중단되었습니다. recordingSessionId={}",
-                    connection.recordingSessionId(), e);
-        }
-        if (connection.state() == AiLiveMeetingConnectionState.RESET_SENT) {
-            cleanup(connection);
-        }
-        return OptionalLong.empty();
-    }
-
-    public boolean forwardAudio(Long recordingSessionId, long streamEpoch, byte[] audio) {
+    public boolean forwardAudio(Long recordingSessionId, byte[] audio) {
         AiLiveMeetingConnection connection = registry.find(recordingSessionId).orElse(null);
         if (connection == null) {
             return false;
         }
         try {
-            return connection.forwardAudio(objectMapper, streamEpoch, audio);
+            return connection.forwardAudio(objectMapper, audio);
         } catch (Exception e) {
             log.warn("AI WebSocket 오디오 전달에 실패했습니다. recordingSessionId={}", recordingSessionId, e);
             return false;

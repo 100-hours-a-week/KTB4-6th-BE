@@ -24,7 +24,6 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.OptionalLong;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.ScheduledFuture;
@@ -748,7 +747,7 @@ class AiLiveMeetingConnectionServiceTest {
     void forwardAudioSendsMetaThenBinaryWhenReady() throws Exception {
         AiLiveMeetingConnection connection = readyConnection();
 
-        boolean forwarded = service.forwardAudio(88L, 0L, new byte[]{1, 2, 3});
+        boolean forwarded = service.forwardAudio(88L, new byte[]{1, 2, 3});
 
         assertThat(forwarded).isTrue();
         JsonNode meta = objectMapper.readTree(client.session.sentMessages.getLast());
@@ -770,9 +769,9 @@ class AiLiveMeetingConnectionServiceTest {
         AiLiveMeetingConnection connection = pausedConnection();
 
         // when
-        boolean pausedForwarded = service.forwardAudio(88L, 0L, new byte[]{1});
+        boolean pausedForwarded = service.forwardAudio(88L, new byte[]{1});
         service.resume(88L);
-        boolean resumeSentForwarded = service.forwardAudio(88L, 0L, new byte[]{2});
+        boolean resumeSentForwarded = service.forwardAudio(88L, new byte[]{2});
 
         // then
         assertThat(pausedForwarded).isFalse();
@@ -791,10 +790,10 @@ class AiLiveMeetingConnectionServiceTest {
 
         // given
         readyConnection();
-        service.forwardAudio(88L, 0L, new byte[]{1});
+        service.forwardAudio(88L, new byte[]{1});
         pauseCurrentReadyConnection();
         service.resume(88L);
-        service.forwardAudio(88L, 0L, new byte[]{2});
+        service.forwardAudio(88L, new byte[]{2});
 
         // when
         client.receive("""
@@ -804,7 +803,7 @@ class AiLiveMeetingConnectionServiceTest {
                   "payload": {"status": "READY"}
                 }
                 """);
-        boolean forwarded = service.forwardAudio(88L, 0L, new byte[]{3});
+        boolean forwarded = service.forwardAudio(88L, new byte[]{3});
 
         // then
         assertThat(forwarded).isTrue();
@@ -830,7 +829,7 @@ class AiLiveMeetingConnectionServiceTest {
         };
 
         // when
-        boolean forwarded = service.forwardAudio(88L, 0L, new byte[]{1});
+        boolean forwarded = service.forwardAudio(88L, new byte[]{1});
         pauseThread.get().join(3_000);
 
         // then
@@ -844,9 +843,9 @@ class AiLiveMeetingConnectionServiceTest {
     void forwardAudioIncrementsSequence() throws Exception {
         readyConnection();
 
-        service.forwardAudio(88L, 0L, new byte[]{1});
-        service.forwardAudio(88L, 0L, new byte[]{2});
-        service.forwardAudio(88L, 0L, new byte[]{3});
+        service.forwardAudio(88L, new byte[]{1});
+        service.forwardAudio(88L, new byte[]{2});
+        service.forwardAudio(88L, new byte[]{3});
 
         List<Long> sequences = new ArrayList<>();
         for (String message : client.session.sentMessages) {
@@ -864,7 +863,7 @@ class AiLiveMeetingConnectionServiceTest {
     void forwardAudioRejectedBeforeReady() throws Exception {
         service.start(context(AudioFormat.PCM_S16LE));
 
-        boolean forwarded = service.forwardAudio(88L, 0L, new byte[]{1, 2, 3});
+        boolean forwarded = service.forwardAudio(88L, new byte[]{1, 2, 3});
 
         assertThat(forwarded).isFalse();
         assertThat(client.session.sentBinaries).isEmpty();
@@ -873,7 +872,7 @@ class AiLiveMeetingConnectionServiceTest {
     @Test
     @DisplayName("AI 연결이 없으면 오디오를 전달하지 않는다")
     void forwardAudioRejectedWhenConnectionMissing() {
-        boolean forwarded = service.forwardAudio(88L, 0L, new byte[]{1, 2, 3});
+        boolean forwarded = service.forwardAudio(88L, new byte[]{1, 2, 3});
 
         assertThat(forwarded).isFalse();
     }
@@ -940,9 +939,9 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     @Test
-    @DisplayName("AI 연결이 없으면 session.start만 하고 decoder.reset 없이 현재 스트림 세대를 돌려준다")
-    void prepareStreamStartsConnectionWithoutReset() throws Exception {
-        AtomicReference<OptionalLong> result = new AtomicReference<>();
+    @DisplayName("AI 연결이 없으면 session.start로 연결하고 session.ready를 받으면 준비 완료를 돌려준다")
+    void prepareStreamStartsConnection() throws Exception {
+        AtomicReference<Boolean> result = new AtomicReference<>();
         Thread waiting = new Thread(() -> result.set(service.prepareStream(context(AudioFormat.PCM_S16LE))));
         waiting.start();
         awaitSentType("session.start");
@@ -957,43 +956,22 @@ class AiLiveMeetingConnectionServiceTest {
                 """);
         waiting.join(3_000);
 
-        assertThat(result.get()).hasValue(0L);
+        assertThat(result.get()).isTrue();
         assertThat(client.connectCount).isOne();
         assertThat(client.session.sentFrameTypes).containsExactly("session.start");
         assertThat(registry.find(88L).orElseThrow().state()).isEqualTo(AiLiveMeetingConnectionState.READY);
     }
 
     @Test
-    @DisplayName("AI 연결이 있으면 새로 연결하지 않고 현재 스트림 세대를 그대로 돌려준다")
-    void prepareStreamReusesConnectionWithoutReset() throws Exception {
+    @DisplayName("AI 연결이 있으면 새로 연결하지 않고 그대로 사용한다")
+    void prepareStreamReusesConnection() throws Exception {
         readyConnection();
 
-        OptionalLong streamEpoch = service.prepareStream(context(AudioFormat.PCM_S16LE));
+        boolean prepared = service.prepareStream(context(AudioFormat.PCM_S16LE));
 
-        assertThat(streamEpoch).hasValue(0L);
+        assertThat(prepared).isTrue();
         assertThat(client.connectCount).isOne();
-        assertThat(client.session.sentFrameTypes).doesNotContain("decoder.reset");
-    }
-
-    @Test
-    @DisplayName("resetStream은 새 녹음 형식으로 decoder.reset을 보내고 새 스트림 세대를 돌려준다")
-    void resetStreamSendsDecoderReset() throws Exception {
-        readyConnection();
-
-        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.PCM_S16LE);
-
-        assertThat(streamEpoch).hasValue(1L);
-        assertThat(client.connectCount).isOne();
-        JsonNode reset = lastSentOfType("decoder.reset");
-        assertThat(reset.size()).isEqualTo(3);
-        assertThat(reset.path("requestId").asText()).isEqualTo("reset-test");
-        assertThat(reset.path("payload").path("audioFormat").asText()).isEqualTo("pcm_s16le");
-    }
-
-    @Test
-    @DisplayName("AI 연결이 없으면 resetStream은 실패한다")
-    void resetStreamFailsWithoutConnection() {
-        assertThat(service.resetStream(88L, AudioFormat.PCM_S16LE)).isEmpty();
+        assertThat(client.session.sentFrameTypes).containsExactly("session.start");
     }
 
     @Test
@@ -1028,105 +1006,10 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(service.awaitStreamable(88L)).isFalse();
     }
 
-    @Test
-    @DisplayName("reset 이후 옛 세대 청크는 버리고 새 세대 청크만 전달하며 시퀀스는 이어진다")
-    void oldStreamChunksAreDroppedAfterReset() throws Exception {
-        readyConnection();
-        assertThat(service.forwardAudio(88L, 0L, new byte[]{1})).isTrue();
-        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.PCM_S16LE);
-
-        boolean oldForwarded = service.forwardAudio(88L, 0L, new byte[]{2});
-        boolean newForwarded = service.forwardAudio(88L, streamEpoch.getAsLong(), new byte[]{3});
-
-        assertThat(oldForwarded).isFalse();
-        assertThat(newForwarded).isTrue();
-        assertThat(audioSequences()).containsExactly(0L, 1L);
-        assertThat(client.session.sentFrameTypes).containsExactly(
-                "session.start", "audio.meta", "binary", "decoder.reset", "audio.meta", "binary");
-    }
-
-    @Test
-    @DisplayName("PAUSED 중 재연결하면 decoder.ready 후에도 PAUSED로 남는다")
-    void resetFromPausedReturnsToPaused() throws Exception {
-        AiLiveMeetingConnection connection = pausedConnection();
-
-        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.PCM_S16LE);
-
-        assertThat(streamEpoch).hasValue(1L);
-        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.PAUSED);
-    }
-
-    @Test
-    @DisplayName("decoder.reset에 error가 오면 AI 연결을 정리하고 실패한다")
-    void resetStreamFailsAndCleansUpWhenResetErrors() throws Exception {
-        readyConnection();
-        AtomicReference<OptionalLong> result = new AtomicReference<>();
-        Thread waiting = new Thread(() -> result.set(service.resetStream(88L, AudioFormat.PCM_S16LE)));
-        waiting.start();
-        awaitSentType("decoder.reset");
-
-        client.receive("""
-                {"type":"error","requestId":"reset-test","payload":{"code":"DECODER_RESET_FAILED","retryable":false}}
-                """);
-        waiting.join(3_000);
-
-        assertThat(result.get()).isEmpty();
-        assertThat(registry.find(88L)).isEmpty();
-    }
-
-    @Test
-    @DisplayName("requestId가 다른 decoder.ready는 무시한다")
-    void decoderReadyWithOtherRequestIdIsIgnored() throws Exception {
-        AiLiveMeetingConnection connection = readyConnection();
-        connection.sendDecoderReset(objectMapper, "reset-test", AudioFormat.PCM_S16LE);
-
-        client.receive(decoderReady("reset-other"));
-
-        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.RESET_SENT);
-    }
-
-    @Test
-    @DisplayName("decoder.ready 대기 중 회의가 종료되면 session.stop을 보낸다")
-    void stopIsSentWhileResetPending() throws Exception {
-        AiLiveMeetingConnection connection = readyConnection();
-        connection.sendDecoderReset(objectMapper, "reset-test", AudioFormat.PCM_S16LE);
-
-        service.stop(88L);
-
-        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.STOP_SENT);
-        assertThat(client.session.sentFrameTypes).contains("session.stop");
-    }
-
-    private OptionalLong resetStreamWithDecoderReady(AudioFormat audioFormat) throws Exception {
-        AtomicReference<OptionalLong> result = new AtomicReference<>();
-        Thread waiting = new Thread(() -> result.set(service.resetStream(88L, audioFormat)));
-        waiting.start();
-        awaitSentType("decoder.reset");
-        client.receive(decoderReady("reset-test"));
-        waiting.join(3_000);
-        return result.get();
-    }
-
     private void awaitSentType(String type) throws InterruptedException {
         for (int i = 0; i < 300 && !client.session.sentFrameTypes.contains(type); i++) {
             Thread.sleep(10);
         }
-    }
-
-    private String decoderReady(String requestId) {
-        return """
-                {"type":"decoder.ready","requestId":"%s","payload":{"status":"READY"}}
-                """.formatted(requestId);
-    }
-
-    private JsonNode lastSentOfType(String type) throws Exception {
-        for (int i = client.session.sentMessages.size() - 1; i >= 0; i--) {
-            JsonNode root = objectMapper.readTree(client.session.sentMessages.get(i));
-            if (type.equals(root.path("type").asText())) {
-                return root;
-            }
-        }
-        throw new AssertionError(type + " was not sent");
     }
 
     private void awaitSessionStartSent() throws InterruptedException {
@@ -1208,10 +1091,6 @@ class AiLiveMeetingConnectionServiceTest {
             return "resume-test";
         }
 
-        @Override
-        public String decoderResetRequestId() {
-            return "reset-test";
-        }
     }
 
     private static class TestAiWebSocketClient implements AiLiveMeetingWebSocketClient {
