@@ -70,7 +70,7 @@ class AiLiveMeetingConnectionServiceTest {
 
     @Test
     void connectSendSessionStartAndMarkReadyWhenSessionReadyReceived() throws Exception {
-        boolean started = service.start(context(AudioFormat.WEBM_OPUS));
+        boolean started = service.start(context(AudioFormat.PCM_S16LE));
 
         assertThat(started).isTrue();
         AiLiveMeetingConnection connection = registry.find(88L).orElseThrow();
@@ -86,7 +86,7 @@ class AiLiveMeetingConnectionServiceTest {
                   "recordingSessionId": 88,
                   "payload": {
                     "status": "READY",
-                    "inputAudioFormat": "webm_opus",
+                    "inputAudioFormat": "pcm_s16le",
                     "outputAudioFormat": "pcm_s16le",
                     "outputSampleRateHz": 16000,
                     "outputChannels": 1
@@ -99,24 +99,17 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     @Test
-    void webmOpusSessionStartSucceeds() throws Exception {
-        assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isTrue();
-
-        assertSessionStart(client.session.sentMessages.getFirst());
-    }
-
-    @Test
-    void mp4AacSessionStartSucceeds() throws Exception {
-        assertThat(service.start(context(AudioFormat.MP4_AAC))).isTrue();
+    void pcmSessionStartSucceeds() throws Exception {
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isTrue();
 
         assertSessionStart(client.session.sentMessages.getFirst());
     }
 
     @Test
     void duplicateAiConnectionDoesNotCreateNewConnection() {
-        assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isTrue();
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isTrue();
 
-        assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isFalse();
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isFalse();
 
         assertThat(client.connectCount).isOne();
         assertThat(registry.count()).isOne();
@@ -126,7 +119,7 @@ class AiLiveMeetingConnectionServiceTest {
     void capacityExceededDoesNotLeaveStaleRegistryEntry() {
         client.failure = new RuntimeException("429 capacity_exceeded");
 
-        assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isFalse();
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isFalse();
 
         assertThat(registry.find(88L)).isEmpty();
         assertThat(registry.count()).isZero();
@@ -136,7 +129,7 @@ class AiLiveMeetingConnectionServiceTest {
     void serviceUnavailableDoesNotLeaveStaleRegistryEntry() {
         client.failure = new RuntimeException("503 service_unavailable");
 
-        assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isFalse();
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isFalse();
 
         assertThat(registry.find(88L)).isEmpty();
         assertThat(registry.count()).isZero();
@@ -145,7 +138,7 @@ class AiLiveMeetingConnectionServiceTest {
     @ParameterizedTest
     @ValueSource(strings = {"meetingId", "recordingSessionId", "requestId"})
     void mismatchedSessionReadyDoesNotMarkReady(String mismatchField) throws Exception {
-        assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isTrue();
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isTrue();
         AiLiveMeetingConnection connection = registry.find(88L).orElseThrow();
         String meetingId = "meetingId".equals(mismatchField) ? "43" : "42";
         String recordingSessionId = "recordingSessionId".equals(mismatchField) ? "89" : "88";
@@ -167,7 +160,7 @@ class AiLiveMeetingConnectionServiceTest {
 
     @Test
     void aiErrorCleansRegistryWithoutChangingDbState() throws Exception {
-        assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isTrue();
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isTrue();
         AiLiveMeetingConnection connection = registry.find(88L).orElseThrow();
 
         client.receive("""
@@ -190,7 +183,7 @@ class AiLiveMeetingConnectionServiceTest {
     void connectionFailureDoesNotLeaveStaleRegistryEntry() {
         client.failure = new RuntimeException("connect failed");
 
-        assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isFalse();
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isFalse();
 
         assertThat(registry.find(88L)).isEmpty();
     }
@@ -206,7 +199,7 @@ class AiLiveMeetingConnectionServiceTest {
                 MeetingParticipant.createAttendee(meeting, member),
                 MeetingParticipant.createCustomAttendee(meeting, "외부 디자이너")));
 
-        service.start(context(AudioFormat.WEBM_OPUS));
+        service.start(context(AudioFormat.PCM_S16LE));
 
         JsonNode root = objectMapper.readTree(client.session.sentMessages.getFirst());
         assertThat(root.path("participantCount").asInt()).isEqualTo(2);
@@ -408,7 +401,7 @@ class AiLiveMeetingConnectionServiceTest {
 
     @Test
     void stopBeforeReadyDoesNotSendSessionStopAndCleansRegistry() {
-        assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isTrue();
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isTrue();
         AiLiveMeetingConnection connection = registry.find(88L).orElseThrow();
 
         service.stop(88L);
@@ -717,7 +710,7 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     private AiLiveMeetingConnection readyConnection() throws Exception {
-        assertThat(service.start(context(AudioFormat.WEBM_OPUS))).isTrue();
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isTrue();
         AiLiveMeetingConnection connection = registry.find(88L).orElseThrow();
         client.receive("""
                 {
@@ -869,7 +862,7 @@ class AiLiveMeetingConnectionServiceTest {
     @Test
     @DisplayName("session.ready를 받기 전에 온 오디오는 전달하지 않는다")
     void forwardAudioRejectedBeforeReady() throws Exception {
-        service.start(context(AudioFormat.WEBM_OPUS));
+        service.start(context(AudioFormat.PCM_S16LE));
 
         boolean forwarded = service.forwardAudio(88L, 0L, new byte[]{1, 2, 3});
 
@@ -900,7 +893,7 @@ class AiLiveMeetingConnectionServiceTest {
     @Test
     @DisplayName("session.ready가 현재 connection과 일치하지 않으면 이벤트를 발행하지 않는다")
     void doesNotPublishReadyEventWhenSessionReadyMismatched() throws Exception {
-        service.start(context(AudioFormat.WEBM_OPUS));
+        service.start(context(AudioFormat.PCM_S16LE));
 
         client.receive("""
                 {
@@ -918,7 +911,7 @@ class AiLiveMeetingConnectionServiceTest {
     @Test
     @DisplayName("session.ready를 받으면 핸드셰이크 대기가 성공으로 끝난다")
     void startAndAwaitReadySucceedsWhenSessionReadyArrives() throws Exception {
-        Thread waiting = new Thread(() -> readyResult.set(service.startAndAwaitReady(context(AudioFormat.WEBM_OPUS))));
+        Thread waiting = new Thread(() -> readyResult.set(service.startAndAwaitReady(context(AudioFormat.PCM_S16LE))));
         waiting.start();
         awaitSessionStartSent();
 
@@ -942,7 +935,7 @@ class AiLiveMeetingConnectionServiceTest {
     void startAndAwaitReadyFailsWhenConnectionFails() {
         client.failure = new RuntimeException("connect failed");
 
-        assertThat(service.startAndAwaitReady(context(AudioFormat.WEBM_OPUS))).isFalse();
+        assertThat(service.startAndAwaitReady(context(AudioFormat.PCM_S16LE))).isFalse();
         assertThat(registry.find(88L)).isEmpty();
     }
 
@@ -950,7 +943,7 @@ class AiLiveMeetingConnectionServiceTest {
     @DisplayName("AI 연결이 없으면 session.start만 하고 decoder.reset 없이 현재 스트림 세대를 돌려준다")
     void prepareStreamStartsConnectionWithoutReset() throws Exception {
         AtomicReference<OptionalLong> result = new AtomicReference<>();
-        Thread waiting = new Thread(() -> result.set(service.prepareStream(context(AudioFormat.WEBM_OPUS))));
+        Thread waiting = new Thread(() -> result.set(service.prepareStream(context(AudioFormat.PCM_S16LE))));
         waiting.start();
         awaitSentType("session.start");
         client.receive("""
@@ -975,7 +968,7 @@ class AiLiveMeetingConnectionServiceTest {
     void prepareStreamReusesConnectionWithoutReset() throws Exception {
         readyConnection();
 
-        OptionalLong streamEpoch = service.prepareStream(context(AudioFormat.MP4_AAC));
+        OptionalLong streamEpoch = service.prepareStream(context(AudioFormat.PCM_S16LE));
 
         assertThat(streamEpoch).hasValue(0L);
         assertThat(client.connectCount).isOne();
@@ -987,20 +980,20 @@ class AiLiveMeetingConnectionServiceTest {
     void resetStreamSendsDecoderReset() throws Exception {
         readyConnection();
 
-        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.MP4_AAC);
+        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.PCM_S16LE);
 
         assertThat(streamEpoch).hasValue(1L);
         assertThat(client.connectCount).isOne();
         JsonNode reset = lastSentOfType("decoder.reset");
         assertThat(reset.size()).isEqualTo(3);
         assertThat(reset.path("requestId").asText()).isEqualTo("reset-test");
-        assertThat(reset.path("payload").path("audioFormat").asText()).isEqualTo("mp4_aac");
+        assertThat(reset.path("payload").path("audioFormat").asText()).isEqualTo("pcm_s16le");
     }
 
     @Test
     @DisplayName("AI 연결이 없으면 resetStream은 실패한다")
     void resetStreamFailsWithoutConnection() {
-        assertThat(service.resetStream(88L, AudioFormat.WEBM_OPUS)).isEmpty();
+        assertThat(service.resetStream(88L, AudioFormat.PCM_S16LE)).isEmpty();
     }
 
     @Test
@@ -1040,7 +1033,7 @@ class AiLiveMeetingConnectionServiceTest {
     void oldStreamChunksAreDroppedAfterReset() throws Exception {
         readyConnection();
         assertThat(service.forwardAudio(88L, 0L, new byte[]{1})).isTrue();
-        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.WEBM_OPUS);
+        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.PCM_S16LE);
 
         boolean oldForwarded = service.forwardAudio(88L, 0L, new byte[]{2});
         boolean newForwarded = service.forwardAudio(88L, streamEpoch.getAsLong(), new byte[]{3});
@@ -1057,7 +1050,7 @@ class AiLiveMeetingConnectionServiceTest {
     void resetFromPausedReturnsToPaused() throws Exception {
         AiLiveMeetingConnection connection = pausedConnection();
 
-        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.WEBM_OPUS);
+        OptionalLong streamEpoch = resetStreamWithDecoderReady(AudioFormat.PCM_S16LE);
 
         assertThat(streamEpoch).hasValue(1L);
         assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.PAUSED);
@@ -1068,7 +1061,7 @@ class AiLiveMeetingConnectionServiceTest {
     void resetStreamFailsAndCleansUpWhenResetErrors() throws Exception {
         readyConnection();
         AtomicReference<OptionalLong> result = new AtomicReference<>();
-        Thread waiting = new Thread(() -> result.set(service.resetStream(88L, AudioFormat.WEBM_OPUS)));
+        Thread waiting = new Thread(() -> result.set(service.resetStream(88L, AudioFormat.PCM_S16LE)));
         waiting.start();
         awaitSentType("decoder.reset");
 
@@ -1085,7 +1078,7 @@ class AiLiveMeetingConnectionServiceTest {
     @DisplayName("requestId가 다른 decoder.ready는 무시한다")
     void decoderReadyWithOtherRequestIdIsIgnored() throws Exception {
         AiLiveMeetingConnection connection = readyConnection();
-        connection.sendDecoderReset(objectMapper, "reset-test", AudioFormat.WEBM_OPUS);
+        connection.sendDecoderReset(objectMapper, "reset-test", AudioFormat.PCM_S16LE);
 
         client.receive(decoderReady("reset-other"));
 
@@ -1096,7 +1089,7 @@ class AiLiveMeetingConnectionServiceTest {
     @DisplayName("decoder.ready 대기 중 회의가 종료되면 session.stop을 보낸다")
     void stopIsSentWhileResetPending() throws Exception {
         AiLiveMeetingConnection connection = readyConnection();
-        connection.sendDecoderReset(objectMapper, "reset-test", AudioFormat.WEBM_OPUS);
+        connection.sendDecoderReset(objectMapper, "reset-test", AudioFormat.PCM_S16LE);
 
         service.stop(88L);
 

@@ -148,6 +148,6 @@ class RecordingOwnerServiceTest {
     }
 
     private AiLiveMeetingConnection connection(Long recordingSessionId) {
-        return new AiLiveMeetingConnection(recordingSessionId, 42L, AudioFormat.WEBM_OPUS, "start-1");
+        return new AiLiveMeetingConnection(recordingSessionId, 42L, AudioFormat.PCM_S16LE, "start-1");
     }
 }
