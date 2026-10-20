@@ -1,7 +1,8 @@
 # #320 BE–AI Heartbeat
 
-기준: #319 병합 후 최신 `origin/dev` `a60d4064b861dcae3ae19b5131a00f970fb5f747`.
-브랜치: `feat/#320-ai-heartbeat`. 커밋/푸시하지 않고 Working Tree에 유지한다.
+최초 기준: #319 병합 후 `origin/dev` `a60d4064b861dcae3ae19b5131a00f970fb5f747`.
+PR 준비 시 최신 dev `4d7c85c35da3448b37edb49dc579d3523a3ea91c`(#326)을 병합했다.
+브랜치: `feat/#320-ai-heartbeat`.
 
 ## 목적과 ACK의 차이
 
@@ -48,7 +49,7 @@ connection의 기존 `sendLock` 안에서 다음 상태를 관리한다:
 
 READY / PAUSED에서 다음 scan 시 첫 ping을 보낸다. outstanding은 최대 하나다.
 응답을 받아도 마지막 성공한 ping write로부터 interval이 지나기 전에는 새 ping을 보내지 않는다.
-PAUSE_SENT / RESUME_SENT / RESET_SENT에서는 새 ping을 보내지 않되 이미 보낸 ping의 pong/timeout은 처리한다.
+PAUSE_SENT / RESUME_SENT에서는 새 ping을 보내지 않되 이미 보낸 ping의 pong/timeout은 처리한다.
 CONNECTING / START_SENT / STOP_SENT / ENDED / CLOSED에는 새 ping을 보내지 않는다.
 PAUSED는 무음과 동일하게 ping/pong을 유지하며 ACK 상태와 관계없다.
 
@@ -141,7 +142,19 @@ Spring scheduler 통합 테스트는 실제 `@Scheduled` 등록과 별도 스레
 - 애플리케이션 프로토콜이므로 AI #102가 같은 requestId와 sessionId를 echo해야 한다.
   실제 AI에서 READY·PAUSED·무음·부하·응답 지연 및 서비스 중단을 양 서버로 검증해야 한다.
 - #321에서 두 timeout 이벤트를 Recoverable Failure로 소비하고 재연결 정책을 연결한다.
-- 현재 dev의 decoder/Audio 포맷 구조는 변경하지 않는다.
+- 최신 dev의 PCM 전송과 decoder reset 제거 결과를 그대로 유지한다.
+
+## 최신 dev / #326 병합 검토
+
+Git의 텍스트 병합 충돌은 없었지만, #320의 `RESET_SENT` 참조가 최신 dev에서 제거된 상태를 사용해
+자동 병합 직후 컴파일이 실패했다. Heartbeat 허용 상태 및 테스트의 오래된 constructor/epoch 인자를
+최신 API에 맞췄으며 제거된 RESET_SENT 테스트 입력도 제거했다. decoder나 streamEpoch를 복원하지 않았다.
+
+#326의 충돌 해결 commit `73e19f8`과 dev squash 결과를 대조했다.
+`AiAudioAckService`, Audio WebSocket handler/handshake/context, PCM enum, Redis checkpoint 및
+기존 ACK 테스트는 최신 dev와 동일하게 보존했다. 공유 connection 파일에서도 Audio 전송/ACK 판정은
+바꾸지 않고 Heartbeat 상태·메서드와 종료 시 정리만 추가했다.
+실제 AI 서버의 PCM·ACK·Heartbeat 계약 전체를 검증했다는 의미는 아니다.
 
 ## 최종 테스트 결과 (2026-10-20)
 
@@ -150,14 +163,15 @@ Spring scheduler 통합 테스트는 실제 `@Scheduled` 등록과 별도 스레
 
 | 구분 | Total | Passed | Failures | Errors | Skipped |
 |---|---:|---:|---:|---:|---:|
-| #320 신규 (상태/경쟁 41 + 설정 5 + Spring scheduler 통합 1) | 47 | 47 | 0 | 0 | 0 |
+| #320 신규 (상태/경쟁 40 + 설정 5 + Spring scheduler 통합 1) | 46 | 46 | 0 | 0 | 0 |
 | #319 ACK 회귀 (실제 Redis 4 포함) | 40 | 40 | 0 | 0 | 0 |
-| 관련 AI realtime / Audio WebSocket / Recording owner | 234 | 234 | 0 | 0 | 0 |
-| 전체 | 1,189 | 1,187 | 2 | 0 | 0 |
-| 깨끗한 기준 dev의 기존 실패 재실행 | 2 | 0 | 2 | 0 | 0 |
+| 관련 AI realtime / Audio WebSocket / Recording owner | 223 | 223 | 0 | 0 | 0 |
+| 전체 | 1,178 | 1,176 | 2 | 0 | 0 |
+| 깨끗한 최신 dev 전체 | 1,132 | 1,130 | 2 | 0 | 0 |
 
 위 실행들은 서로 포함되므로 합산하지 않는다.
-전체 suite는 기존 실패 2건으로 실패 상태이며, 같은 실패를 깨끗한 최신 기준 dev `a60d406`에서도 재현했다:
+전체 suite는 기존 실패 2건으로 실패 상태다. 훈의 변경을 포함하는 깨끗한 최신 dev `4d7c85c`에서도
+전체 테스트를 실행해 동일한 두 실패만 재현했으며, #320 추가 46건 외 신규 실패는 없었다:
 
 1. `RecordingMySqlIntegrationTest.startCommitsSessionCreditLedgerAndMeetingTogether`: 원장 amount 기대 +20, 실제 -20.
 2. `RecordingMySqlIntegrationTest.twoMeetingsInSameTeamCannotStartTogether`: `team_credits ... FOR UPDATE` MySQL deadlock.

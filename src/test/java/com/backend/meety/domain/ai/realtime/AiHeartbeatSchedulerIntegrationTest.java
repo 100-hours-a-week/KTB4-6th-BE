@@ -32,7 +32,7 @@ class AiHeartbeatSchedulerIntegrationTest {
         // @Scheduled 등록과 비동기 AI 응답 경로가 연결되어 반복 probe를 수행하는지 검증한다.
         // given
         var connections = new AiLiveMeetingConnectionRegistry();
-        var connection = new AiLiveMeetingConnection(88L, 42L, AudioFormat.WEBM_OPUS, "scheduler-connection");
+        var connection = new AiLiveMeetingConnection(88L, 42L, "scheduler-connection");
         var mapper = new ObjectMapper();
         var metrics = new SimpleMeterRegistry();
         var events = new CopyOnWriteArrayList<Object>();

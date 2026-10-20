@@ -39,7 +39,7 @@ class AiHeartbeatServiceTest {
     private final AiHeartbeatService service = new AiHeartbeatService(connections, properties,
             new AiRequestIdGenerator(), mapper, clock, metrics, events::add);
     private final WebSocketSession socket = mock(WebSocketSession.class);
-    private final AiLiveMeetingConnection connection = new AiLiveMeetingConnection(88L, 42L, AudioFormat.WEBM_OPUS, "start-a");
+    private final AiLiveMeetingConnection connection = new AiLiveMeetingConnection(88L, 42L, "start-a");
 
     AiHeartbeatServiceTest() {
         when(socket.isOpen()).thenReturn(true);
@@ -199,7 +199,7 @@ class AiHeartbeatServiceTest {
 
     @ParameterizedTest
     @EnumSource(value = AiLiveMeetingConnectionState.class, names = {
-            "CONNECTING", "START_SENT", "PAUSE_SENT", "RESUME_SENT", "RESET_SENT", "STOP_SENT", "ENDED", "CLOSED"})
+            "CONNECTING", "START_SENT", "PAUSE_SENT", "RESUME_SENT", "STOP_SENT", "ENDED", "CLOSED"})
     @DisplayName("활성 안정 상태가 아닌 연결에는 새로운 Heartbeat ping을 보내지 않는다")
     void noNewPingOutsideReadyAndPaused(AiLiveMeetingConnectionState target) throws Exception {
         // 테스트 목적:
@@ -337,7 +337,7 @@ class AiHeartbeatServiceTest {
         // 전송 실패를 정상 송신으로 기록하거나 한 연결의 예외로 전체 감시를 중단하지 않는지 검증한다.
         // given
         doThrow(new java.io.IOException("write failed")).when(socket).sendMessage(any(TextMessage.class));
-        var other = new AiLiveMeetingConnection(99L, 42L, AudioFormat.WEBM_OPUS, "start-b");
+        var other = new AiLiveMeetingConnection(99L, 42L, "start-b");
         var otherSocket = mock(WebSocketSession.class);
         when(otherSocket.isOpen()).thenReturn(true);
         other.attach(otherSocket);
@@ -376,7 +376,7 @@ class AiHeartbeatServiceTest {
         // 테스트 목적:
         // 후속 Recovery consumer가 실패하더라도 공용 scheduler가 다른 연결을 계속 검사하는지 검증한다.
         // given
-        var other = new AiLiveMeetingConnection(99L, 42L, AudioFormat.WEBM_OPUS, "start-b");
+        var other = new AiLiveMeetingConnection(99L, 42L, "start-b");
         other.attach(socket);
         other.markReady();
         connections.reserve(other);
@@ -429,7 +429,7 @@ class AiHeartbeatServiceTest {
         var ack = new AiAudioAckService(connections, audio, redis,
                 new AiAudioAckProperties(Duration.ofSeconds(5), Duration.ofSeconds(1), 1024),
                 clock, metrics, events::add);
-        for (long i = 1; i <= 10; i++) { ack.forwardAudio(connection, mapper, 0, i, new byte[]{1}); }
+        for (long i = 1; i <= 10; i++) { ack.forwardAudio(connection, mapper, i, new byte[]{1}); }
         var before = connection.ackSnapshot();
         service.tick();
         // when
@@ -463,7 +463,7 @@ class AiHeartbeatServiceTest {
         clock.advance(5);
         service.tick();
         var before = connection.heartbeatSnapshot();
-        connection.forwardAudio(mapper, 0, new byte[]{1}, 1, clock, 1024);
+        connection.forwardAudio(mapper, new byte[]{1}, 1, clock, 1024);
         // when
         connection.acknowledge(0, clock.instant(), (sequence, count) -> true);
         // then
@@ -545,7 +545,7 @@ class AiHeartbeatServiceTest {
         // given
         service.tick();
         String oldId = pingId();
-        var next = new AiLiveMeetingConnection(88L, 42L, AudioFormat.WEBM_OPUS, "start-b");
+        var next = new AiLiveMeetingConnection(88L, 42L, "start-b");
         next.attach(socket);
         next.markReady();
         // when
@@ -591,11 +591,11 @@ class AiHeartbeatServiceTest {
         switch (target) {
             case CONNECTING -> {
                 connections.remove(88L, connection);
-                connections.reserve(new AiLiveMeetingConnection(88L, 42L, AudioFormat.WEBM_OPUS, "start-new"));
+                connections.reserve(new AiLiveMeetingConnection(88L, 42L, "start-new"));
             }
             case START_SENT -> {
                 connections.remove(88L, connection);
-                var starting = new AiLiveMeetingConnection(88L, 42L, AudioFormat.WEBM_OPUS, "start-new");
+                var starting = new AiLiveMeetingConnection(88L, 42L, "start-new");
                 starting.markStartSent();
                 connections.reserve(starting);
             }
@@ -603,7 +603,6 @@ class AiHeartbeatServiceTest {
             case RESUME_SENT -> {
                 connection.sendPause(mapper, "pause-a"); connection.markPaused(); connection.sendResume(mapper, "resume-a");
             }
-            case RESET_SENT -> connection.sendDecoderReset(mapper, "reset-a", AudioFormat.WEBM_OPUS);
             case STOP_SENT -> connection.markStopSent("stop-a");
             case ENDED -> { connection.markStopSent("stop-a"); connection.markEnded(); }
             case CLOSED -> connection.close();

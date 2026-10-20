@@ -2,7 +2,6 @@ package com.backend.meety.domain.recording.realtime;
 
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionService;
 import java.io.IOException;
-import java.util.OptionalLong;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -21,7 +20,6 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
 
     public static final CloseStatus SUPERSEDED = new CloseStatus(4001, "superseded by new connection");
     public static final CloseStatus AI_NOT_READY = CloseStatus.SERVER_ERROR.withReason("ai not ready");
-    public static final CloseStatus STREAM_RESET_FAILED = CloseStatus.SERVER_ERROR.withReason("stream reset failed");
 
     private static final String RECOVERY_FINISHED = "recovery.finished";
     private static final String STATS_ATTRIBUTE = "audioChunkStats";
@@ -79,10 +77,6 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
             session.close(CloseStatus.NOT_ACCEPTABLE.withReason("audio frame size not allowed"));
             return;
         }
-        if (phase(session) == AudioSocketPhase.RESETTING) {
-            log.debug("스트림 전환 중이라 오디오 청크를 처리하지 않습니다. recordingSessionId={}", recordingSessionId);
-            return;
-        }
         AudioChunkFrame frame = AudioChunkFrame.create(message.getPayload());
         AudioChunkStats stats = stats(session);
         AudioStreamState state = registry.streamState(recordingSessionId);
@@ -97,8 +91,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
                 log.warn("오디오 청크 순번이 건너뛰었습니다. recordingSessionId={}, expected={}, received={}",
                         recordingSessionId, state.nextExpectedSequence(), frame.sequence());
             }
-            forwarded = aiConnectionService.forwardAudio(
-                    recordingSessionId, context.streamEpoch(), frame.sequence(), frame.audio());
+            forwarded = aiConnectionService.forwardAudio(recordingSessionId, frame.sequence(), frame.audio());
             if (forwarded) {
                 state.markSent(frame.sequence());
             }
@@ -151,17 +144,7 @@ public class AudioWebSocketHandler extends AbstractWebSocketHandler {
             sendRecoveryStart(session, recordingSessionId);
             return;
         }
-        session.getAttributes().put(PHASE_ATTRIBUTE, AudioSocketPhase.RESETTING);
         sendAck(session, recordingSessionId, lastProcessedSequence);
-        OptionalLong streamEpoch = aiConnectionService.resetStream(recordingSessionId, context.audioFormat());
-        if (streamEpoch.isEmpty()) {
-            log.warn("새 스트림으로 전환하지 못해 Audio WebSocket을 닫습니다. recordingSessionId={}, aiState={}",
-                    recordingSessionId, aiState(recordingSessionId));
-            session.close(STREAM_RESET_FAILED);
-            return;
-        }
-        session.getAttributes().put(AudioWebSocketHandshakeInterceptor.CONTEXT_ATTRIBUTE,
-                context.withStreamEpoch(streamEpoch.getAsLong()));
         session.getAttributes().put(PHASE_ATTRIBUTE, AudioSocketPhase.STREAMING);
         send(session, recordingSessionId, AudioStreamReadyMessage.create());
     }

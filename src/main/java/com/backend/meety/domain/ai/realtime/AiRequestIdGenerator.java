@@ -25,8 +25,4 @@ public class AiRequestIdGenerator {
     public String sessionResumeRequestId() {
         return "resume-" + UUID.randomUUID();
     }
-
-    public String decoderResetRequestId() {
-        return "reset-" + UUID.randomUUID();
-    }
 }

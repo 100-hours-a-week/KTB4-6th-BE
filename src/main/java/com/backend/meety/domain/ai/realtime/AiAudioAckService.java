@@ -62,13 +62,13 @@ public class AiAudioAckService {
     }
 
     public boolean forwardAudio(AiLiveMeetingConnection connection, ObjectMapper mapper,
-                                long epoch, long feSequence, byte[] audio) throws IOException {
+                                long feSequence, byte[] audio) throws IOException {
         AudioStreamState state = audioRegistry.streamState(connection.recordingSessionId());
         synchronized (state) {
             if (!isCurrent(connection) || !state.bind(connection.sessionStartRequestId()) || state.isSent(feSequence)) {
                 return false;
             }
-            boolean sent = connection.forwardAudio(mapper, epoch, audio, feSequence, clock,
+            boolean sent = connection.forwardAudio(mapper, audio, feSequence, clock,
                     properties.maxPendingChunks());
             if (sent) {
                 state.markSent(feSequence);
