@@ -10,7 +10,6 @@ import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnection;
 import com.backend.meety.domain.ai.realtime.AiLiveMeetingConnectionRegistry;
-import com.backend.meety.domain.ai.realtime.AudioFormat;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -148,6 +147,6 @@ class RecordingOwnerServiceTest {
     }
 
     private AiLiveMeetingConnection connection(Long recordingSessionId) {
-        return new AiLiveMeetingConnection(recordingSessionId, 42L, AudioFormat.WEBM_OPUS, "start-1");
+        return new AiLiveMeetingConnection(recordingSessionId, 42L, "start-1");
     }
 }

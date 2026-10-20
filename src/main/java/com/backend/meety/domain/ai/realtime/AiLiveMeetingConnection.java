@@ -5,7 +5,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.NavigableMap;
-import java.util.OptionalLong;
 import java.util.TreeMap;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
@@ -26,17 +25,12 @@ public class AiLiveMeetingConnection {
 
     private final Long recordingSessionId;
     private final Long meetingId;
-    private volatile AudioFormat audioFormat;
     private final String sessionStartRequestId;
     private volatile WebSocketSession webSocketSession;
     private volatile AiLiveMeetingConnectionState state;
     private volatile String sessionPauseRequestId;
     private volatile String sessionResumeRequestId;
     private volatile String sessionStopRequestId;
-    private volatile String decoderResetRequestId;
-    private volatile CountDownLatch decoderReadyLatch = new CountDownLatch(0);
-    private volatile AiLiveMeetingConnectionState stateBeforeReset;
-    private long streamEpoch;
     private volatile ScheduledFuture<?> stopTimeoutFuture;
     private volatile String owner;
     private final NavigableMap<Long, Long> pendingAudio = new TreeMap<>();
@@ -58,11 +52,9 @@ public class AiLiveMeetingConnection {
         }
     }
 
-    public AiLiveMeetingConnection(Long recordingSessionId, Long meetingId,
-                                   AudioFormat audioFormat, String sessionStartRequestId) {
+    public AiLiveMeetingConnection(Long recordingSessionId, Long meetingId, String sessionStartRequestId) {
         this.recordingSessionId = recordingSessionId;
         this.meetingId = meetingId;
-        this.audioFormat = audioFormat;
         this.sessionStartRequestId = sessionStartRequestId;
         this.state = AiLiveMeetingConnectionState.CONNECTING;
     }
@@ -75,22 +67,12 @@ public class AiLiveMeetingConnection {
         return meetingId;
     }
 
-    public AudioFormat audioFormat() {
-        return audioFormat;
-    }
-
     public String sessionStartRequestId() {
         return sessionStartRequestId;
     }
 
     public WebSocketSession webSocketSession() {
         return webSocketSession;
-    }
-
-    public long streamEpoch() {
-        synchronized (sendLock) {
-            return streamEpoch;
-        }
     }
 
     public synchronized AiLiveMeetingConnectionState state() {
@@ -110,12 +92,12 @@ public class AiLiveMeetingConnection {
     }
 
     /**
-     * audio.meta와 바이너리 프레임을 한 쌍으로 전송한다. 현재 스트림 세대가 아니거나 READY가 아니면 전송하지 않고 false를 반환한다.
+     * audio.meta와 바이너리 프레임을 한 쌍으로 전송한다. READY가 아니면 전송하지 않고 false를 반환한다.
      */
-    public boolean forwardAudio(ObjectMapper objectMapper, long streamEpoch, byte[] audio,
+    public boolean forwardAudio(ObjectMapper objectMapper, byte[] audio,
                                 long feSequence, Clock clock, int maxPendingChunks) throws IOException {
         synchronized (sendLock) {
-            if (streamEpoch != this.streamEpoch || state() != AiLiveMeetingConnectionState.READY) {
+            if (state() != AiLiveMeetingConnectionState.READY) {
                 return false;
             }
             WebSocketSession session = webSocketSession;
@@ -238,33 +220,9 @@ public class AiLiveMeetingConnection {
         }
     }
 
-    public OptionalLong sendDecoderReset(ObjectMapper objectMapper, String requestId, AudioFormat audioFormat)
-            throws IOException {
-        synchronized (sendLock) {
-            AiLiveMeetingConnectionState current = state();
-            if (current != AiLiveMeetingConnectionState.READY && current != AiLiveMeetingConnectionState.PAUSED) {
-                return OptionalLong.empty();
-            }
-            WebSocketSession session = webSocketSession;
-            if (session == null || !session.isOpen()) {
-                return OptionalLong.empty();
-            }
-            // forwardAudio와 같은 락에서 세대를 올려야 reset 뒤에 옛 스트림 청크가 AI로 가지 않는다
-            streamEpoch++;
-            this.stateBeforeReset = current;
-            this.state = AiLiveMeetingConnectionState.RESET_SENT;
-            this.audioFormat = audioFormat;
-            this.decoderResetRequestId = requestId;
-            this.decoderReadyLatch = new CountDownLatch(1);
-            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiDecoderResetMessage.create(this))));
-            return OptionalLong.of(streamEpoch);
-        }
-    }
-
     public boolean sendStop(ObjectMapper objectMapper, String requestId) throws IOException {
         synchronized (sendLock) {
-            if (state() != AiLiveMeetingConnectionState.READY && state() != AiLiveMeetingConnectionState.PAUSED
-                    && state() != AiLiveMeetingConnectionState.RESET_SENT) {
+            if (state() != AiLiveMeetingConnectionState.READY && state() != AiLiveMeetingConnectionState.PAUSED) {
                 return false;
             }
             WebSocketSession session = webSocketSession;
@@ -305,22 +263,6 @@ public class AiLiveMeetingConnection {
         }
     }
 
-    public synchronized void markDecoderReady() {
-        if (state == AiLiveMeetingConnectionState.RESET_SENT) {
-            this.state = stateBeforeReset;
-            decoderReadyLatch.countDown();
-            notifyAll();
-        }
-    }
-
-    public boolean awaitDecoderReady(Duration timeout) throws InterruptedException {
-        if (!decoderReadyLatch.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-            return false;
-        }
-        AiLiveMeetingConnectionState current = state();
-        return current == AiLiveMeetingConnectionState.READY || current == AiLiveMeetingConnectionState.PAUSED;
-    }
-
     public synchronized boolean awaitState(AiLiveMeetingConnectionState expected, Duration timeout)
             throws InterruptedException {
         long deadline = System.nanoTime() + timeout.toNanos();
@@ -356,10 +298,6 @@ public class AiLiveMeetingConnection {
         return sessionResumeRequestId;
     }
 
-    public String decoderResetRequestId() {
-        return decoderResetRequestId;
-    }
-
     public String sessionStopRequestId() {
         return sessionStopRequestId;
     }
@@ -391,7 +329,6 @@ public class AiLiveMeetingConnection {
                 this.state = AiLiveMeetingConnectionState.CLOSED;
                 clearAudioAckState();
                 readyLatch.countDown();
-                decoderReadyLatch.countDown();
                 notifyAll();
             }
         }

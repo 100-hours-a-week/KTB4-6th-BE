@@ -283,7 +283,7 @@ class AiAudioAckServiceTest {
         clock.advance(30);
         assertThat(connection.ackSnapshot().lastAckProgressAt()).isNull();
         // when
-        service.forwardAudio(connection, mapper, 0, 2, new byte[]{1});
+        service.forwardAudio(connection, mapper, 2, new byte[]{1});
         service.detectTimeouts();
         clock.advance(4);
         service.detectTimeouts();
@@ -333,7 +333,7 @@ class AiAudioAckServiceTest {
         ack(0);
         clock.advance(4);
         // when
-        service.forwardAudio(connection, mapper, 0, 3, new byte[]{1});
+        service.forwardAudio(connection, mapper, 3, new byte[]{1});
         ack(0);
         clock.advance(1);
         service.detectTimeouts();
@@ -354,7 +354,7 @@ class AiAudioAckServiceTest {
         AiLiveMeetingConnection replacement = ready("connection-b");
         replacement.attach(aiSocket);
         connections.reserve(replacement);
-        service.forwardAudio(replacement, mapper, 0, 1, new byte[]{1});
+        service.forwardAudio(replacement, mapper, 1, new byte[]{1});
         ack(0);
         // then
         verifyNoInteractions(repository, feSocket);
@@ -391,7 +391,7 @@ class AiAudioAckServiceTest {
         // given
         sendThrough(1024);
         // when
-        boolean accepted = service.forwardAudio(connection, mapper, 0, 1025, new byte[]{1});
+        boolean accepted = service.forwardAudio(connection, mapper, 1025, new byte[]{1});
         // then
         assertThat(accepted).isFalse();
         assertThat(connection.pendingAudioCount()).isEqualTo(1024);
@@ -406,11 +406,11 @@ class AiAudioAckServiceTest {
         // 로컬 상한으로 전송하지 못한 오디오를 더 높은 누적 ACK로 확인했다고 오인하지 않는지 검증한다.
         // given
         sendThrough(1024);
-        assertThat(service.forwardAudio(connection, mapper, 0, 1025, new byte[]{1})).isFalse();
+        assertThat(service.forwardAudio(connection, mapper, 1025, new byte[]{1})).isFalse();
         ack(1023);
         // when
-        boolean skipped = service.forwardAudio(connection, mapper, 0, 1026, new byte[]{1});
-        boolean retried = service.forwardAudio(connection, mapper, 0, 1025, new byte[]{1});
+        boolean skipped = service.forwardAudio(connection, mapper, 1026, new byte[]{1});
+        boolean retried = service.forwardAudio(connection, mapper, 1025, new byte[]{1});
         // then
         assertThat(skipped).isFalse();
         assertThat(retried).isTrue();
@@ -425,9 +425,9 @@ class AiAudioAckServiceTest {
         // given
         doThrow(new java.io.IOException("write failed")).when(aiSocket).sendMessage(any(BinaryMessage.class));
         // when
-        assertThatThrownBy(() -> service.forwardAudio(connection, mapper, 0, 1, new byte[]{1}))
+        assertThatThrownBy(() -> service.forwardAudio(connection, mapper, 1, new byte[]{1}))
                 .isInstanceOf(java.io.IOException.class);
-        boolean skipped = service.forwardAudio(connection, mapper, 0, 2, new byte[]{1});
+        boolean skipped = service.forwardAudio(connection, mapper, 2, new byte[]{1});
         // then
         assertThat(skipped).isFalse();
         assertThat(connection.ackSnapshot().lastSentSequence()).isEqualTo(-1);
@@ -545,7 +545,7 @@ class AiAudioAckServiceTest {
 
     private void sendThrough(int count) throws Exception {
         for (long sequence = 1; sequence <= count; sequence++) {
-            assertThat(service.forwardAudio(connection, mapper, 0, sequence, new byte[]{1})).isTrue();
+            assertThat(service.forwardAudio(connection, mapper, sequence, new byte[]{1})).isTrue();
         }
     }
 
@@ -554,7 +554,7 @@ class AiAudioAckServiceTest {
     }
 
     private AiLiveMeetingConnection ready(String id) {
-        var result = new AiLiveMeetingConnection(88L, 42L, AudioFormat.WEBM_OPUS, id);
+        var result = new AiLiveMeetingConnection(88L, 42L, id);
         result.markReady();
         return result;
     }

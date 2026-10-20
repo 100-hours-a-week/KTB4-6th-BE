@@ -58,7 +58,7 @@ class AiAudioAckRedisIntegrationTest {
         // given
         var connections = new AiLiveMeetingConnectionRegistry();
         var audioRegistry = new AudioWebSocketRegistry();
-        var connection = new AiLiveMeetingConnection(RECORDING_ID, 42L, AudioFormat.WEBM_OPUS, "redis-connection");
+        var connection = new AiLiveMeetingConnection(RECORDING_ID, 42L, "redis-connection");
         var ai = mock(WebSocketSession.class);
         var fe = mock(WebSocketSession.class);
         when(ai.isOpen()).thenReturn(true);
@@ -79,7 +79,7 @@ class AiAudioAckRedisIntegrationTest {
         }).when(fe).sendMessage(any(TextMessage.class));
         // when
         for (long sequence = 1; sequence <= 10; sequence++) {
-            assertThat(service.forwardAudio(connection, mapper, 0, sequence, new byte[]{1})).isTrue();
+            assertThat(service.forwardAudio(connection, mapper, sequence, new byte[]{1})).isTrue();
         }
         // then
         assertThat(repository.find(RECORDING_ID)).isEmpty();
