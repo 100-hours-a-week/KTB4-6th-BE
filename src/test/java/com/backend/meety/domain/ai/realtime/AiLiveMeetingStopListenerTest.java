@@ -47,10 +47,6 @@ class AiLiveMeetingStopListenerTest {
     @Test
     @DisplayName("Owner가 없으면 전사 저장 큐를 거쳐 전사 확정 이벤트를 발행한다")
     void publishesTranscriptFinalizedThroughSaveQueueWhenOwnerAbsent() {
-        // 테스트 목적:
-        // Owner가 사라져도 같은 서버 큐에 남은 전사 저장 뒤에 요약 등록이 실행되도록
-        // 확정 이벤트가 바로 발행되지 않고 전사 저장 큐를 거치는지 검증한다.
-
         // given
         when(ownerService.dispatch(88L, RecordingCommand.STOP)).thenReturn(RecordingCommandDispatch.NO_OWNER);
 

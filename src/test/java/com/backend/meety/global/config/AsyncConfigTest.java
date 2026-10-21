@@ -66,10 +66,6 @@ class AsyncConfigTest {
     @Test
     @DisplayName("전사 저장은 다른 작업과 별도의 bounded Executor를 사용한다")
     void registersTranscriptSaveExecutor() {
-        // 테스트 목적:
-        // 전사 저장이 AI 수신 스레드나 다른 Executor를 쓰지 않고,
-        // 포화 시 호출 스레드에서 실행하지 않는 별도 worker를 쓰는지 검증한다.
-
         // when, then
         contextRunner.run(context -> {
             assertThat(context).hasNotFailed();
