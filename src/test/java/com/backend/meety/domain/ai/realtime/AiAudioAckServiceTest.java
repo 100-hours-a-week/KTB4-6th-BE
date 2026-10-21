@@ -7,7 +7,7 @@ import static org.mockito.Mockito.*;
 
 import com.backend.meety.domain.ai.event.AiAudioAckTimeoutEvent;
 import com.backend.meety.domain.recording.realtime.*;
-import com.backend.meety.domain.transcript.service.TranscriptService;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.*;
 import java.util.List;
@@ -534,7 +534,7 @@ class AiAudioAckServiceTest {
         // 실제 AI 메시지 분기에서 audio.ack를 알 수 없는 메시지로 버리지 않는지 검증한다.
         // given
         var connectionService = mock(AiLiveMeetingConnectionService.class);
-        var handler = new AiLiveMeetingInboundHandler(connection, connectionService, mapper, mock(TranscriptService.class));
+        var handler = new AiLiveMeetingInboundHandler(connection, connectionService, mapper, mock(TranscriptSaveDispatcher.class));
         String message = "{\"type\":\"audio.ack\",\"recordingSessionId\":\"88\",\"payload\":{\"sequence\":0}}";
         // when
         handler.handleTextMessage(aiSocket, new TextMessage(message));

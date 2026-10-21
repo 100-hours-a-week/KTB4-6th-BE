@@ -9,7 +9,7 @@ import com.backend.meety.domain.ai.event.AiAudioAckTimeoutEvent;
 import com.backend.meety.domain.ai.event.AiHeartbeatTimeoutEvent;
 import com.backend.meety.domain.recording.realtime.AudioSequenceRepository;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketRegistry;
-import com.backend.meety.domain.transcript.service.TranscriptService;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
@@ -571,7 +571,7 @@ class AiHeartbeatServiceTest {
         // AI 메시지 분기에서 pong을 ACK나 일반 메시지 처리와 혼동하지 않는지 검증한다.
         // given
         var connectionService = mock(AiLiveMeetingConnectionService.class);
-        var inbound = new AiLiveMeetingInboundHandler(connection, connectionService, mapper, mock(TranscriptService.class));
+        var inbound = new AiLiveMeetingInboundHandler(connection, connectionService, mapper, mock(TranscriptSaveDispatcher.class));
         String json = "{\"type\":\"heartbeat.pong\",\"requestId\":\"hb-a\",\"recordingSessionId\":\"88\"}";
         // when
         inbound.handleTextMessage(socket, new TextMessage(json));

@@ -23,7 +23,11 @@ class AsyncConfigTest {
                     "meeting-sse.executor.core-pool-size=4",
                     "meeting-sse.executor.max-pool-size=4",
                     "meeting-sse.executor.queue-capacity=100",
-                    "meeting-sse.executor.shutdown-await-seconds=10"
+                    "meeting-sse.executor.shutdown-await-seconds=10",
+                    "transcript-save.executor.core-pool-size=4",
+                    "transcript-save.executor.max-pool-size=4",
+                    "transcript-save.executor.queue-capacity=100",
+                    "transcript-save.executor.shutdown-await-seconds=20"
             );
 
     @Test
@@ -59,9 +63,30 @@ class AsyncConfigTest {
         });
     }
 
+    @Test
+    @DisplayName("전사 저장은 다른 작업과 별도의 bounded Executor를 사용한다")
+    void registersTranscriptSaveExecutor() {
+        // when, then
+        contextRunner.run(context -> {
+            assertThat(context).hasNotFailed();
+            ThreadPoolTaskExecutor transcript =
+                    context.getBean(AsyncConfig.TRANSCRIPT_SAVE_TASK_EXECUTOR_BEAN_NAME, ThreadPoolTaskExecutor.class);
+            ThreadPoolTaskExecutor meeting =
+                    context.getBean(AsyncConfig.MEETING_SSE_TASK_EXECUTOR_BEAN_NAME, ThreadPoolTaskExecutor.class);
+
+            assertThat(transcript).isNotSameAs(meeting);
+            assertThat(transcript.getCorePoolSize()).isEqualTo(4);
+            assertThat(transcript.getMaxPoolSize()).isEqualTo(4);
+            assertThat(transcript.getQueueCapacity()).isEqualTo(100);
+            assertThat(transcript.getThreadNamePrefix()).isEqualTo("transcript-save-");
+            assertThat(transcript.getThreadPoolExecutor().getRejectedExecutionHandler())
+                    .isInstanceOf(java.util.concurrent.ThreadPoolExecutor.AbortPolicy.class);
+        });
+    }
+
     @Configuration
     @EnableConfigurationProperties({NotificationExecutorProperties.class, ChatExecutorProperties.class,
-            MeetingSseExecutorProperties.class})
+            MeetingSseExecutorProperties.class, TranscriptSaveExecutorProperties.class})
     static class PropertiesConfig {
     }
 }
