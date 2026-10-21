@@ -40,6 +40,7 @@ class AiHeartbeatSchedulerIntegrationTest {
                 new AiHeartbeatProperties(Duration.ofMillis(20), Duration.ofSeconds(2), 2),
                 new AiRequestIdGenerator(), mapper, Clock.systemUTC(), metrics, events::add);
         var bridge = mock(AiLiveMeetingConnectionService.class);
+        when(bridge.isCurrent(connection)).thenReturn(true);
         var inbound = new AiLiveMeetingInboundHandler(connection, bridge, mapper, mock(TranscriptService.class));
         var socket = mock(WebSocketSession.class);
         var responses = new CountDownLatch(2);

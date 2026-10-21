@@ -63,6 +63,12 @@ chat:
     queue-capacity: ${CHAT_EXECUTOR_QUEUE_CAPACITY:1000}
 
 ai:
+  recovery:
+    max-attempts: ${AI_RECOVERY_MAX_ATTEMPTS:2}
+    attempt-timeout: ${AI_RECOVERY_ATTEMPT_TIMEOUT:5s}
+    success-ack-chunks: ${AI_RECOVERY_SUCCESS_ACK_CHUNKS:10}
+    workers: ${AI_RECOVERY_WORKERS:2}
+    queue-capacity: ${AI_RECOVERY_QUEUE_CAPACITY:64}
   heartbeat:
     interval: ${AI_HEARTBEAT_INTERVAL:5s}
     pong-timeout: ${AI_HEARTBEAT_PONG_TIMEOUT:5s}

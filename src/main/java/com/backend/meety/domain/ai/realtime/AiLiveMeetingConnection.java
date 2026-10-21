@@ -28,6 +28,12 @@ public class AiLiveMeetingConnection {
     private final Long recordingSessionId;
     private final Long meetingId;
     private final String sessionStartRequestId;
+    private final Long startSequence;
+    private final Long transcriptSequenceStart;
+    private volatile boolean recoveryFenced;
+    private volatile boolean stopRequested;
+    private volatile boolean replayEnabled = true;
+    private volatile boolean strictRecoveryReplay;
     private volatile WebSocketSession webSocketSession;
     private volatile AiLiveMeetingConnectionState state;
     private volatile String sessionPauseRequestId;
@@ -73,9 +79,23 @@ public class AiLiveMeetingConnection {
     }
 
     public AiLiveMeetingConnection(Long recordingSessionId, Long meetingId, String sessionStartRequestId) {
+        this(recordingSessionId, meetingId, sessionStartRequestId, null, null);
+    }
+
+    public AiLiveMeetingConnection(Long recordingSessionId, Long meetingId, String sessionStartRequestId,
+                                   Long startSequence, Long transcriptSequenceStart) {
         this.recordingSessionId = recordingSessionId;
         this.meetingId = meetingId;
         this.sessionStartRequestId = sessionStartRequestId;
+        this.startSequence = startSequence;
+        this.transcriptSequenceStart = transcriptSequenceStart;
+        if (startSequence != null) {
+            nextAudioSequence = startSequence;
+            lastSentSequence = startSequence - 1;
+            lastAckedSequence = startSequence - 1;
+            replayEnabled = false;
+            strictRecoveryReplay = true;
+        }
         this.state = AiLiveMeetingConnectionState.CONNECTING;
     }
 
@@ -89,6 +109,39 @@ public class AiLiveMeetingConnection {
 
     public String sessionStartRequestId() {
         return sessionStartRequestId;
+    }
+
+    public Long startSequence() { return startSequence; }
+    public Long transcriptSequenceStart() { return transcriptSequenceStart; }
+    public boolean isRecoveryConnection() { return startSequence != null; }
+    public boolean isRecoveryFenced() { return recoveryFenced; }
+    public boolean isStopRequested() { return stopRequested; }
+    public void requestStop() { stopRequested = true; }
+    public void fenceForRecovery() { recoveryFenced = true; }
+    public void enableReplay() { replayEnabled = true; }
+    public void finishRecoveryReplay() { strictRecoveryReplay = false; }
+
+    public boolean attachIfActive(WebSocketSession session, BooleanSupplier current) {
+        synchronized (sendLock) {
+            if (recoveryFenced || stopRequested || isClosed() || !current.getAsBoolean()) { return false; }
+            webSocketSession = session;
+            return true;
+        }
+    }
+
+    public boolean sendStart(TextMessage message) throws IOException {
+        synchronized (sendLock) {
+            if (recoveryFenced || stopRequested || state() != AiLiveMeetingConnectionState.CONNECTING) { return false; }
+            markStartSent();
+            webSocketSession.sendMessage(message);
+            return true;
+        }
+    }
+
+    public void saveTranscriptIfActive(Runnable save) {
+        synchronized (sendLock) {
+            if (!recoveryFenced && !isClosed()) { save.run(); }
+        }
     }
 
     public WebSocketSession webSocketSession() {
@@ -117,9 +170,10 @@ public class AiLiveMeetingConnection {
     public boolean forwardAudio(ObjectMapper objectMapper, byte[] audio,
                                 long feSequence, Clock clock, int maxPendingChunks) throws IOException {
         synchronized (sendLock) {
-            if (state() != AiLiveMeetingConnectionState.READY) {
+            if (recoveryFenced || !replayEnabled || state() != AiLiveMeetingConnectionState.READY) {
                 return false;
             }
+            if (strictRecoveryReplay && feSequence != nextAudioSequence) { return false; }
             WebSocketSession session = webSocketSession;
             if (session == null || !session.isOpen()) {
                 return false;
@@ -151,7 +205,7 @@ public class AiLiveMeetingConnection {
     /** Caller also holds the FE stream-state lock: stream state -> sendLock is the global lock order. */
     public AckResult acknowledge(long sequence, Instant now, BiPredicate<Long, Integer> checkpoint) {
         synchronized (sendLock) {
-            if (state() == AiLiveMeetingConnectionState.CLOSED || state() == AiLiveMeetingConnectionState.STOP_SENT
+            if (recoveryFenced || state() == AiLiveMeetingConnectionState.CLOSED || state() == AiLiveMeetingConnectionState.STOP_SENT
                     || state() == AiLiveMeetingConnectionState.ENDED) {
                 return AckResult.CLOSED;
             }
@@ -266,7 +320,7 @@ public class AiLiveMeetingConnection {
     }
 
     private boolean acceptsHeartbeatPong() {
-        if (heartbeatStopped) {
+        if (heartbeatStopped || recoveryFenced) {
             return false;
         }
         return switch (state()) {
@@ -277,7 +331,7 @@ public class AiLiveMeetingConnection {
 
     public void detectAckTimeout(Instant now, Duration timeout, Consumer<AckSnapshot> onTimeout) {
         synchronized (sendLock) {
-            if (state() == AiLiveMeetingConnectionState.CLOSED
+            if (recoveryFenced || state() == AiLiveMeetingConnectionState.CLOSED
                     || lastSentSequence <= lastAckedSequence || ackTimeoutReported) {
                 return;
             }
@@ -322,6 +376,7 @@ public class AiLiveMeetingConnection {
 
     public boolean sendStop(ObjectMapper objectMapper, String requestId) throws IOException {
         synchronized (sendLock) {
+            stopRequested = true;
             if (state() != AiLiveMeetingConnectionState.READY && state() != AiLiveMeetingConnectionState.PAUSED) {
                 return false;
             }
@@ -346,6 +401,8 @@ public class AiLiveMeetingConnection {
     }
 
     public synchronized void markReady() {
+        if (recoveryFenced || (state != AiLiveMeetingConnectionState.CONNECTING
+                && state != AiLiveMeetingConnectionState.START_SENT)) { return; }
         this.state = AiLiveMeetingConnectionState.READY;
         readyLatch.countDown();
         notifyAll();

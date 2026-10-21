@@ -44,6 +44,14 @@ public class AudioWebSocketRegistry {
         return streamStates.computeIfAbsent(recordingSessionId, ignored -> new AudioStreamState());
     }
 
+    public void installRecoveryState(Long recordingSessionId, String connectionId, long checkpoint) {
+        // Publish a fully initialized state without locking the retired stream state.
+        AudioStreamState state = new AudioStreamState();
+        state.bind(connectionId);
+        state.restore(checkpoint);
+        streamStates.put(recordingSessionId, state);
+    }
+
     public void removeStreamState(Long recordingSessionId) {
         AudioStreamState state = streamStates.get(recordingSessionId);
         if (state != null) {
