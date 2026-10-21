@@ -2,6 +2,7 @@ package com.backend.meety.domain.transcript.realtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
@@ -14,7 +15,6 @@ import com.backend.meety.domain.ai.realtime.AiTranscriptSegmentPayload;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.exception.MeetingException;
 import com.backend.meety.domain.transcript.service.TranscriptService;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -36,12 +36,10 @@ import org.springframework.transaction.CannotCreateTransactionException;
 class TranscriptSaveDispatcherTest {
 
     private final TranscriptService transcriptService = mock(TranscriptService.class);
-    private SimpleMeterRegistry meters;
     private ThreadPoolTaskExecutor workers;
 
     @BeforeEach
     void setUp() {
-        meters = new SimpleMeterRegistry();
         workers = new ThreadPoolTaskExecutor();
         workers.setCorePoolSize(2);
         workers.setMaxPoolSize(2);
@@ -53,7 +51,6 @@ class TranscriptSaveDispatcherTest {
     void tearDown() throws Exception {
         workers.shutdown();
         workers.getThreadPoolExecutor().awaitTermination(3, TimeUnit.SECONDS);
-        meters.close();
     }
 
     @Test
@@ -146,8 +143,6 @@ class TranscriptSaveDispatcherTest {
         awaitIdle(dispatcher);
         assertThat(order).containsExactly("save-1", "save-2");
         assertThat(attempts).hasValue(3);
-        assertThat(meters.get("transcript.save.retries").counter().count()).isEqualTo(2);
-        assertFailures("retry-exhausted", 0);
     }
 
     @Test
@@ -165,8 +160,8 @@ class TranscriptSaveDispatcherTest {
 
         // then
         awaitIdle(dispatcher);
+        verify(transcriptService, atLeast(2)).saveFinalSegment(message(88L, 1L));
         verify(transcriptService).saveFinalSegment(message(88L, 2L));
-        assertFailures("retry-exhausted", 1);
     }
 
     @Test
@@ -183,8 +178,6 @@ class TranscriptSaveDispatcherTest {
         // then
         awaitIdle(dispatcher);
         verify(transcriptService, times(1)).saveFinalSegment(any());
-        assertFailures("non-retryable", 1);
-        assertThat(meters.get("transcript.save.retries").counter().count()).isZero();
     }
 
     @Test
@@ -207,8 +200,6 @@ class TranscriptSaveDispatcherTest {
         awaitIdle(dispatcher);
         verify(transcriptService, times(1)).saveFinalSegment(message(88L, 1L));
         verify(transcriptService).saveFinalSegment(message(88L, 2L));
-        assertFailures("non-retryable", 1);
-        assertThat(meters.get("transcript.save.retries").counter().count()).isZero();
     }
 
     @Test
@@ -240,7 +231,6 @@ class TranscriptSaveDispatcherTest {
         awaitIdle(dispatcher);
         assertThat(order).containsExactly("save", "finalize");
         assertThat(attempts).hasValue(3);
-        assertThat(meters.get("transcript.save.retries").counter().count()).isEqualTo(2);
     }
 
     @Test
@@ -269,8 +259,6 @@ class TranscriptSaveDispatcherTest {
         assertThat(overRecording).isFalse();
         assertThat(otherQueued).isTrue();
         assertThat(overTotal).isFalse();
-        assertRejections("recording-capacity", 1);
-        assertRejections("total-capacity", 1);
         release.countDown();
         awaitIdle(dispatcher);
         verify(transcriptService).saveFinalSegment(message(88L, 2L));
@@ -285,7 +273,7 @@ class TranscriptSaveDispatcherTest {
                 task -> {
                     throw new RejectedExecutionException("saturated");
                 },
-                properties(500, 5000, Duration.ofSeconds(1)), transcriptService, meters);
+                properties(500, 5000, Duration.ofSeconds(1)), transcriptService);
         AtomicInteger finalized = new AtomicInteger();
 
         // when
@@ -297,7 +285,6 @@ class TranscriptSaveDispatcherTest {
         assertThat(finalized).hasValue(1);
         assertThat(dispatcher.pendingTaskCount()).isZero();
         assertThat(dispatcher.recordingQueueCount()).isZero();
-        assertRejections("executor", 2);
     }
 
     @Test
@@ -316,7 +303,6 @@ class TranscriptSaveDispatcherTest {
         assertThat(saved).isFalse();
         assertThat(finalized).hasValue(1);
         verify(transcriptService, times(0)).saveFinalSegment(any());
-        assertRejections("closed", 2);
     }
 
     @Test
@@ -335,12 +321,11 @@ class TranscriptSaveDispatcherTest {
         // then
         awaitIdle(dispatcher);
         assertThat(finalized).hasValue(1);
-        assertFailures("non-retryable", 1);
     }
 
     private TranscriptSaveDispatcher dispatcher(int perRecording, int total, Duration retryMaxDuration) {
         return new TranscriptSaveDispatcher(workers, properties(perRecording, total, retryMaxDuration),
-                transcriptService, meters);
+                transcriptService);
     }
 
     private static TranscriptSaveProperties properties(int perRecording, int total, Duration retryMaxDuration) {
@@ -352,13 +337,7 @@ class TranscriptSaveDispatcherTest {
                 new AiTranscriptSegmentPayload(sequenceNumber, "text", 0L, 1000L, LocalDateTime.of(2026, 10, 21, 0, 0)));
     }
 
-    private void assertRejections(String reason, long count) {
-        assertThat(meters.get("transcript.save.rejected").tag("reason", reason).counter().count()).isEqualTo(count);
-    }
 
-    private void assertFailures(String reason, long count) {
-        assertThat(meters.get("transcript.save.failures").tag("reason", reason).counter().count()).isEqualTo(count);
-    }
 
     private static void await(CountDownLatch latch) {
         try {

@@ -12,7 +12,6 @@ import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveProperties;
 import com.backend.meety.domain.transcript.service.TranscriptService;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -30,7 +29,7 @@ class AiLiveMeetingStopListenerTest {
     private final List<Runnable> queuedRunners = new ArrayList<>();
     private final TranscriptSaveDispatcher dispatcher = new TranscriptSaveDispatcher(queuedRunners::add,
             new TranscriptSaveProperties(500, 5000, Duration.ofMillis(1), Duration.ZERO),
-            mock(TranscriptService.class), new SimpleMeterRegistry());
+            mock(TranscriptService.class));
     private final AiLiveMeetingStopListener listener =
             new AiLiveMeetingStopListener(ownerService, publishedEvents::add, dispatcher);
 

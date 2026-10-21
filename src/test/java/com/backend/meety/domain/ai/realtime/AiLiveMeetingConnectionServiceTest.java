@@ -66,7 +66,7 @@ class AiLiveMeetingConnectionServiceTest {
             readyEvents::add,
             new TranscriptSaveDispatcher(Runnable::run,
                     new TranscriptSaveProperties(500, 5000, Duration.ofMillis(1), Duration.ZERO),
-                    transcriptService, new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
+                    transcriptService),
             ownerService,
             meetingParticipantRepository,
             new AiAudioAckService(registry, new com.backend.meety.domain.recording.realtime.AudioWebSocketRegistry(),

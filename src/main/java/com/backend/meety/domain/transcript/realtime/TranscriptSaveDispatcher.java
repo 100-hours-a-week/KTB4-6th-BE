@@ -3,10 +3,6 @@ package com.backend.meety.domain.transcript.realtime;
 import com.backend.meety.domain.ai.realtime.AiTranscriptSegmentMessage;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import com.backend.meety.global.config.AsyncConfig;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -31,36 +27,17 @@ public class TranscriptSaveDispatcher {
     private final Executor executor;
     private final TranscriptSaveProperties properties;
     private final TranscriptService transcriptService;
-    private final Timer queueWait;
-    private final Counter retries;
-    private final Map<String, Counter> failures;
-    private final Map<String, Counter> rejections;
     private int pendingTasks;
     private boolean closed;
 
     public TranscriptSaveDispatcher(
             @Qualifier(AsyncConfig.TRANSCRIPT_SAVE_TASK_EXECUTOR_BEAN_NAME) Executor executor,
             TranscriptSaveProperties properties,
-            TranscriptService transcriptService,
-            MeterRegistry meters
+            TranscriptService transcriptService
     ) {
         this.executor = executor;
         this.properties = properties;
         this.transcriptService = transcriptService;
-        queueWait = meters.timer("transcript.save.queue.wait");
-        retries = meters.counter("transcript.save.retries");
-        failures = Map.of(
-                "non-retryable", meters.counter("transcript.save.failures", "reason", "non-retryable"),
-                "retry-exhausted", meters.counter("transcript.save.failures", "reason", "retry-exhausted"),
-                "interrupted", meters.counter("transcript.save.failures", "reason", "interrupted"),
-                "task", meters.counter("transcript.save.failures", "reason", "task"));
-        rejections = Map.of(
-                "recording-capacity", meters.counter("transcript.save.rejected", "reason", "recording-capacity"),
-                "total-capacity", meters.counter("transcript.save.rejected", "reason", "total-capacity"),
-                "executor", meters.counter("transcript.save.rejected", "reason", "executor"),
-                "closed", meters.counter("transcript.save.rejected", "reason", "closed"));
-        Gauge.builder("transcript.save.pending.tasks", this, TranscriptSaveDispatcher::pendingTaskCount).register(meters);
-        Gauge.builder("transcript.save.queues", this, TranscriptSaveDispatcher::recordingQueueCount).register(meters);
     }
 
     public boolean submitSave(AiTranscriptSegmentMessage message) {
@@ -88,23 +65,22 @@ public class TranscriptSaveDispatcher {
     private String enqueue(Long recordingSessionId, Runnable action) {
         synchronized (monitor) {
             if (closed) {
-                return reject("closed");
+                return "closed";
             }
             RecordingQueue queue = queues.get(recordingSessionId);
             if (queue != null && queue.tasks.size() >= properties.maxPendingPerRecording()) {
-                return reject("recording-capacity");
+                return "recording-capacity";
             }
             if (pendingTasks >= properties.maxPendingTotal()) {
-                return reject("total-capacity");
+                return "total-capacity";
             }
-            PendingTask task = new PendingTask(action, System.nanoTime());
             if (queue != null) {
-                queue.tasks.addLast(task);
+                queue.tasks.addLast(action);
                 pendingTasks++;
                 return null;
             }
             RecordingQueue created = new RecordingQueue(recordingSessionId);
-            created.tasks.addLast(task);
+            created.tasks.addLast(action);
             pendingTasks++;
             queues.put(recordingSessionId, created);
             try {
@@ -113,14 +89,14 @@ public class TranscriptSaveDispatcher {
             } catch (RejectedExecutionException e) {
                 queues.remove(recordingSessionId, created);
                 pendingTasks--;
-                return reject("executor");
+                return "executor";
             }
         }
     }
 
     private void drain(RecordingQueue queue) {
         while (true) {
-            PendingTask task;
+            Runnable task;
             synchronized (monitor) {
                 task = queue.tasks.pollFirst();
                 if (task == null) {
@@ -129,11 +105,9 @@ public class TranscriptSaveDispatcher {
                 }
                 pendingTasks--;
             }
-            queueWait.record(System.nanoTime() - task.enqueuedAt(), TimeUnit.NANOSECONDS);
             try {
-                task.action().run();
+                task.run();
             } catch (RuntimeException e) {
-                failures.get("task").increment();
                 log.error("전사 저장 큐 작업이 실패했습니다. recordingSessionId={}", queue.recordingSessionId, e);
             }
         }
@@ -155,23 +129,19 @@ public class TranscriptSaveDispatcher {
                 return;
             } catch (RuntimeException e) {
                 if (!isRetryable(e)) {
-                    failures.get("non-retryable").increment();
                     log.error("{}에 실패했습니다. 재시도하지 않습니다. recordingSessionId={}, sourceSegmentKey={}",
                             taskName, recordingSessionId, sourceSegmentKey, e);
                     return;
                 }
                 long remainingNanos = deadline - System.nanoTime();
                 if (remainingNanos <= 0) {
-                    failures.get("retry-exhausted").increment();
                     log.error("{} 재시도 한도를 넘겨 포기합니다. recordingSessionId={}, sourceSegmentKey={}, attempts={}",
                             taskName, recordingSessionId, sourceSegmentKey, attempt, e);
                     return;
                 }
-                retries.increment();
                 log.warn("{}에 실패해 재시도합니다. recordingSessionId={}, sourceSegmentKey={}, attempt={}, cause={}",
                         taskName, recordingSessionId, sourceSegmentKey, attempt, e.toString());
                 if (!sleep(Math.min(backoff.toNanos(), remainingNanos))) {
-                    failures.get("interrupted").increment();
                     log.error("{} 재시도가 중단돼 포기합니다. recordingSessionId={}, sourceSegmentKey={}",
                             taskName, recordingSessionId, sourceSegmentKey);
                     return;
@@ -199,11 +169,6 @@ public class TranscriptSaveDispatcher {
         }
     }
 
-    private String reject(String reason) {
-        rejections.get(reason).increment();
-        return reason;
-    }
-
     int pendingTaskCount() {
         synchronized (monitor) {
             return pendingTasks;
@@ -225,13 +190,10 @@ public class TranscriptSaveDispatcher {
 
     private static class RecordingQueue {
         private final Long recordingSessionId;
-        private final ArrayDeque<PendingTask> tasks = new ArrayDeque<>();
+        private final ArrayDeque<Runnable> tasks = new ArrayDeque<>();
 
         RecordingQueue(Long recordingSessionId) {
             this.recordingSessionId = recordingSessionId;
         }
-    }
-
-    private record PendingTask(Runnable action, long enqueuedAt) {
     }
 }
