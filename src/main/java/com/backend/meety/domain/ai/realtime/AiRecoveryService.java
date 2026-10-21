@@ -185,7 +185,9 @@ public class AiRecoveryService {
             long checkpoint = checkpoints.find(context.recordingSessionId).orElse(0);
             long fromSequence = Math.addExact(checkpoint, 1);
             Long lastTranscript = transcripts.findMaxSequenceNumber(context.meetingId);
-            long transcriptStart = lastTranscript == null ? 1 : Math.addExact(lastTranscript, 1);
+            long transcriptFloor = Math.max(lastTranscript == null ? 0 : lastTranscript,
+                    previous.lastAcceptedTranscriptSequence());
+            long transcriptStart = Math.addExact(transcriptFloor, 1);
             synchronized (context) {
                 if (!active(context, number)) { return; }
                 if (context.paused == null) { context.paused = recording.getStatus() == RecordingSessionStatus.PAUSED; }

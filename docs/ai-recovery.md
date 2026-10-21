@@ -1,6 +1,7 @@
 # #321 Owner-local AI Recovery
 
-기준 `origin/dev`: `7a19e319a52f9ed7e7258ef600ef36610fe3831e` (#319 / #320 병합 후).
+구현 시작 기준 `origin/dev`: `7a19e319a52f9ed7e7258ef600ef36610fe3831e` (#319 / #320 병합 후).
+최신 dev 병합 기준: `8d34350b37a5dba3dfaeffdff923b708dc61be3f` (#335 전사 저장 비동기화 포함).
 브랜치: `feat/#321-ai-recovery`. 원격 브랜치 반영과 PR 생성은 별도 절차로 진행한다.
 
 ## 기존 구조에서 확인한 것
@@ -69,13 +70,17 @@ replay 요청 전 전송은 허용하지 않고, 정상화 검증 중에는 from
 그 결과 마지막 ACK 109가 실제 100..109의 10청크 수신 확인이라는 의미를 가진다.
 성공 후에는 검증용 연속 제한을 해제해 기존 일반 Audio gap 처리 계약을 유지한다.
 
-`transcriptSequenceStart = DB meeting 내 최대 sequence + 1`이다. 전사가 없으면 기존 테스트의 첫 순번 1을 사용한다.
+`transcriptSequenceStart = max(DB meeting 내 최대 sequence, 이전 connection의 큐 수락 최대 순번) + 1`이다.
+전사가 없으면 기존 테스트의 첫 순번 1을 사용한다.
 soft-delete된 행도 source key를 계속 점유하므로 max 조회에서 제외하지 않는다.
 새 sequence 저장소나 DB column은 추가하지 않는다.
 
-교체 직전 진행 중인 전사 저장을 놓치지 않도록 기존 sendLock 안에서 현재 연결의 전사 저장을 확인하고,
-retire가 그 저장의 commit 종료를 기다린 뒤 max를 조회한다. fence 뒤의 늦은 전사는 저장하지 않는다.
-현재 dev의 동기 전사 저장 구조를 유지한 안전 장치이며 #316의 비동기 저장 변경은 가져오지 않았다.
+최신 dev #335의 TranscriptSaveDispatcher 및 저장 재시도/종료 로직은 변경하지 않았다.
+#321은 기존 sendLock 안에서 현재 연결의 큐 제출과 수락된 최대 순번만 기록한다.
+DB 저장을 기다리지 않으므로 AI 수신 스레드를 다시 DB I/O에 묶지 않는다.
+retire 이후 DB max와 큐 수락 최대값을 함께 확인해 아직 commit되지 않은 전사의 순번을 재사용하지 않는다.
+새 connection도 이 순번 하한을 이어받아 두 번째 attempt에서도 유지한다. fence 뒤의 늦은 전사는 enqueue하지 않는다.
+큐 제출 거절은 순번 하한을 올리지 않으며, 기존 Dispatcher의 best-effort 유실 정책은 그대로다.
 
 기존 `AiSessionStartMessage`에 nullable `startSequence`와 `transcriptSequenceStart`를 추가했다.
 Recovery가 아닌 일반 session.start에서는 두 필드를 생략해 기존 wire contract를 유지한다.
@@ -157,7 +162,7 @@ STOP/cleanup/Owner 변경은 명시적 취소이므로 retry하지 않는다.
 
 5초는 attempt의 논리적인 정상화 기준이다. 초기 executor 큐 대기는 attempt 시작 전이며,
 외부 DB/Redis/소켓 write/close 및 기존 sendLock 대기는 엄격한 5초 I/O deadline이 아니다.
-특히 기존 동기 전사 저장과 FE send가 오래 걸리면 검사/제어가 지연될 수 있다.
+특히 기존 FE send나 동기 외부 I/O가 오래 걸리면 검사/제어가 지연될 수 있다.
 worker가 완전히 포화/종료돼 물리 cleanup 제출도 거절되면 로그가 남고 물리 자원 정리가 지연될 수 있다.
 이 상태의 DB/FE 종료와 최종 자원 정리는 #317 consumer에서 연결해야 한다.
 
@@ -198,9 +203,9 @@ Micrometer counter (sessionId/generation/requestId tag 없음):
 |---|---:|---:|---:|---:|---:|
 | 신규 #321 (실제 Redis checkpoint 1건 포함) | 41 | 41 | 0 | 0 | 0 |
 | #319 ACK / #320 Heartbeat 회귀 | 86 | 86 | 0 | 0 | 0 |
-| AI realtime / Audio WebSocket / Owner 도메인 | 264 | 264 | 0 | 0 | 0 |
-| 현재 Working Tree 전체 | 1,219 | 1,217 | 2 | 0 | 0 |
-| 깨끗한 기준 dev 전체 | 1,178 | 1,176 | 2 | 0 | 0 |
+| 최신 dev 병합 후 AI realtime / Audio WebSocket / Owner / Transcript | 363 | 363 | 0 | 0 | 0 |
+| 최신 dev 병합 후 전체 | 1,231 | 1,229 | 2 | 0 | 0 |
+| 깨끗한 구현 시작 기준 dev (`7a19e31`) 전체 | 1,178 | 1,176 | 2 | 0 | 0 |
 
 두 전체 실행의 실패는 동일한 `RecordingMySqlIntegrationTest` 두 건이다.
 
@@ -210,8 +215,10 @@ Micrometer counter (sessionId/generation/requestId tag 없음):
 관련 없는 크레딧/녹음 로직이나 기존 assertion은 수정하지 않았다. 기존 테스트 네 파일은
 추가 의존성 주입 및 current-connection mock만 보완했다.
 
-최종 `git fetch origin` 후에도 `origin/dev`는 기준 SHA와 같아 현재 dev 대비 병합 충돌은 없다.
-다른 원격 작업 브랜치의 변경은 가져오지 않았다. 검증 대상은 #321 관련 변경 파일 29개다.
+추가 fetch에서 dev의 #335 병합을 확인해 최신 dev를 통합했다. InboundHandler와 ACK/Heartbeat 테스트
+세 파일의 텍스트 충돌을 해결했고 Recovery 재연결 경로의 Dispatcher 의존성을 맞췄다.
+비동기 큐 수락 순번을 두 attempt에 걸쳐 보존하는 회귀 테스트로 의미상 충돌도 검증했다.
+훈의 Dispatcher/Properties/Executor/StopListener 구현과 테스트는 최신 dev 원본을 유지했다.
 
 ## 남은 실제 통합 검증
 
@@ -220,5 +227,5 @@ Micrometer counter (sessionId/generation/requestId tag 없음):
 - PAUSED 중 재전송 가능한 청크가 10개보다 적으면, 고정 성공 기준상 5초 안에 성공할 수 없어 retry/exhausted될 수 있다.
   이 기준을 임의로 완화하지 않았다. 실제 FE 버퍼 보존/PAUSED replay 정책을 양쪽으로 검증해야 한다.
 - 정상 무음, 대규모 buffer replay, Owner BE 변경 및 process 종료 후 새 Owner의 별도 복구를 검증.
-- #316 비동기 Transcript 저장이 dev에 들어오면 commit barrier와 max 조회 경계를 재검토해야 한다.
+- Owner BE 종료 시 메모리의 큐 수락 순번은 승계하지 않는다. 비동기 Dispatcher의 영속 큐/무손실 처리는 이번 범위가 아니다.
 - #317 Fatal consumer 연결과 Owner/세대 fencing, 최종 FE/DB/자원 정리 검증.

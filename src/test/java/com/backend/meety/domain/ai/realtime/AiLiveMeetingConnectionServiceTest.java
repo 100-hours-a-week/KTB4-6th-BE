@@ -17,6 +17,8 @@ import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveProperties;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -62,7 +64,9 @@ class AiLiveMeetingConnectionServiceTest {
             timeoutScheduler,
             objectMapper,
             readyEvents::add,
-            transcriptService,
+            new TranscriptSaveDispatcher(Runnable::run,
+                    new TranscriptSaveProperties(500, 5000, Duration.ofMillis(1), Duration.ZERO),
+                    transcriptService),
             ownerService,
             meetingParticipantRepository,
             new AiAudioAckService(registry, new com.backend.meety.domain.recording.realtime.AudioWebSocketRegistry(),

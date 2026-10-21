@@ -5,7 +5,7 @@ import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
-import com.backend.meety.domain.transcript.service.TranscriptService;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import java.net.URI;
 import java.util.List;
 import java.util.Optional;
@@ -30,7 +30,7 @@ public class AiLiveMeetingConnectionService {
     private final AiStopTimeoutScheduler stopTimeoutScheduler;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
-    private final TranscriptService transcriptService;
+    private final TranscriptSaveDispatcher transcriptSaveDispatcher;
     private final RecordingOwnerService ownerService;
     private final MeetingParticipantRepository meetingParticipantRepository;
     private final AiAudioAckService audioAckService;
@@ -38,9 +38,11 @@ public class AiLiveMeetingConnectionService {
     private final AiRecoveryRegistry recoveries;
 
     void notifyTranscriptFinalized(AiLiveMeetingConnection connection) {
-        eventPublisher.publishEvent(new MeetingTranscriptFinalizedEvent(
-                connection.meetingId(), connection.recordingSessionId()));
-        releaseOwner(connection);
+        transcriptSaveDispatcher.submitFinalize(connection.recordingSessionId(), () -> {
+            eventPublisher.publishEvent(new MeetingTranscriptFinalizedEvent(
+                    connection.meetingId(), connection.recordingSessionId()));
+            releaseOwner(connection);
+        });
     }
 
     private void releaseOwner(AiLiveMeetingConnection connection) {
@@ -91,7 +93,7 @@ public class AiLiveMeetingConnectionService {
         }
         try {
             WebSocketSession aiSession = webSocketClient.connect(
-                    new AiLiveMeetingInboundHandler(connection, this, objectMapper, transcriptService),
+                    new AiLiveMeetingInboundHandler(connection, this, objectMapper, transcriptSaveDispatcher),
                     aiWebSocketUri()
             );
             connection.attach(aiSession);
@@ -324,7 +326,7 @@ public class AiLiveMeetingConnectionService {
     public void connectRecovery(AiLiveMeetingConnection connection, java.time.Duration timeout) throws Exception {
         if (!isCurrent(connection)) { return; }
         if (timeout.isNegative() || timeout.isZero()) { throw new java.util.concurrent.TimeoutException("Recovery deadline elapsed"); }
-        var session = webSocketClient.connect(new AiLiveMeetingInboundHandler(connection, this, objectMapper, transcriptService),
+        var session = webSocketClient.connect(new AiLiveMeetingInboundHandler(connection, this, objectMapper, transcriptSaveDispatcher),
                 aiWebSocketUri(), timeout);
         if (!connection.attachIfActive(session, () -> registry.find(connection.recordingSessionId()).orElse(null) == connection)) {
             session.close(CloseStatus.NORMAL);

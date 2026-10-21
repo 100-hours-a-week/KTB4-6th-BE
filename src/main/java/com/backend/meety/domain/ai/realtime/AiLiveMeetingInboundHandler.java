@@ -1,6 +1,6 @@
 package com.backend.meety.domain.ai.realtime;
 
-import com.backend.meety.domain.transcript.service.TranscriptService;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.socket.CloseStatus;
@@ -27,7 +27,7 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
     private final AiLiveMeetingConnection connection;
     private final AiLiveMeetingConnectionService connectionService;
     private final ObjectMapper objectMapper;
-    private final TranscriptService transcriptService;
+    private final TranscriptSaveDispatcher transcriptSaveDispatcher;
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
@@ -90,6 +90,9 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
         if (connection.state() == AiLiveMeetingConnectionState.STOP_SENT) {
             log.warn("AI WebSocket이 session.ended 없이 종료되었습니다. recordingSessionId={}, closeStatus={}",
                     connection.recordingSessionId(), status);
+        } else {
+            log.info("AI WebSocket이 종료되었습니다. recordingSessionId={}, state={}, closeStatus={}",
+                    connection.recordingSessionId(), connection.state(), status);
         }
         if (connection.state() == AiLiveMeetingConnectionState.STOP_SENT) { cleanup(); }
         else { connectionService.recoverableFailure(connection, "AI_UNEXPECTED_CLOSE"); }
@@ -129,7 +132,8 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
             log.debug("STOP_SENT 상태에서 AI transcript를 처리합니다. recordingSessionId={}, sourceSegmentKey={}",
                     connection.recordingSessionId(), message.sourceSegmentKey());
         }
-        connection.saveTranscriptIfActive(() -> transcriptService.saveFinalSegment(message));
+        connection.enqueueTranscriptIfActive(message.payload().sequenceNumber(),
+                () -> transcriptSaveDispatcher.submitSave(message));
     }
 
     private void handleSessionPaused(JsonNode root) {

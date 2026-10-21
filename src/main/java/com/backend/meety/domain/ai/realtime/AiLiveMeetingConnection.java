@@ -34,6 +34,7 @@ public class AiLiveMeetingConnection {
     private volatile boolean stopRequested;
     private volatile boolean replayEnabled = true;
     private volatile boolean strictRecoveryReplay;
+    private long lastAcceptedTranscriptSequence;
     private volatile WebSocketSession webSocketSession;
     private volatile AiLiveMeetingConnectionState state;
     private volatile String sessionPauseRequestId;
@@ -89,6 +90,7 @@ public class AiLiveMeetingConnection {
         this.sessionStartRequestId = sessionStartRequestId;
         this.startSequence = startSequence;
         this.transcriptSequenceStart = transcriptSequenceStart;
+        lastAcceptedTranscriptSequence = transcriptSequenceStart == null ? 0 : transcriptSequenceStart - 1;
         if (startSequence != null) {
             nextAudioSequence = startSequence;
             lastSentSequence = startSequence - 1;
@@ -138,10 +140,16 @@ public class AiLiveMeetingConnection {
         }
     }
 
-    public void saveTranscriptIfActive(Runnable save) {
+    public boolean enqueueTranscriptIfActive(long sequence, BooleanSupplier enqueue) {
         synchronized (sendLock) {
-            if (!recoveryFenced && !isClosed()) { save.run(); }
+            if (recoveryFenced || isClosed() || !enqueue.getAsBoolean()) { return false; }
+            lastAcceptedTranscriptSequence = Math.max(lastAcceptedTranscriptSequence, sequence);
+            return true;
         }
+    }
+
+    public long lastAcceptedTranscriptSequence() {
+        synchronized (sendLock) { return lastAcceptedTranscriptSequence; }
     }
 
     public WebSocketSession webSocketSession() {

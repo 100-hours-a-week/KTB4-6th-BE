@@ -56,6 +56,17 @@ meeting-sse:
     max-pending-per-meeting: ${MEETING_SSE_MAX_PENDING_PER_MEETING:100}
     max-pending-total: ${MEETING_SSE_MAX_PENDING_TOTAL:1000}
 
+transcript-save:
+  max-pending-per-recording: ${TRANSCRIPT_SAVE_MAX_PENDING_PER_RECORDING:500}
+  max-pending-total: ${TRANSCRIPT_SAVE_MAX_PENDING_TOTAL:5000}
+  retry-initial-backoff: ${TRANSCRIPT_SAVE_RETRY_INITIAL_BACKOFF:1s}
+  retry-max-duration: ${TRANSCRIPT_SAVE_RETRY_MAX_DURATION:60s}
+  executor:
+    core-pool-size: ${TRANSCRIPT_SAVE_EXECUTOR_CORE_POOL_SIZE:4}
+    max-pool-size: ${TRANSCRIPT_SAVE_EXECUTOR_MAX_POOL_SIZE:4}
+    queue-capacity: ${TRANSCRIPT_SAVE_EXECUTOR_QUEUE_CAPACITY:100}
+    shutdown-await-seconds: ${TRANSCRIPT_SAVE_EXECUTOR_SHUTDOWN_AWAIT_SECONDS:20}
+
 chat:
   executor:
     core-pool-size: ${CHAT_EXECUTOR_CORE_POOL_SIZE:8}

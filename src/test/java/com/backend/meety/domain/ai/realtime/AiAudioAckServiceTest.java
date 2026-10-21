@@ -7,7 +7,7 @@ import static org.mockito.Mockito.*;
 
 import com.backend.meety.domain.ai.event.AiAudioAckTimeoutEvent;
 import com.backend.meety.domain.recording.realtime.*;
-import com.backend.meety.domain.transcript.service.TranscriptService;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.*;
 import java.util.List;
@@ -535,7 +535,7 @@ class AiAudioAckServiceTest {
         // given
         var connectionService = mock(AiLiveMeetingConnectionService.class);
         when(connectionService.isCurrent(connection)).thenReturn(true);
-        var handler = new AiLiveMeetingInboundHandler(connection, connectionService, mapper, mock(TranscriptService.class));
+        var handler = new AiLiveMeetingInboundHandler(connection, connectionService, mapper, mock(TranscriptSaveDispatcher.class));
         String message = "{\"type\":\"audio.ack\",\"recordingSessionId\":\"88\",\"payload\":{\"sequence\":0}}";
         // when
         handler.handleTextMessage(aiSocket, new TextMessage(message));

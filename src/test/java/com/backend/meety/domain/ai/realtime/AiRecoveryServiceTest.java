@@ -14,6 +14,8 @@ import com.backend.meety.domain.recording.realtime.*;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
 import com.backend.meety.domain.transcript.service.TranscriptService;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveProperties;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.net.URI;
 import java.time.*;
@@ -41,6 +43,9 @@ class AiRecoveryServiceTest {
     final TestClock clock = new TestClock();
     final SimpleMeterRegistry metrics = new SimpleMeterRegistry();
     final ConcurrentLinkedQueue<Runnable> work = new ConcurrentLinkedQueue<>();
+    final ConcurrentLinkedQueue<Runnable> transcriptWork = new ConcurrentLinkedQueue<>();
+    final TranscriptSaveDispatcher transcriptSaveDispatcher = new TranscriptSaveDispatcher(transcriptWork::add,
+            new TranscriptSaveProperties(500, 5000, Duration.ofSeconds(1), Duration.ZERO), transcriptService);
     final List<Object> events = new CopyOnWriteArrayList<>();
     final List<String> feMessages = new CopyOnWriteArrayList<>();
     final List<String> starts = new CopyOnWriteArrayList<>();
@@ -62,7 +67,7 @@ class AiRecoveryServiceTest {
             mapper, clock, metrics, this::publish);
     final AiLiveMeetingConnectionService connectionService = new AiLiveMeetingConnectionService(
             connections, this::connect, new AiLiveMeetingProperties(URI.create("ws://localhost/ai")),
-            new AiRequestIdGenerator(), timers, mapper, this::publish, transcriptService,
+            new AiRequestIdGenerator(), timers, mapper, this::publish, transcriptSaveDispatcher,
             mock(RecordingOwnerService.class), mock(MeetingParticipantRepository.class), ack, heartbeat, contexts);
     final AiRecoveryService recovery = new AiRecoveryService(contexts, connections, connectionService, ownerRepository,
             recordingRepository, transcriptRepository, checkpointRepository, audio, heartbeat, timers, work::add,
@@ -348,7 +353,7 @@ class AiRecoveryServiceTest {
         // given
         begin(); runAll();
         var current = connections.find(88L).orElseThrow();
-        var oldInbound = new AiLiveMeetingInboundHandler(original, connectionService, mapper, transcriptService);
+        var oldInbound = new AiLiveMeetingInboundHandler(original, connectionService, mapper, transcriptSaveDispatcher);
         // when
         oldInbound.handleTextMessage(originalSocket, new TextMessage("{\"type\":\"audio.ack\",\"recordingSessionId\":\"88\",\"payload\":{\"sequence\":999}}"));
         oldInbound.handleTextMessage(originalSocket, new TextMessage("{\"type\":\"heartbeat.pong\",\"recordingSessionId\":\"88\",\"requestId\":\"old\"}"));
@@ -655,30 +660,32 @@ class AiRecoveryServiceTest {
     }
 
     @Test
-    @DisplayName("이미 commit 중인 이전 전사가 끝난 뒤 다음 transcript sequence를 계산한다")
+    @DisplayName("비동기 저장을 기다리지 않고 큐에 수락된 이전 전사 이후 순번으로 두 attempt를 시작한다")
     void transcriptBarrierPreventsSequenceReuse() throws Exception {
         // 테스트 목적:
-        // 교체 직전에 진행 중이던 DB 저장을 놓쳐 동일 sourceSegmentKey를 재사용하지 않는지 검증한다.
+        // DB에 아직 없는 큐 수락 순번을 재시도에서도 보존해 비동기 전사 저장과 충돌하지 않는지 검증한다.
         // given
-        var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
-        try (var pool = Executors.newFixedThreadPool(2)) {
-            var saving = pool.submit(() -> original.saveTranscriptIfActive(() -> {
-                entered.countDown();
-                try { assertThat(release.await(3, TimeUnit.SECONDS)).isTrue(); }
-                catch (InterruptedException e) { throw new AssertionError(e); }
-                transcriptMax.set(12);
-            }));
-            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-            // when
-            begin();
-            var attempt = pool.submit(() -> work.remove().run());
-            try { assertThatThrownBy(() -> attempt.get(50, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class); }
-            finally { release.countDown(); }
-            saving.get(3, TimeUnit.SECONDS); attempt.get(3, TimeUnit.SECONDS);
-        } finally { release.countDown(); }
-        runAll();
+        String json = """
+                {"type":"transcript.committed","meetingId":42,"recordingSessionId":88,
+                 "payload":{"sequenceNumber":12,"content":"queued","startedAtMs":0,
+                            "endedAtMs":100,"recognizedAt":"2026-10-21T00:00:00Z"}}
+                """;
+        var message = AiTranscriptSegmentMessage.from(mapper.readTree(json));
+        var handler = new AiLiveMeetingInboundHandler(original, connectionService, mapper, transcriptSaveDispatcher);
+        handler.handleTextMessage(originalSocket, new TextMessage(json));
+        verifyNoInteractions(transcriptService);
+        // when
+        begin(); runAll();
+        clock.advance(5); timers.fireAll(); runAll();
         // then
         assertThat(mapper.readTree(starts.getFirst()).path("transcriptSequenceStart").asLong()).isEqualTo(13);
+        assertThat(mapper.readTree(starts.getLast()).path("transcriptSequenceStart").asLong()).isEqualTo(13);
+        assertThat(transcriptMax.get()).isEqualTo(11);
+        verifyNoInteractions(transcriptService);
+        // when
+        transcriptWork.remove().run();
+        // then
+        verify(transcriptService).saveFinalSegment(message);
     }
 
     @Test
@@ -716,11 +723,12 @@ class AiRecoveryServiceTest {
         var current = connections.find(88L).orElseThrow();
         var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
         try (var pool = Executors.newFixedThreadPool(2)) {
-            var writer = pool.submit(() -> current.saveTranscriptIfActive(() -> {
+            var writer = pool.submit(() -> current.enqueueTranscriptIfActive(12, () -> {
                 entered.countDown();
                 try { assertThat(release.await(3, TimeUnit.SECONDS)).isTrue(); }
                 catch (InterruptedException e) { throw new AssertionError(e); }
                 connectionService.recoverableFailure(current, "AI_TRANSPORT_ERROR");
+                return true;
             }));
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
             // when
