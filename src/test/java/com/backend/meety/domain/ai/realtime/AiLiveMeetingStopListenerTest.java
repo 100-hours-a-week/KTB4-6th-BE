@@ -28,7 +28,7 @@ class AiLiveMeetingStopListenerTest {
     private final List<Object> publishedEvents = new ArrayList<>();
     private final List<Runnable> queuedRunners = new ArrayList<>();
     private final TranscriptSaveDispatcher dispatcher = new TranscriptSaveDispatcher(queuedRunners::add,
-            new TranscriptSaveProperties(500, 5000, Duration.ofMillis(1), Duration.ZERO),
+            new TranscriptSaveProperties(500, 5000, Duration.ofMillis(1), Duration.ofMillis(1), Duration.ZERO),
             mock(TranscriptService.class));
     private final AiLiveMeetingStopListener listener =
             new AiLiveMeetingStopListener(ownerService, publishedEvents::add, dispatcher);

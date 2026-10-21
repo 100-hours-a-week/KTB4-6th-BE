@@ -45,7 +45,7 @@ class AiRecoveryServiceTest {
     final ConcurrentLinkedQueue<Runnable> work = new ConcurrentLinkedQueue<>();
     final ConcurrentLinkedQueue<Runnable> transcriptWork = new ConcurrentLinkedQueue<>();
     final TranscriptSaveDispatcher transcriptSaveDispatcher = new TranscriptSaveDispatcher(transcriptWork::add,
-            new TranscriptSaveProperties(500, 5000, Duration.ofSeconds(1), Duration.ZERO), transcriptService);
+            new TranscriptSaveProperties(500, 5000, Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ZERO), transcriptService);
     final List<Object> events = new CopyOnWriteArrayList<>();
     final List<String> feMessages = new CopyOnWriteArrayList<>();
     final List<String> starts = new CopyOnWriteArrayList<>();

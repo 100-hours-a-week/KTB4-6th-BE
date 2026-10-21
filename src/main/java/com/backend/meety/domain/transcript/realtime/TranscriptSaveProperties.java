@@ -8,6 +8,7 @@ public record TranscriptSaveProperties(
         int maxPendingPerRecording,
         int maxPendingTotal,
         Duration retryInitialBackoff,
+        Duration retryMaxBackoff,
         Duration retryMaxDuration
 ) {
 
@@ -18,6 +19,9 @@ public record TranscriptSaveProperties(
         }
         if (retryInitialBackoff == null || retryInitialBackoff.isNegative() || retryInitialBackoff.isZero()) {
             throw new IllegalArgumentException("transcript-save.retry-initial-backoff must be positive");
+        }
+        if (retryMaxBackoff == null || retryMaxBackoff.compareTo(retryInitialBackoff) < 0) {
+            throw new IllegalArgumentException("transcript-save.retry-max-backoff must be at least retry-initial-backoff");
         }
         if (retryMaxDuration == null || retryMaxDuration.isNegative()) {
             throw new IllegalArgumentException("transcript-save.retry-max-duration must not be negative");

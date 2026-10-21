@@ -146,7 +146,8 @@ public class TranscriptSaveDispatcher {
                             taskName, recordingSessionId, sourceSegmentKey);
                     return;
                 }
-                backoff = backoff.multipliedBy(2);
+                Duration doubled = backoff.multipliedBy(2);
+                backoff = doubled.compareTo(properties.retryMaxBackoff()) > 0 ? properties.retryMaxBackoff() : doubled;
                 attempt++;
             }
         }

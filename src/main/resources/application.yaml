@@ -60,6 +60,7 @@ transcript-save:
   max-pending-per-recording: ${TRANSCRIPT_SAVE_MAX_PENDING_PER_RECORDING:500}
   max-pending-total: ${TRANSCRIPT_SAVE_MAX_PENDING_TOTAL:5000}
   retry-initial-backoff: ${TRANSCRIPT_SAVE_RETRY_INITIAL_BACKOFF:1s}
+  retry-max-backoff: ${TRANSCRIPT_SAVE_RETRY_MAX_BACKOFF:5s}
   retry-max-duration: ${TRANSCRIPT_SAVE_RETRY_MAX_DURATION:60s}
   executor:
     core-pool-size: ${TRANSCRIPT_SAVE_EXECUTOR_CORE_POOL_SIZE:4}

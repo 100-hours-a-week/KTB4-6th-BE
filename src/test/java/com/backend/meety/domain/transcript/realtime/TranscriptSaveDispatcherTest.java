@@ -311,13 +311,46 @@ class TranscriptSaveDispatcherTest {
         assertThat(finalized).hasValue(1);
     }
 
+    @Test
+    @DisplayName("재시도 간격은 최대 간격을 넘지 않아 DB가 복구되면 곧바로 저장을 재개한다")
+    void retryBackoffIsCappedSoSaveResumesSoonAfterRecovery() {
+        // given
+        long recoverAfterNanos = TimeUnit.MILLISECONDS.toNanos(200);
+        long[] firstAttemptAt = {0L};
+        long[] savedAt = {0L};
+        doAnswer(call -> {
+            long now = System.nanoTime();
+            if (firstAttemptAt[0] == 0L) {
+                firstAttemptAt[0] = now;
+            }
+            if (now - firstAttemptAt[0] < recoverAfterNanos) {
+                throw new CannotCreateTransactionException("Connection is not available");
+            }
+            savedAt[0] = now;
+            return null;
+        }).when(transcriptService).saveFinalSegment(any());
+        TranscriptSaveDispatcher dispatcher = new TranscriptSaveDispatcher(workers,
+                new TranscriptSaveProperties(500, 5000, Duration.ofMillis(10), Duration.ofMillis(20), Duration.ofSeconds(3)),
+                transcriptService);
+
+        // when
+        dispatcher.submitSave(message(88L, 1L));
+
+        // then
+        awaitIdle(dispatcher);
+        long resumedAfterRecoveryMillis =
+                TimeUnit.NANOSECONDS.toMillis(savedAt[0] - firstAttemptAt[0] - recoverAfterNanos);
+        assertThat(resumedAfterRecoveryMillis).isLessThan(60);
+    }
+
     private TranscriptSaveDispatcher dispatcher(int perRecording, int total, Duration retryMaxDuration) {
         return new TranscriptSaveDispatcher(workers, properties(perRecording, total, retryMaxDuration),
                 transcriptService);
     }
 
     private static TranscriptSaveProperties properties(int perRecording, int total, Duration retryMaxDuration) {
-        return new TranscriptSaveProperties(perRecording, total, Duration.ofMillis(5), retryMaxDuration);
+        return new TranscriptSaveProperties(perRecording, total, Duration.ofMillis(5), Duration.ofSeconds(1),
+                retryMaxDuration);
     }
 
     private static AiTranscriptSegmentMessage message(Long recordingSessionId, Long sequenceNumber) {

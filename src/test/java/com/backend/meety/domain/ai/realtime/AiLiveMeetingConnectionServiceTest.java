@@ -65,7 +65,7 @@ class AiLiveMeetingConnectionServiceTest {
             objectMapper,
             readyEvents::add,
             new TranscriptSaveDispatcher(Runnable::run,
-                    new TranscriptSaveProperties(500, 5000, Duration.ofMillis(1), Duration.ZERO),
+                    new TranscriptSaveProperties(500, 5000, Duration.ofMillis(1), Duration.ofMillis(1), Duration.ZERO),
                     transcriptService),
             ownerService,
             meetingParticipantRepository,
