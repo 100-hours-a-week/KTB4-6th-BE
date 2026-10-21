@@ -1,6 +1,7 @@
 package com.backend.meety.domain.ai.realtime;
 
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
+import com.backend.meety.domain.recording.realtime.RealtimeFailureReason;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.socket.CloseStatus;
@@ -31,10 +32,12 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
+        if (!connectionService.isCurrent(connection)) { return; }
         try {
             JsonNode root = objectMapper.readTree(message.getPayload());
+            if (!root.isObject()) { throw new IllegalArgumentException("AI message must be an object"); }
             String type = root.path("type").asText();
-            if (!connectionService.isCurrent(connection)) { return; }
+            if (type.isBlank()) { throw new IllegalArgumentException("AI message type is missing"); }
             if ("audio.ack".equals(type)) {
                 connectionService.receiveAudioAck(connection, root);
                 return;
@@ -42,6 +45,15 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
             if ("heartbeat.pong".equals(type)) {
                 connectionService.receiveHeartbeatPong(connection, root);
                 return;
+            }
+            if ((root.has("recordingSessionId") && !String.valueOf(connection.recordingSessionId())
+                    .equals(root.path("recordingSessionId").asText()))
+                    || (root.has("meetingId") && !String.valueOf(connection.meetingId()).equals(root.path("meetingId").asText()))) {
+                if (connection.owner() == null || connection.isStopRequested()) {
+                    log.warn("시작 전/정상 STOP의 불일치 AI 응답을 무시합니다. recordingSessionId={}", connection.recordingSessionId());
+                    return;
+                }
+                throw new IllegalArgumentException("AI payload session identity mismatch");
             }
             log.info("AI 메시지 수신: {}", message.getPayload());
             if (SESSION_READY.equals(type)) {
@@ -61,13 +73,15 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                 return;
             }
             if (ERROR.equals(type)) {
+                if (connection.isStopRequested()) { cleanup(); return; }
                 log.warn("AI WebSocket error 이벤트를 수신했습니다. recordingSessionId={}, requestId={}, code={}, retryable={}",
                         connection.recordingSessionId(),
                         root.path("requestId").asText(),
                         root.path("payload").path("code").asText(),
                         root.path("payload").path("retryable").asText());
-                if (connection.isRecoveryConnection()) { connectionService.recoverableFailure(connection, "AI_RECOVERY_PROTOCOL_FAILURE"); }
-                else { cleanup(); }
+                if (root.path("payload").path("retryable").asBoolean(false)) {
+                    connectionService.recoverableFailure(connection, "AI_PROCESSING_ERROR");
+                } else { connectionService.fatalFailure(connection, RealtimeFailureReason.AI_PROCESSING_ERROR); }
                 return;
             }
             if (TRANSCRIPT_SEGMENT_FINAL.equals(type)) {
@@ -79,9 +93,8 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
         } catch (Exception e) {
             log.warn("AI WebSocket 메시지 처리 중 예외가 발생했습니다. recordingSessionId={}",
                     connection.recordingSessionId(), e);
-            if (connection.isRecoveryConnection()) { connectionService.recoverableFailure(connection, "AI_RECOVERY_PROTOCOL_FAILURE"); }
-            else { cleanup(); }
-            throw e;
+            if (connection.isStopRequested()) { cleanup(); }
+            else { connectionService.fatalFailure(connection, RealtimeFailureReason.AI_INBOUND_PROCESSING_FAILED); }
         }
     }
 
@@ -132,8 +145,18 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
             log.debug("STOP_SENT 상태에서 AI transcript를 처리합니다. recordingSessionId={}, sourceSegmentKey={}",
                     connection.recordingSessionId(), message.sourceSegmentKey());
         }
-        connection.enqueueTranscriptIfActive(message.payload().sequenceNumber(),
-                () -> transcriptSaveDispatcher.submitSave(message));
+        String ownerAtSubmission = connection.owner();
+        // Rejection can invoke the failure hook inline. Never enter Fatal cleanup under sendLock.
+        var submitted = new java.util.concurrent.CompletableFuture<Void>();
+        try {
+            connection.enqueueTranscriptIfActive(message.payload().sequenceNumber(),
+                    () -> transcriptSaveDispatcher.submitSave(message, () -> submitted.thenRun(() -> {
+                        try { connectionService.transcriptFailure(connection, ownerAtSubmission); }
+                        catch (RuntimeException e) {
+                            log.error("전사 최종 실패의 Fatal 전달 실패. recordingSessionId={}", connection.recordingSessionId(), e);
+                        }
+                    })));
+        } finally { submitted.complete(null); }
     }
 
     private void handleSessionPaused(JsonNode root) {

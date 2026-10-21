@@ -2,6 +2,7 @@ package com.backend.meety.domain.recording.realtime;
 
 import com.backend.meety.domain.meeting.realtime.MeetingSsePublisher;
 import com.backend.meety.domain.recording.event.RecordingCompletedEvent;
+import com.backend.meety.domain.recording.event.RecordingFailedEvent;
 import com.backend.meety.domain.recording.event.RecordingPausedEvent;
 import com.backend.meety.domain.recording.event.RecordingResumedEvent;
 import com.backend.meety.domain.recording.event.RecordingStartedEvent;
@@ -53,5 +54,12 @@ public class RecordingSseEventListener {
         ssePublisher.broadcast(meetingId, eventName, payload);
         log.debug("Recording SSE 발행 완료. meetingId={}, recordingSessionId={}, event={}",
                 meetingId, recordingSessionId, eventName);
+    }
+
+    @Order(0)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void broadcastFailed(RecordingFailedEvent event) {
+        ssePublisher.broadcast(event.meetingId(), "RECORDING_FAILED",
+                new RecordingFailedSseEvent("RECORDING_FAILED", event.recordingSessionId(), event.reason()));
     }
 }

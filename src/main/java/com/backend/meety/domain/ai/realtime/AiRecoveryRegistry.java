@@ -106,6 +106,10 @@ public class AiRecoveryRegistry {
 
     public int count() { return contexts.size(); }
 
+    public boolean hasDifferentGeneration(Long id, String generation) {
+        return find(id).filter(context -> !context.generation.equals(generation)).isPresent();
+    }
+
     public void remove(Context context) {
         synchronized (context) {
             context.cancelled = true;
