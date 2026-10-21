@@ -9,6 +9,11 @@ import com.backend.meety.domain.recording.event.RecordingCompletedEvent;
 import com.backend.meety.domain.recording.owner.RecordingCommand;
 import com.backend.meety.domain.recording.owner.RecordingCommandDispatch;
 import com.backend.meety.domain.recording.owner.RecordingOwnerService;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveProperties;
+import com.backend.meety.domain.transcript.service.TranscriptService;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Duration;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,7 +27,12 @@ class AiLiveMeetingStopListenerTest {
 
     private final RecordingOwnerService ownerService = mock(RecordingOwnerService.class);
     private final List<Object> publishedEvents = new ArrayList<>();
-    private final AiLiveMeetingStopListener listener = new AiLiveMeetingStopListener(ownerService, publishedEvents::add);
+    private final List<Runnable> queuedRunners = new ArrayList<>();
+    private final TranscriptSaveDispatcher dispatcher = new TranscriptSaveDispatcher(queuedRunners::add,
+            new TranscriptSaveProperties(500, 5000, Duration.ofMillis(1), Duration.ZERO),
+            mock(TranscriptService.class), new SimpleMeterRegistry());
+    private final AiLiveMeetingStopListener listener =
+            new AiLiveMeetingStopListener(ownerService, publishedEvents::add, dispatcher);
 
     @Test
     @DisplayName("녹음 종료가 커밋되면 Owner 서버로 STOP 명령을 보낸다")
@@ -36,12 +46,22 @@ class AiLiveMeetingStopListenerTest {
     }
 
     @Test
-    @DisplayName("Owner가 없으면 요청 서버가 전사 확정 이벤트를 바로 발행한다")
-    void publishesTranscriptFinalizedWhenOwnerAbsent() {
+    @DisplayName("Owner가 없으면 전사 저장 큐를 거쳐 전사 확정 이벤트를 발행한다")
+    void publishesTranscriptFinalizedThroughSaveQueueWhenOwnerAbsent() {
+        // 테스트 목적:
+        // Owner가 사라져도 같은 서버 큐에 남은 전사 저장 뒤에 요약 등록이 실행되도록
+        // 확정 이벤트가 바로 발행되지 않고 전사 저장 큐를 거치는지 검증한다.
+
+        // given
         when(ownerService.dispatch(88L, RecordingCommand.STOP)).thenReturn(RecordingCommandDispatch.NO_OWNER);
 
+        // when
         listener.stopAiLiveMeeting(new RecordingCompletedEvent(42L, 88L));
 
+        // then
+        Assertions.assertThat(publishedEvents).isEmpty();
+        Assertions.assertThat(queuedRunners).hasSize(1);
+        queuedRunners.forEach(Runnable::run);
         Assertions.assertThat(publishedEvents)
                 .containsExactly(new MeetingTranscriptFinalizedEvent(42L, 88L));
     }

@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-import com.backend.meety.domain.transcript.service.TranscriptService;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
@@ -40,7 +40,7 @@ class AiHeartbeatSchedulerIntegrationTest {
                 new AiHeartbeatProperties(Duration.ofMillis(20), Duration.ofSeconds(2), 2),
                 new AiRequestIdGenerator(), mapper, Clock.systemUTC(), metrics, events::add);
         var bridge = mock(AiLiveMeetingConnectionService.class);
-        var inbound = new AiLiveMeetingInboundHandler(connection, bridge, mapper, mock(TranscriptService.class));
+        var inbound = new AiLiveMeetingInboundHandler(connection, bridge, mapper, mock(TranscriptSaveDispatcher.class));
         var socket = mock(WebSocketSession.class);
         var responses = new CountDownLatch(2);
         var failure = new AtomicReference<Throwable>();
