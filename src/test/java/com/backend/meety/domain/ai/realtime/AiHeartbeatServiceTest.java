@@ -571,6 +571,7 @@ class AiHeartbeatServiceTest {
         // AI 메시지 분기에서 pong을 ACK나 일반 메시지 처리와 혼동하지 않는지 검증한다.
         // given
         var connectionService = mock(AiLiveMeetingConnectionService.class);
+        when(connectionService.isCurrent(connection)).thenReturn(true);
         var inbound = new AiLiveMeetingInboundHandler(connection, connectionService, mapper, mock(TranscriptSaveDispatcher.class));
         String json = "{\"type\":\"heartbeat.pong\",\"requestId\":\"hb-a\",\"recordingSessionId\":\"88\"}";
         // when

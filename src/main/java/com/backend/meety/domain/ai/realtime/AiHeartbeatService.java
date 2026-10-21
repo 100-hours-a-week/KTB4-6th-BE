@@ -56,7 +56,7 @@ public class AiHeartbeatService {
         }
     }
 
-    private void process(AiLiveMeetingConnection connection) {
+    public void process(AiLiveMeetingConnection connection) {
         var result = connection.heartbeatTick(mapper, properties, clock, requestIds::heartbeatRequestId,
                 () -> isCurrent(connection));
         if (result.pingSent()) {
@@ -100,6 +100,10 @@ public class AiHeartbeatService {
                 () -> isCurrent(connection));
         if (result == AiLiveMeetingConnection.PongResult.ACCEPTED) {
             pongs.increment();
+            if (connection.isRecoveryConnection()) {
+                events.publishEvent(new com.backend.meety.domain.ai.event.AiRecoveryProgressEvent(
+                        connection.recordingSessionId(), connection.sessionStartRequestId()));
+            }
             log.debug("AI heartbeat.pong 수신. recordingSessionId={}, requestId={}",
                     connection.recordingSessionId(), requestId.asText());
         } else {

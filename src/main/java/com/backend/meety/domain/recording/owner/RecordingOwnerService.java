@@ -26,7 +26,7 @@ public class RecordingOwnerService {
                     recordingSessionId, owner, e);
             return false;
         }
-        aiConnectionRegistry.find(recordingSessionId).ifPresent(connection -> connection.assignOwner(owner));
+        aiConnectionRegistry.assignOwner(recordingSessionId, owner);
         log.info("녹음 세션 Owner를 기록했습니다. recordingSessionId={}, owner={}", recordingSessionId, owner);
         return true;
     }

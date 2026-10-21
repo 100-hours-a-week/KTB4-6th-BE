@@ -9,6 +9,9 @@ import org.springframework.data.repository.query.Param;
 
 public interface TranscriptSegmentRepository extends JpaRepository<TranscriptSegment, Long> {
 
+    @Query("select max(s.sequenceNumber) from TranscriptSegment s where s.meeting.id = :meetingId")
+    Long findMaxSequenceNumber(@Param("meetingId") Long meetingId);
+
     boolean existsBySourceSegmentKey(String sourceSegmentKey);
 
     boolean existsByMeetingId(Long meetingId);

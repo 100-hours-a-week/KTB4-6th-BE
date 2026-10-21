@@ -34,6 +34,7 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
         try {
             JsonNode root = objectMapper.readTree(message.getPayload());
             String type = root.path("type").asText();
+            if (!connectionService.isCurrent(connection)) { return; }
             if ("audio.ack".equals(type)) {
                 connectionService.receiveAudioAck(connection, root);
                 return;
@@ -65,7 +66,8 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                         root.path("requestId").asText(),
                         root.path("payload").path("code").asText(),
                         root.path("payload").path("retryable").asText());
-                cleanup();
+                if (connection.isRecoveryConnection()) { connectionService.recoverableFailure(connection, "AI_RECOVERY_PROTOCOL_FAILURE"); }
+                else { cleanup(); }
                 return;
             }
             if (TRANSCRIPT_SEGMENT_FINAL.equals(type)) {
@@ -77,7 +79,8 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
         } catch (Exception e) {
             log.warn("AI WebSocket 메시지 처리 중 예외가 발생했습니다. recordingSessionId={}",
                     connection.recordingSessionId(), e);
-            cleanup();
+            if (connection.isRecoveryConnection()) { connectionService.recoverableFailure(connection, "AI_RECOVERY_PROTOCOL_FAILURE"); }
+            else { cleanup(); }
             throw e;
         }
     }
@@ -91,14 +94,15 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
             log.info("AI WebSocket이 종료되었습니다. recordingSessionId={}, state={}, closeStatus={}",
                     connection.recordingSessionId(), connection.state(), status);
         }
-        cleanup();
+        if (connection.state() == AiLiveMeetingConnectionState.STOP_SENT) { cleanup(); }
+        else { connectionService.recoverableFailure(connection, "AI_UNEXPECTED_CLOSE"); }
     }
 
     @Override
     public void handleTransportError(WebSocketSession session, Throwable exception) {
         log.warn("AI WebSocket transport 오류가 발생했습니다. recordingSessionId={}",
                 connection.recordingSessionId(), exception);
-        cleanup();
+        connectionService.recoverableFailure(connection, "AI_TRANSPORT_ERROR");
     }
 
     private void handleSessionReady(JsonNode root) {
@@ -128,7 +132,8 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
             log.debug("STOP_SENT 상태에서 AI transcript를 처리합니다. recordingSessionId={}, sourceSegmentKey={}",
                     connection.recordingSessionId(), message.sourceSegmentKey());
         }
-        transcriptSaveDispatcher.submitSave(message);
+        connection.enqueueTranscriptIfActive(message.payload().sequenceNumber(),
+                () -> transcriptSaveDispatcher.submitSave(message));
     }
 
     private void handleSessionPaused(JsonNode root) {

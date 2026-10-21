@@ -22,4 +22,28 @@ public class StandardAiLiveMeetingWebSocketClient implements AiLiveMeetingWebSoc
             throw e;
         }
     }
+
+    @Override
+    public WebSocketSession connect(WebSocketHandler handler, URI uri, java.time.Duration timeout) {
+        var future = webSocketClient.execute(handler, uri.toString());
+        try {
+            return future.get(Math.max(1, timeout.toMillis()), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            closeLateConnection(future);
+            throw new CompletionException(e);
+        } catch (java.util.concurrent.TimeoutException e) {
+            closeLateConnection(future);
+            throw new CompletionException(e);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new CompletionException(e.getCause());
+        }
+    }
+
+    private void closeLateConnection(java.util.concurrent.CompletableFuture<WebSocketSession> future) {
+        future.thenAccept(session -> {
+            try { session.close(); }
+            catch (Exception e) { org.slf4j.LoggerFactory.getLogger(getClass()).warn("늦게 연결된 AI socket close 실패", e); }
+        });
+    }
 }
