@@ -164,14 +164,15 @@ STOP/cleanup/Owner 변경은 명시적 취소이므로 retry하지 않는다.
 외부 DB/Redis/소켓 write/close 및 기존 sendLock 대기는 엄격한 5초 I/O deadline이 아니다.
 특히 기존 FE send나 동기 외부 I/O가 오래 걸리면 검사/제어가 지연될 수 있다.
 worker가 완전히 포화/종료돼 물리 cleanup 제출도 거절되면 로그가 남고 물리 자원 정리가 지연될 수 있다.
-이 상태의 DB/FE 종료와 최종 자원 정리는 #317 consumer에서 연결해야 한다.
+이 상태의 DB/FE 종료는 #317 consumer가 처리한다. 외부 I/O 자체가 block되는 경우의 자원 정리 지연은 남는다.
 
 ## #317 진입점과 관측
 
 `AiRecoveryExhaustedEvent`에 세션 ID, Recovery generation, Owner token, 마지막 session.start requestId,
-attempt 수와 실패 원인을 담는다. #317 consumer는 최신 Owner/세대를 재검증한 뒤 Fatal 정책을 적용해야 한다.
-현재 #317 구현이 없어 Recording FAILED, 회의 종료, 크레딧/요약 후처리, FE 강제 종료는 구현하지 않았다.
-따라서 exhausted 이벤트만으로 녹음 DB 상태가 바뀌지는 않는다.
+attempt 수와 최초 장애 원인을 담는다. #317의 RealtimeFatalFailureService가 최신 Owner/세대를 재검증하고
+Recording FAILED를 확정한 뒤 AFTER_COMMIT에서 runtime/FE/Owner를 정리하고 참가자 SSE를 전파한다.
+추가 확정 정책으로 Fatal 시 Meeting COMPLETED와 실제 녹음 비용 전액 보상을 같은 transaction에서 처리한다.
+정상 녹음 완료/전사 확정 이벤트는 발행하지 않아 자동 요약은 시작하지 않는다. 상세 내용은 `realtime-fatal-failure.md`를 참고한다.
 
 Micrometer counter (sessionId/generation/requestId tag 없음):
 
@@ -228,4 +229,4 @@ Micrometer counter (sessionId/generation/requestId tag 없음):
   이 기준을 임의로 완화하지 않았다. 실제 FE 버퍼 보존/PAUSED replay 정책을 양쪽으로 검증해야 한다.
 - 정상 무음, 대규모 buffer replay, Owner BE 변경 및 process 종료 후 새 Owner의 별도 복구를 검증.
 - Owner BE 종료 시 메모리의 큐 수락 순번은 승계하지 않는다. 비동기 Dispatcher의 영속 큐/무손실 처리는 이번 범위가 아니다.
-- #317 Fatal consumer 연결과 Owner/세대 fencing, 최종 FE/DB/자원 정리 검증.
+- 실제 FE/AI와 #317 Fatal consumer의 최종 오류 UI 및 참가자 상태 동기화 통합 검증.

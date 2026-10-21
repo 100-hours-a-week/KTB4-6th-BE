@@ -2,6 +2,7 @@ package com.backend.meety.domain.credit.repository;
 
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -10,6 +11,8 @@ import org.springframework.data.repository.query.Param;
 public interface CreditLedgerRepository extends JpaRepository<CreditLedger, Long> {
 
     boolean existsByIdempotencyKey(String idempotencyKey);
+
+    Optional<CreditLedger> findByIdempotencyKeyAndDeletedAtIsNull(String idempotencyKey);
 
     @Query("""
             select l

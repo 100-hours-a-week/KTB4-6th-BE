@@ -341,7 +341,7 @@ public class AiRecoveryService {
         }
         try {
             events.publishEvent(new AiRecoveryExhaustedEvent(context.recordingSessionId, context.generation,
-                    context.owner, current == null ? null : current.sessionStartRequestId(), context.attempt, reason));
+                    context.owner, current == null ? null : current.sessionStartRequestId(), context.attempt, context.reason));
         } catch (RuntimeException e) {
             log.error("AI recovery Fatal consumer 실패. recordingSessionId={}", context.recordingSessionId, e);
         }

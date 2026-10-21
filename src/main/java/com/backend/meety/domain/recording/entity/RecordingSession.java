@@ -107,6 +107,17 @@ public class RecordingSession extends BaseEntity {
         totalPausedDurationMs += Duration.between(pausedAt, now).toMillis();
     }
 
+    public void fail(LocalDateTime now) {
+        if (status != RecordingSessionStatus.PREPARING && status != RecordingSessionStatus.RECORDING
+                && status != RecordingSessionStatus.PAUSED) {
+            throw new RecordingException(RecordingErrorCode.INVALID_RECORDING_STATUS_TRANSITION);
+        }
+        if (status == RecordingSessionStatus.PAUSED) { accumulateCurrentPause(now); }
+        status = RecordingSessionStatus.FAILED;
+        pausedAt = null;
+        endedAt = now;
+    }
+
     private void requireStatus(RecordingSessionStatus expected) {
         if (status != expected) {
             throw new RecordingException(RecordingErrorCode.INVALID_RECORDING_STATUS_TRANSITION);

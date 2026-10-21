@@ -124,6 +124,44 @@ public class AiLiveMeetingConnectionService {
         registry.find(recordingSessionId).ifPresent(this::cleanup);
     }
 
+    public void closeForFatal(Long recordingSessionId, String owner) {
+        registry.find(recordingSessionId).filter(connection -> owner.equals(connection.owner()))
+                .ifPresent(connection -> {
+                    connection.requestStop();
+                    connection.fenceForRecovery();
+                });
+        recoveries.find(recordingSessionId).filter(context -> owner.equals(context.owner)).ifPresent(context -> {
+            synchronized (context) {
+                if (context.current != null && owner.equals(context.current.owner())) {
+                    context.current.requestStop();
+                    context.current.fenceForRecovery();
+                }
+                recoveries.remove(context);
+            }
+        });
+        registry.find(recordingSessionId).filter(connection -> owner.equals(connection.owner())).ifPresent(this::cleanup);
+    }
+
+    public boolean hasDifferentOwner(Long recordingSessionId, String owner) {
+        return registry.find(recordingSessionId).filter(connection -> !owner.equals(connection.owner())).isPresent();
+    }
+
+    void fatalFailure(AiLiveMeetingConnection connection,
+                      com.backend.meety.domain.recording.realtime.RealtimeFailureReason reason) {
+        if (!isCurrent(connection) || connection.isStopRequested()) { return; }
+        if (connection.owner() == null) { cleanup(connection); return; }
+        eventPublisher.publishEvent(new com.backend.meety.domain.ai.event.AiFatalFailureEvent(
+                connection.recordingSessionId(), connection.owner(), connection.sessionStartRequestId(), reason));
+    }
+
+    void transcriptFailure(AiLiveMeetingConnection connection, String ownerAtSubmission) {
+        if (ownerAtSubmission != null) {
+            eventPublisher.publishEvent(new com.backend.meety.domain.ai.event.AiFatalFailureEvent(
+                    connection.recordingSessionId(), ownerAtSubmission, null,
+                    com.backend.meety.domain.recording.realtime.RealtimeFailureReason.TRANSCRIPT_PROCESSING_FAILED));
+        }
+    }
+
     public boolean awaitStreamable(Long recordingSessionId) {
         AiLiveMeetingConnection connection = openConnection(recordingSessionId).orElse(null);
         if (connection == null) {

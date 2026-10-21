@@ -71,4 +71,17 @@ class TeamCreditTest {
 
         assertThat(credit.getBalance()).isEqualTo(7L);
     }
+
+    @Test
+    @DisplayName("차감 보상은 정기 적립 상한과 무관하게 전액 복원한다")
+    void restoreIsNotCapped() {
+        // 테스트 목적:
+        // 장애 보상을 프로모션 적립으로 취급해 일부 금액을 버리지 않는지 검증한다.
+        // given
+        TeamCredit credit = TeamCredit.create(TEAM, TestCreditPolicy.MAX_BALANCE, TestCreditPolicy.MAX_BALANCE);
+        // when
+        credit.restore(20L);
+        // then
+        assertThat(credit.getBalance()).isEqualTo(TestCreditPolicy.MAX_BALANCE + 20L);
+    }
 }

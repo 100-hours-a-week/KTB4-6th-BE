@@ -123,4 +123,9 @@ public class CreditLedger extends BaseEntity {
         return create(team, CreditTransactionType.USE, CreditSourceType.RECORDING,
                 recordingSessionId, amount, balanceAfter);
     }
+
+    public static CreditLedger restoreForRecording(Team team, Long recordingSessionId, long amount, long balanceAfter) {
+        return create(team, CreditTransactionType.RESTORE, CreditSourceType.RECORDING,
+                recordingSessionId, amount, balanceAfter);
+    }
 }

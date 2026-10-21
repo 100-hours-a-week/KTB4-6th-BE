@@ -626,11 +626,15 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     @Test
-    @DisplayName("녹음 중 AI 오류로 정리되면 Owner를 해제하지 않는다")
+    @DisplayName("녹음 중 retry 가능한 AI 오류는 Owner를 유지한 채 기존 Recovery 진입점으로 전달한다")
     void keepsOwnerWhenAiErrorDuringRecording() throws Exception {
+        // 테스트 목적:
+        // retry 가능한 오류를 즉시 종료하지 않고 공통 Recovery가 판단하도록 위임하는지 검증한다.
+        // given
         AiLiveMeetingConnection connection = readyConnection();
         connection.assignOwner("server-a:1");
 
+        // when
         client.receive("""
                 {
                   "type": "error",
@@ -643,7 +647,11 @@ class AiLiveMeetingConnectionServiceTest {
                 }
                 """);
 
-        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.CLOSED);
+        // then
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.READY);
+        assertThat(registry.find(88L)).contains(connection);
+        assertThat(readyEvents).contains(new com.backend.meety.domain.ai.event.AiRecoverableFailureEvent(
+                88L, connection.sessionStartRequestId(), "AI_PROCESSING_ERROR"));
         verify(ownerService, never()).release(anyLong(), anyString());
     }
 

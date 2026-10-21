@@ -41,13 +41,20 @@ public class TranscriptSaveDispatcher {
     }
 
     public boolean submitSave(AiTranscriptSegmentMessage message) {
-        String rejection = enqueue(message.recordingSessionId(), () -> runWithRetry("전사 저장", message.recordingSessionId(),
-                message.sourceSegmentKey(), () -> transcriptService.saveFinalSegment(message)));
+        return submitSave(message, () -> { });
+    }
+
+    public boolean submitSave(AiTranscriptSegmentMessage message, Runnable onFailure) {
+        String rejection = enqueue(message.recordingSessionId(), () -> {
+            if (!runWithRetry("전사 저장", message.recordingSessionId(),
+                    message.sourceSegmentKey(), () -> transcriptService.saveFinalSegment(message))) { onFailure.run(); }
+        });
         if (rejection == null) {
             return true;
         }
         log.error("전사 저장 요청을 거절해 전사가 유실됩니다. reason={}, recordingSessionId={}, sourceSegmentKey={}",
                 rejection, message.recordingSessionId(), message.sourceSegmentKey());
+        onFailure.run();
         return false;
     }
 
@@ -113,7 +120,7 @@ public class TranscriptSaveDispatcher {
         }
     }
 
-    private void runWithRetry(String taskName, Long recordingSessionId, String sourceSegmentKey, Runnable action) {
+    private boolean runWithRetry(String taskName, Long recordingSessionId, String sourceSegmentKey, Runnable action) {
         long startedAt = System.nanoTime();
         long deadline = startedAt + properties.retryMaxDuration().toNanos();
         Duration backoff = properties.retryInitialBackoff();
@@ -126,25 +133,25 @@ public class TranscriptSaveDispatcher {
                             taskName, recordingSessionId, sourceSegmentKey, attempt,
                             TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt));
                 }
-                return;
+                return true;
             } catch (RuntimeException e) {
                 if (!isRetryable(e)) {
                     log.error("{}에 실패했습니다. 재시도하지 않습니다. recordingSessionId={}, sourceSegmentKey={}",
                             taskName, recordingSessionId, sourceSegmentKey, e);
-                    return;
+                    return false;
                 }
                 long remainingNanos = deadline - System.nanoTime();
                 if (remainingNanos <= 0) {
                     log.error("{} 재시도 한도를 넘겨 포기합니다. recordingSessionId={}, sourceSegmentKey={}, attempts={}",
                             taskName, recordingSessionId, sourceSegmentKey, attempt, e);
-                    return;
+                    return false;
                 }
                 log.warn("{}에 실패해 재시도합니다. recordingSessionId={}, sourceSegmentKey={}, attempt={}, cause={}",
                         taskName, recordingSessionId, sourceSegmentKey, attempt, e.toString());
                 if (!sleep(Math.min(backoff.toNanos(), remainingNanos))) {
                     log.error("{} 재시도가 중단돼 포기합니다. recordingSessionId={}, sourceSegmentKey={}",
                             taskName, recordingSessionId, sourceSegmentKey);
-                    return;
+                    return false;
                 }
                 Duration doubled = backoff.multipliedBy(2);
                 backoff = doubled.compareTo(properties.retryMaxBackoff()) > 0 ? properties.retryMaxBackoff() : doubled;
