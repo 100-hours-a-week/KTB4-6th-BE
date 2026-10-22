@@ -1,6 +1,7 @@
 package com.backend.meety.domain.ai.realtime;
 
 import com.backend.meety.domain.ai.event.AiHeartbeatTimeoutEvent;
+import com.backend.meety.global.config.SchedulingConfig;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
@@ -44,7 +45,7 @@ public class AiHeartbeatService {
         sendFailures = metrics.counter("ai.heartbeat.send.failures");
     }
 
-    @Scheduled(fixedDelayString = "${ai.heartbeat.interval}")
+    @Scheduled(fixedDelayString = "${ai.heartbeat.interval}", scheduler = SchedulingConfig.CONNECTION_TASK_SCHEDULER_BEAN_NAME)
     public void tick() {
         for (var connection : connections.findAll()) {
             try {
