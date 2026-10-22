@@ -27,6 +27,12 @@ public class AiHttpClientConfig {
         return build(aiHttpUrl, DIARIZATION_READ_TIMEOUT);
     }
 
+    @Bean
+    public RestClient prewarmRestClient(@Value("${ai.stt.prewarm.http-url}") String aiHttpUrl,
+                                       SttPrewarmProperties properties) {
+        return build(aiHttpUrl, properties.readTimeout());
+    }
+
     private RestClient build(String baseUrl, Duration readTimeout) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(AI_CONNECT_TIMEOUT);
