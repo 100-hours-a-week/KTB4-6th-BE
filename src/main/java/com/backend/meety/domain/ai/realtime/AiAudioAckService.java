@@ -5,6 +5,7 @@ import com.backend.meety.domain.recording.realtime.AudioAckMessage;
 import com.backend.meety.domain.recording.realtime.AudioSequenceRepository;
 import com.backend.meety.domain.recording.realtime.AudioStreamState;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketRegistry;
+import com.backend.meety.global.config.SchedulingConfig;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -139,7 +140,7 @@ public class AiAudioAckService {
         }
     }
 
-    @Scheduled(fixedDelayString = "${ai.audio-ack.poll-delay}")
+    @Scheduled(fixedDelayString = "${ai.audio-ack.poll-delay}", scheduler = SchedulingConfig.CONNECTION_TASK_SCHEDULER_BEAN_NAME)
     public void detectTimeouts() {
         for (var connection : connections.findAll()) {
             AtomicReference<AiLiveMeetingConnection.AckSnapshot> detected = new AtomicReference<>();
