@@ -90,7 +90,7 @@ public class MeetingService {
                 request.title(),
                 request.purpose(),
                 request.note(),
-                LocalDateTime.now(clock.withZone(KST_ZONE_ID)),
+                request.scheduledAt(),
                 request.targetDurationMinutes()
         );
 
@@ -150,7 +150,7 @@ public class MeetingService {
     }
 
     private void validateDailyMeetingLimit(Long teamId) {
-        LocalDate today = LocalDate.now(KST_ZONE_ID);
+        LocalDate today = LocalDate.now(clock.withZone(KST_ZONE_ID));
         LocalDateTime startOfDay = today.atStartOfDay();
         LocalDateTime nextDay = today.plusDays(1).atStartOfDay();
 
