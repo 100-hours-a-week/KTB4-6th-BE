@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
+import com.backend.meety.global.config.SchedulingConfig;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
@@ -17,9 +18,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import tools.jackson.databind.ObjectMapper;
@@ -86,5 +89,10 @@ class AiHeartbeatSchedulerIntegrationTest {
 
     @Configuration(proxyBeanMethods = false)
     @EnableScheduling
-    static class Scheduling { }
+    static class Scheduling {
+        @Bean(name = SchedulingConfig.CONNECTION_TASK_SCHEDULER_BEAN_NAME)
+        ThreadPoolTaskScheduler connectionTaskScheduler() {
+            return new ThreadPoolTaskScheduler();
+        }
+    }
 }
