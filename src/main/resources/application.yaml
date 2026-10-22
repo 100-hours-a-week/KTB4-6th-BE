@@ -78,6 +78,12 @@ chat:
     queue-capacity: ${CHAT_EXECUTOR_QUEUE_CAPACITY:1000}
 
 ai:
+  stt:
+    prewarm:
+      http-url: ${AI_STT_PREWARM_HTTP_URL:${ai.http-url}}
+      scheduler-delay: ${AI_STT_PREWARM_SCHEDULER_DELAY:10s}
+      lookahead: ${AI_STT_PREWARM_LOOKAHEAD:1m}
+      read-timeout: ${AI_STT_PREWARM_READ_TIMEOUT:3s}
   recovery:
     max-attempts: ${AI_RECOVERY_MAX_ATTEMPTS:2}
     attempt-timeout: ${AI_RECOVERY_ATTEMPT_TIMEOUT:5s}

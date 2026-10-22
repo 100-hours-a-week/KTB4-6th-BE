@@ -35,6 +35,27 @@ class MeetingRepositoryTest {
     }
 
     @Test
+    @DisplayName("STT prewarm 대상은 DB에서 WAITING·미삭제·예정 시각 반열린 구간으로 조회한다")
+    void findWaitingForPrewarmUsesDatabaseRange() throws NoSuchMethodException {
+        // 테스트 목적:
+        // 전체 회의를 가져와 Java에서 필터링하지 않고 DB 조건으로 prewarm 후보를 제한하는지 검증한다.
+        // given
+        Query query = MeetingRepository.class
+                .getMethod("findWaitingForPrewarm", LocalDateTime.class, LocalDateTime.class)
+                .getAnnotation(Query.class);
+
+        // when
+        String jpql = query.value();
+
+        // then
+        assertThat(jpql).contains("m.status = com.backend.meety.domain.meeting.entity.MeetingStatus.WAITING");
+        assertThat(jpql).contains("m.deletedAt is null");
+        assertThat(jpql).contains("m.scheduledAt >= :fromInclusive");
+        assertThat(jpql).contains("m.scheduledAt < :toExclusive");
+        assertThat(jpql).contains("m.scheduledAt asc, m.id asc");
+    }
+
+    @Test
     @DisplayName("수정/삭제용 회의 조회는 PESSIMISTIC_WRITE lock과 soft delete 조건을 사용한다")
     void findByIdForUpdateAndDeletedAtIsNullUsesPessimisticWriteLock() throws NoSuchMethodException {
         Lock lock = MeetingRepository.class

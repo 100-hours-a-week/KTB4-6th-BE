@@ -36,6 +36,20 @@ public interface MeetingRepository extends JpaRepository<Meeting, Long>, Meeting
     @Query("""
             select m
             from Meeting m
+            where m.status = com.backend.meety.domain.meeting.entity.MeetingStatus.WAITING
+              and m.deletedAt is null
+              and m.scheduledAt >= :fromInclusive
+              and m.scheduledAt < :toExclusive
+            order by m.scheduledAt asc, m.id asc
+            """)
+    List<Meeting> findWaitingForPrewarm(
+            @Param("fromInclusive") LocalDateTime fromInclusive,
+            @Param("toExclusive") LocalDateTime toExclusive
+    );
+
+    @Query("""
+            select m
+            from Meeting m
             join fetch m.team
             join fetch m.createdByTeamMember
             where m.id = :meetingId

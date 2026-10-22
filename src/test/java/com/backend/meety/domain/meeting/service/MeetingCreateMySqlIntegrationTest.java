@@ -202,6 +202,37 @@ class MeetingCreateMySqlIntegrationTest {
         assertThat(count).isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("prewarm 범위 조회는 실제 MySQL에서 미삭제 WAITING 회의만 하한 포함·상한 제외로 정렬한다")
+    void findsOnlyUpcomingWaitingMeetingsForPrewarm() {
+        // 테스트 목적:
+        // #303에서 저장한 예정 시각으로 범위를 조회하고 시작·완료·삭제 회의와 양쪽 경계를 정확히 처리하는지 검증한다.
+        // given
+        LocalDateTime from = TODAY.atTime(14, 59);
+        long before = service.createMeeting(userId, teamId, request(from.minusSeconds(1))).meetingId();
+        long lower = service.createMeeting(userId, teamId, request(from)).meetingId();
+        long later = service.createMeeting(userId, teamId, request(from.plusSeconds(30))).meetingId();
+        long laterTie = service.createMeeting(userId, teamId, request(from.plusSeconds(30))).meetingId();
+        long upper = service.createMeeting(userId, teamId, request(from.plusMinutes(1))).meetingId();
+        long inProgress = service.createMeeting(userId, teamId, request(from.plusSeconds(10))).meetingId();
+        long completed = service.createMeeting(userId, teamId, request(from.plusSeconds(20))).meetingId();
+        long deleted = service.createMeeting(userId, teamId, request(from.plusSeconds(5))).meetingId();
+        transaction.executeWithoutResult(status -> {
+            entityManager.find(Meeting.class, inProgress).start(CREATED_AT);
+            Meeting ended = entityManager.find(Meeting.class, completed);
+            ended.start(CREATED_AT);
+            ended.complete(CREATED_AT.plusMinutes(1));
+            entityManager.find(Meeting.class, deleted).softDelete(CREATED_AT);
+        });
+
+        // when
+        var ids = meetings.findWaitingForPrewarm(from, from.plusMinutes(1)).stream().map(Meeting::getId).toList();
+
+        // then
+        assertThat(ids).containsExactly(lower, later, laterTie);
+        assertThat(ids).doesNotContain(before, upper, inProgress, completed, deleted);
+    }
+
     @RepeatedTest(3)
     @DisplayName("실제 MySQL에서 남은 한 자리에 동시 생성해도 Team 잠금으로 20개를 초과하지 않는다")
     void concurrentCreationRespectsTwentyMeetingLimit() throws Exception {
