@@ -58,7 +58,7 @@ class NotificationServiceTest {
     void notifyActiveTeamMembersCreatesNotificationForAllActiveMembers() {
         // 테스트 목적:
         // 알림 이벤트가 발생했을 때 해당 팀의 ACTIVE 팀원 전체를 수신자로 조회하고
-        // 각 사용자별 알림 저장을 공통 Writer에 위임하는지 검증한다.
+        // 전체 수신자의 알림 저장을 한 번의 일괄 저장으로 Writer에 위임하는지 검증한다.
 
         // given
         Team team = withId(Team.create("미티팀"), 2L);
@@ -78,12 +78,13 @@ class NotificationServiceTest {
         );
 
         // then
-        ArgumentCaptor<NotificationWriteCommand> captor = ArgumentCaptor.forClass(NotificationWriteCommand.class);
-        verify(notificationWriter, times(2)).create(captor.capture());
-        assertThat(captor.getAllValues())
+        ArgumentCaptor<List<NotificationWriteCommand>> captor = ArgumentCaptor.captor();
+        verify(notificationWriter).createAll(captor.capture());
+        verify(notificationWriter, never()).create(any(NotificationWriteCommand.class));
+        assertThat(captor.getValue())
                 .extracting(NotificationWriteCommand::userId)
                 .containsExactly(1L, 2L);
-        assertThat(captor.getAllValues()).allSatisfy(command -> {
+        assertThat(captor.getValue()).allSatisfy(command -> {
             assertThat(command.teamId()).isEqualTo(2L);
             assertThat(command.type()).isEqualTo(NotificationType.MEETING_STARTED);
             assertThat(command.idempotencyKey()).isEqualTo("MEETING_STARTED:700");
@@ -106,6 +107,8 @@ class NotificationServiceTest {
         when(teamMemberRepository.findAllByTeamIdAndMembershipStatusWithUserAndTeam(
                 2L, MembershipStatus.ACTIVE)).thenReturn(List.of(member));
         doThrow(new DataIntegrityViolationException("uk_notification_user_id_idempotency_key"))
+                .when(notificationWriter).createAll(any());
+        doThrow(new DataIntegrityViolationException("uk_notification_user_id_idempotency_key"))
                 .when(notificationWriter).create(any(NotificationWriteCommand.class));
 
         // when, then
@@ -124,7 +127,7 @@ class NotificationServiceTest {
     void duplicateNotificationSkipsOnlyThatRecipient() {
         // 테스트 목적:
         // ACTIVE 팀원 여러 명에게 알림을 생성하는 중 한 사용자에게만 UNIQUE 충돌이 발생해도
-        // 해당 사용자만 건너뛰고 이후 수신자 알림 생성은 계속되는지 검증한다.
+        // 일괄 저장을 수신자별 저장으로 다시 시도해 해당 사용자만 건너뛰는지 검증한다.
 
         // given
         Team team = withId(Team.create("미티팀"), 2L);
@@ -134,6 +137,8 @@ class NotificationServiceTest {
         TeamMember fourth = member(team, 4L, 13L, "d");
         when(teamMemberRepository.findAllByTeamIdAndMembershipStatusWithUserAndTeam(
                 2L, MembershipStatus.ACTIVE)).thenReturn(List.of(first, second, third, fourth));
+        doThrow(new DataIntegrityViolationException("uk_notification_user_id_idempotency_key"))
+                .when(notificationWriter).createAll(any());
         doAnswer(invocation -> {
             NotificationWriteCommand command = invocation.getArgument(0);
             if (command.userId().equals(3L)) {
@@ -158,6 +163,39 @@ class NotificationServiceTest {
         assertThat(captor.getAllValues())
                 .extracting(NotificationWriteCommand::userId)
                 .containsExactly(1L, 2L, 3L, 4L);
+    }
+
+    @Test
+    @DisplayName("일괄 저장이 중복 외 이유로 실패해도 수신자별로 다시 생성한다")
+    void batchFailureFallsBackToPerRecipientCreate() {
+        // 테스트 목적:
+        // 일괄 저장 트랜잭션이 예상하지 못한 오류로 롤백되어도
+        // 수신자별 저장으로 다시 시도해 알림이 유실되지 않는지 검증한다.
+
+        // given
+        Team team = withId(Team.create("미티팀"), 2L);
+        TeamMember first = member(team, 1L, 10L, "a");
+        TeamMember second = member(team, 2L, 11L, "b");
+        when(teamMemberRepository.findAllByTeamIdAndMembershipStatusWithUserAndTeam(
+                2L, MembershipStatus.ACTIVE)).thenReturn(List.of(first, second));
+        doThrow(new IllegalStateException("batch failed")).when(notificationWriter).createAll(any());
+
+        // when
+        service.notifyActiveTeamMembers(
+                2L,
+                NotificationType.SUMMARY_READY,
+                "SUMMARY_READY:300",
+                NotificationReferenceType.MEETING,
+                100L,
+                "요약이 완료되었습니다"
+        );
+
+        // then
+        ArgumentCaptor<NotificationWriteCommand> captor = ArgumentCaptor.forClass(NotificationWriteCommand.class);
+        verify(notificationWriter, times(2)).create(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(NotificationWriteCommand::userId)
+                .containsExactly(1L, 2L);
     }
 
     @Test
@@ -203,6 +241,15 @@ class NotificationServiceTest {
                 2L, MembershipStatus.ACTIVE)).thenReturn(List.of(first, second));
         Set<String> createdKeys = new HashSet<>();
         doAnswer(invocation -> {
+            List<NotificationWriteCommand> commands = invocation.getArgument(0);
+            for (NotificationWriteCommand command : commands) {
+                if (!createdKeys.add(command.userId() + ":" + command.idempotencyKey())) {
+                    throw new DataIntegrityViolationException("uk_notification_user_id_idempotency_key");
+                }
+            }
+            return null;
+        }).when(notificationWriter).createAll(any());
+        doAnswer(invocation -> {
             NotificationWriteCommand command = invocation.getArgument(0);
             String userEventKey = command.userId() + ":" + command.idempotencyKey();
             if (!createdKeys.add(userEventKey)) {
@@ -230,8 +277,9 @@ class NotificationServiceTest {
                     "10 크레딧이 충전되었습니다"
             );
         }).doesNotThrowAnyException();
+        verify(notificationWriter, times(2)).createAll(any());
         ArgumentCaptor<NotificationWriteCommand> captor = ArgumentCaptor.forClass(NotificationWriteCommand.class);
-        verify(notificationWriter, times(4)).create(captor.capture());
+        verify(notificationWriter, times(2)).create(captor.capture());
         assertThat(captor.getAllValues()).allSatisfy(command ->
                 assertThat(command.idempotencyKey()).isEqualTo("CREDIT_EARNED:EARN:SCHEDULE:2:2026-W40"));
     }
