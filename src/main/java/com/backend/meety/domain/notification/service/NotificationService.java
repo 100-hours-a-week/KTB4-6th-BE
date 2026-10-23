@@ -144,8 +144,16 @@ public class NotificationService {
                 .map(this::toRecipient)
                 .toList();
 
-        for (NotificationRecipient recipient : recipients) {
-            create(recipient, type, idempotencyKey, referenceType, referenceId, bodyFactory.apply(recipient));
+        List<NotificationWriteCommand> commands = recipients.stream()
+                .map(recipient -> new NotificationWriteCommand(recipient.teamId(), recipient.userId(), type,
+                        idempotencyKey, referenceType, referenceId, bodyFactory.apply(recipient)))
+                .toList();
+        try {
+            notificationWriter.createAll(commands);
+        } catch (RuntimeException e) {
+            log.warn("알림 일괄 생성에 실패해 수신자별로 다시 생성합니다. type={}, idempotencyKey={}, recipients={}",
+                    type, idempotencyKey, commands.size(), e);
+            commands.forEach(this::create);
         }
     }
 
@@ -153,22 +161,14 @@ public class NotificationService {
         return new NotificationRecipient(member.getTeam().getId(), member.getUser().getId());
     }
 
-    private void create(
-            NotificationRecipient recipient,
-            NotificationType type,
-            String idempotencyKey,
-            NotificationReferenceType referenceType,
-            Long referenceId,
-            String body
-    ) {
+    private void create(NotificationWriteCommand command) {
         try {
-            notificationWriter.create(new NotificationWriteCommand(
-                    recipient.teamId(), recipient.userId(), type, idempotencyKey, referenceType, referenceId, body));
+            notificationWriter.create(command);
         } catch (DataIntegrityViolationException e) {
-            log.debug("이미 생성된 알림입니다. userId={}, idempotencyKey={}", recipient.userId(), idempotencyKey);
+            log.debug("이미 생성된 알림입니다. userId={}, idempotencyKey={}", command.userId(), command.idempotencyKey());
         } catch (RuntimeException e) {
             log.error("알림 생성에 실패했습니다. userId={}, type={}, idempotencyKey={}",
-                    recipient.userId(), type, idempotencyKey, e);
+                    command.userId(), command.type(), command.idempotencyKey(), e);
         }
     }
 
