@@ -26,7 +26,8 @@ public class TranscriptSseEventListener {
                 event.content(),
                 event.startedAtMs(),
                 event.endedAtMs(),
-                event.recognizedAt()
+                event.recognizedAt(),
+                event.speakerId()
         );
         ssePublisher.broadcast(event.meetingId(), TRANSCRIPT_CREATED_EVENT_NAME, payload);
         log.debug("TRANSCRIPT_CREATED 발행 완료. meetingId={}, transcriptSegmentId={}, sequenceNumber={}",

@@ -93,7 +93,8 @@ public class TranscriptService {
                 savedSegment.getContent(),
                 savedSegment.getStartedAtMs(),
                 savedSegment.getEndedAtMs(),
-                savedSegment.getRecognizedAt()
+                savedSegment.getRecognizedAt(),
+                message.payload().speakerId()
         ));
         log.debug("TranscriptCreatedEvent 발행. transcriptSegmentId={}, meetingId={}",
                 savedSegment.getId(), savedSegment.getMeeting().getId());

@@ -93,7 +93,7 @@ class TranscriptServiceTest {
     void saveFinalSegmentStoresTranscriptAndPublishesEvent() {
         // 테스트 목적:
         // AI가 전달한 최종 전사 세그먼트가 저장되고
-        // 저장된 전사 기준으로 TranscriptCreatedEvent가 발행되는지 검증한다.
+        // 저장된 전사와 AI 화자 식별자로 TranscriptCreatedEvent가 발행되는지 검증한다.
 
         // given
         when(transcriptSegments.saveAndFlush(any(TranscriptSegment.class)))
@@ -122,7 +122,8 @@ class TranscriptServiceTest {
                 "final text",
                 12000L,
                 14500L,
-                RECOGNIZED_AT
+                RECOGNIZED_AT,
+                0L
         ));
     }
 
@@ -1276,7 +1277,7 @@ class TranscriptServiceTest {
                 AiTranscriptSegmentMessage.TYPE,
                 100L,
                 700L,
-                new AiTranscriptSegmentPayload(31L, "final text", 12000L, 14500L, RECOGNIZED_AT)
+                new AiTranscriptSegmentPayload(31L, "final text", 12000L, 14500L, RECOGNIZED_AT, 0L)
         );
     }
 
