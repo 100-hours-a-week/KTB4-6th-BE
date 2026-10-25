@@ -432,6 +432,7 @@ class MetricProcessingServiceTest {
 
     private TranscriptSegment segment(Long id, Long sequenceNumber) {
         return withId(TranscriptSegment.createFinal(
-                meeting, "segment-" + id, sequenceNumber, "발언 " + id, 1000L, 2000L, LocalDateTime.now()), id);
+                meeting, "segment-" + id, sequenceNumber, "발언 " + id, 1000L, 2000L,
+                LocalDateTime.now(), null), id);
     }
 }

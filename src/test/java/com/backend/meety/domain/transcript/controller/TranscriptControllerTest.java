@@ -57,11 +57,11 @@ class TranscriptControllerTest {
     }
 
     @Test
-    @DisplayName("전사 조회 API는 segments를 공통 성공 응답으로 반환한다")
+    @DisplayName("전사 조회 API는 저장된 speakerId를 포함한 segments를 공통 성공 응답으로 반환한다")
     void getTranscriptsReturnsCommonSuccessResponse() throws Exception {
         // 테스트 목적:
         // keyword 없이 전사 조회를 요청하면 전체 전사 조회 결과가
-        // segments 응답 객체로 반환되는지 검증한다.
+        // segments 응답 객체와 AI 원본 speakerId를 반환하는지 검증한다.
 
         // given
         when(transcriptService.getTranscripts(1L, 100L, null))
@@ -72,7 +72,8 @@ class TranscriptControllerTest {
                         "hello",
                         1000L,
                         2000L,
-                        LocalDateTime.of(2026, 9, 21, 5, 30)
+                        LocalDateTime.of(2026, 9, 21, 5, 30),
+                        0L
                 ))));
 
         // when & then
@@ -81,6 +82,7 @@ class TranscriptControllerTest {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.segments[0].segmentId").value(900L))
                 .andExpect(jsonPath("$.data.segments[0].speakerDisplayName").value("김진혁"))
+                .andExpect(jsonPath("$.data.segments[0].speakerId").value(0))
                 .andExpect(jsonPath("$.data.segments[0].sequenceNumber").value(1L))
                 .andExpect(jsonPath("$.data.segments[0].content").value("hello"))
                 .andExpect(jsonPath("$.error").doesNotExist());

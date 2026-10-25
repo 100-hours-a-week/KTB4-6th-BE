@@ -45,10 +45,10 @@ class MetricAiRequestFactoryTest {
         summary.complete("# 회의 요약");
         TranscriptSpeaker speaker = withId(TranscriptSpeaker.create(meeting, "화자 1"), 301L);
         TranscriptSegment first = withId(TranscriptSegment.createFinal(
-                meeting, "1:1", 0L, "첫 발언", 1000L, 3500L, LocalDateTime.now()), 101L);
+                meeting, "1:1", 0L, "첫 발언", 1000L, 3500L, LocalDateTime.now(), null), 101L);
         first.assignSpeaker(speaker);
         TranscriptSegment second = withId(TranscriptSegment.createFinal(
-                meeting, "1:2", 1L, "둘째 발언", 4000L, null, LocalDateTime.now()), 102L);
+                meeting, "1:2", 1L, "둘째 발언", 4000L, null, LocalDateTime.now(), null), 102L);
         when(transcripts.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(first, second));
 
         // when

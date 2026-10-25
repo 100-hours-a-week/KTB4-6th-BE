@@ -49,7 +49,8 @@ class ChatCitationResolverTest {
         meeting = meeting(team, member);
         meeting.start(NOW);
         otherMeeting = withId(Meeting.create(team, member, "다른 회의", "테스트", null, NOW, 30), 101L);
-        segment = withId(TranscriptSegment.createFinal(meeting, "seg-1", 8L, "배포는 금요일", 754000L, 757000L, NOW), 801L);
+        segment = withId(TranscriptSegment.createFinal(
+                meeting, "seg-1", 8L, "배포는 금요일", 754000L, 757000L, NOW, null), 801L);
         summary = withId(MeetingSummary.createPending(
                 withId(AiRequest.create(team, member, "s", AiRequestType.SUMMARY), 5L), team, meeting, 1L, null), 12L);
 

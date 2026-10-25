@@ -36,9 +36,9 @@ class SummaryAiRequestFactoryTest {
         meeting.start(LocalDateTime.of(2026, 9, 25, 14, 0));
         AiRequest aiRequest = withId(AiRequest.create(team, member, "key", AiRequestType.SUMMARY), 900L);
         TranscriptSegment withEnd = withId(TranscriptSegment.createFinal(
-                meeting, "1:1", 1L, "첫 발언", 1000L, 3500L, LocalDateTime.now()), 101L);
+                meeting, "1:1", 1L, "첫 발언", 1000L, 3500L, LocalDateTime.now(), null), 101L);
         TranscriptSegment withoutEnd = withId(TranscriptSegment.createFinal(
-                meeting, "1:2", 2L, "둘째 발언", 4000L, null, LocalDateTime.now()), 102L);
+                meeting, "1:2", 2L, "둘째 발언", 4000L, null, LocalDateTime.now(), null), 102L);
         when(transcripts.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(withEnd, withoutEnd));
         MeetingSummary summary = MeetingSummary.createPending(aiRequest, team, meeting, 2L, "다시 요약해줘");
 
