@@ -1,5 +1,6 @@
 package com.backend.meety.domain.meeting.realtime;
 
+import com.backend.meety.global.config.DataSourceConfig;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.ParticipationStatus;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
@@ -19,6 +20,7 @@ import javax.sql.DataSource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,7 +47,7 @@ public class MeetingSseService {
     private DataSource dataSource;
 
     @Autowired(required = false)
-    void setDataSource(DataSource dataSource) {
+    void setDataSource(@Qualifier(DataSourceConfig.WRITE_DATA_SOURCE_BEAN_NAME) DataSource dataSource) {
         this.dataSource = dataSource;
     }
 

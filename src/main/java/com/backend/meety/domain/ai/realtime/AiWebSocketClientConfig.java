@@ -23,6 +23,7 @@ public class AiWebSocketClientConfig {
         executor.setMaxPoolSize(properties.workers());
         executor.setQueueCapacity(properties.queueCapacity());
         executor.setThreadNamePrefix("ai-recovery-");
+        executor.setTaskDecorator(com.backend.meety.global.config.ReadMasterContext.taskDecorator());
         executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
         return executor;
     }

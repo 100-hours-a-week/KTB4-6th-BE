@@ -1,5 +1,6 @@
 package com.backend.meety.domain.recording.service;
 
+import com.backend.meety.global.config.DataSourceConfig;
 import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.TeamCredit;
@@ -39,6 +40,7 @@ import javax.sql.DataSource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -65,7 +67,7 @@ public class RecordingService {
     private DataSource dataSource;
 
     @Autowired(required = false)
-    void setDataSource(DataSource dataSource) {
+    void setDataSource(@Qualifier(DataSourceConfig.WRITE_DATA_SOURCE_BEAN_NAME) DataSource dataSource) {
         this.dataSource = dataSource;
     }
 

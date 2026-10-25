@@ -72,3 +72,8 @@ management:
   health:
     redis:
       enabled: false
+
+read-datasource:
+  url: jdbc:mysql://${DB_READ_HOST:${DB_HOST}}:${DB_READ_PORT:${DB_PORT}}/${DB_NAME}
+  username: ${DB_READ_USERNAME:${DB_USERNAME}}
+  password: ${DB_READ_PASSWORD:${DB_PASSWORD}}
