@@ -105,7 +105,7 @@ class RecordingSseEventListenerTest {
         // then
         assertReceived(user10, "RECORDING_PAUSED", expected);
         assertThat(user20.sendAttempted).isTrue();
-        assertThat(user20.completed).isTrue();
+        assertThat(user20.completed).isFalse();
         assertReceived(user30, "RECORDING_PAUSED", expected);
         assertThat(registry.find(100L, 10L)).contains(user10);
         assertThat(registry.find(100L, 20L)).isEmpty();

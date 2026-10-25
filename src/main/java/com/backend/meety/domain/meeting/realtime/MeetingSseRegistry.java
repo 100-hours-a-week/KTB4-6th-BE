@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Slf4j
@@ -133,12 +134,21 @@ public class MeetingSseRegistry {
         }
         try {
             sendEmitter(emitter, eventName, data);
-        } catch (IOException | RuntimeException e) {
+            completeEmitter(meetingId, userId, emitter);
+        } catch (AsyncRequestNotUsableException e) {
+            sendFailures.increment();
+            log.debug("SSE 클라이언트 연결이 끊겼습니다. meetingId={}, userId={}, eventName={}",
+                    meetingId, userId, eventName);
+        } catch (IOException e) {
             sendFailures.increment();
             log.warn("SSE 이벤트 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
                     meetingId, userId, eventName, e);
-        } finally {
+        } catch (RuntimeException e) {
+            sendFailures.increment();
+            log.warn("SSE 이벤트 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
+                    meetingId, userId, eventName, e);
             completeEmitter(meetingId, userId, emitter);
+        } finally {
             remove(meetingId, userId, emitter);
         }
     }
@@ -155,7 +165,17 @@ public class MeetingSseRegistry {
         }
         try {
             sendEmitter(emitter, eventName, data);
-        } catch (IOException | RuntimeException e) {
+        } catch (AsyncRequestNotUsableException e) {
+            sendFailures.increment();
+            log.debug("SSE 클라이언트 연결이 끊겼습니다. meetingId={}, userId={}, eventName={}",
+                    meetingId, userId, eventName);
+            remove(meetingId, userId, emitter);
+        } catch (IOException e) {
+            sendFailures.increment();
+            log.warn("SSE broadcast 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
+                    meetingId, userId, eventName, e);
+            remove(meetingId, userId, emitter);
+        } catch (RuntimeException e) {
             sendFailures.increment();
             log.warn("SSE broadcast 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
                     meetingId, userId, eventName, e);

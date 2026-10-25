@@ -16,6 +16,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -131,6 +132,24 @@ class NotificationSseServiceTest {
     }
 
     @Test
+    @DisplayName("클라이언트 이탈로 error callback이 호출돼도 해당 연결을 정리한다")
+    void clientDisconnectErrorCallbackRemovesEmitter() {
+        // 테스트 목적:
+        // 브라우저 이탈로 AsyncRequestNotUsableException과 함께 error callback이 호출돼도
+        // 해당 연결이 Registry에서 제거되는지 검증한다.
+
+        // given
+        TestSseEmitter emitter = connect("conn-1", 1L);
+
+        // when
+        emitter.error.accept(new AsyncRequestNotUsableException("Broken pipe"));
+
+        // then
+        assertThat(registry.find(1L, "conn-1")).isEmpty();
+        assertThat(registry.countAll()).isZero();
+    }
+
+    @Test
     @DisplayName("알림 생성 이벤트는 수신자의 모든 연결에 전송된다")
     void sendNotificationCreated() {
         // 테스트 목적:
@@ -193,7 +212,7 @@ class NotificationSseServiceTest {
         // then
         assertReceived(firstTab, "NOTIFICATION_CREATED", event);
         assertThat(failedTab.sendAttempted).isTrue();
-        assertThat(failedTab.completed).isTrue();
+        assertThat(failedTab.completed).isFalse();
         assertReceived(thirdTab, "NOTIFICATION_CREATED", event);
         assertThat(registry.find(1L, "conn-2")).isEmpty();
         assertThat(registry.count(1L)).isEqualTo(2);
@@ -242,7 +261,7 @@ class NotificationSseServiceTest {
         NotificationSseHeartbeatEvent expected = NotificationSseHeartbeatEvent.heartbeat(NOW);
         assertReceived(first, "HEARTBEAT", expected);
         assertThat(failed.sendAttempted).isTrue();
-        assertThat(failed.completed).isTrue();
+        assertThat(failed.completed).isFalse();
         assertReceived(otherUser, "HEARTBEAT", expected);
         assertThat(registry.find(1L, "conn-2")).isEmpty();
         assertThat(registry.countAll()).isEqualTo(2);

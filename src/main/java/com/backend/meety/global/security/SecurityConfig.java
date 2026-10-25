@@ -3,6 +3,7 @@ package com.backend.meety.global.security;
 import com.backend.meety.global.config.AuthCookieProperties;
 import com.backend.meety.global.config.CorsProperties;
 import com.backend.meety.global.config.InternalApiProperties;
+import jakarta.servlet.DispatcherType;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -73,6 +74,7 @@ public class SecurityConfig {
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> {
+                    auth.dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll();
                     if (isApiDocsEnabled()) {
                         auth.requestMatchers(API_DOCS_URLS).permitAll();
                     } else {

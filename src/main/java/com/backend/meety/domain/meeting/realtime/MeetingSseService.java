@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Slf4j
@@ -34,6 +35,7 @@ public class MeetingSseService {
 
     private static final String CONNECTED_EVENT_NAME = "CONNECTED";
     private static final long SLOW_LOG_THRESHOLD_MS = 1_000L;
+    private static final String CLIENT_DISCONNECTED_REASON = "client_disconnected";
 
     private final MeetingRepository meetingRepository;
     private final TeamMemberRepository teamMemberRepository;
@@ -132,10 +134,11 @@ public class MeetingSseService {
     private void removeAndLog(Long meetingId, Long userId, SseEmitter emitter, String reason, Throwable throwable) {
         registry.remove(meetingId, userId, emitter);
         logConnectionDiag(lifecyclePhase(reason), meetingId, userId, reason);
-        if (throwable == null) {
+        if (throwable == null || throwable instanceof AsyncRequestNotUsableException) {
             log.info("[SSE] 연결이 종료되었습니다. meetingId={}, userId={}, reason={}, "
                             + "meetingEmitters={}, totalEmitters={}",
-                    meetingId, userId, reason, registry.count(meetingId), registry.countAll());
+                    meetingId, userId, throwable == null ? reason : CLIENT_DISCONNECTED_REASON,
+                    registry.count(meetingId), registry.countAll());
             return;
         }
         log.warn("[SSE] 연결이 오류로 종료되었습니다. meetingId={}, userId={}, reason={}, "

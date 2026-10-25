@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -91,7 +92,7 @@ class NotificationSseRegistryTest {
         // then
         assertReceived(firstTab, "NOTIFICATION_CREATED", "created");
         assertThat(failedTab.sendAttempted).isTrue();
-        assertThat(failedTab.completed).isTrue();
+        assertThat(failedTab.completed).isFalse();
         assertReceived(thirdTab, "NOTIFICATION_CREATED", "created");
         assertThat(registry.find(1L, "conn-1")).contains(firstTab);
         assertThat(registry.find(1L, "conn-2")).isEmpty();
@@ -122,10 +123,57 @@ class NotificationSseRegistryTest {
         assertThat(targetCount).isEqualTo(3);
         assertReceived(first, "HEARTBEAT", "heartbeat");
         assertThat(failed.sendAttempted).isTrue();
-        assertThat(failed.completed).isTrue();
+        assertThat(failed.completed).isFalse();
         assertReceived(otherUser, "HEARTBEAT", "heartbeat");
         assertThat(registry.find(1L, "conn-2")).isEmpty();
         assertThat(registry.countAll()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("클라이언트가 끊긴 연결의 heartbeat 실패도 해당 emitter만 제거한다")
+    void heartbeatClientDisconnectRemovesOnlyDisconnectedEmitter() {
+        // 테스트 목적:
+        // 브라우저가 이미 떠나 heartbeat 전송이 AsyncRequestNotUsableException으로 실패해도
+        // 기존 전송 실패와 같이 해당 연결만 정리되는지 검증한다.
+
+        // given
+        NotificationSseRegistry registry = new NotificationSseRegistry();
+        TestSseEmitter alive = new TestSseEmitter();
+        TestSseEmitter disconnected = new TestSseEmitter();
+        disconnected.sendFailure = new AsyncRequestNotUsableException("Broken pipe");
+        registry.register(1L, "conn-1", alive);
+        registry.register(2L, "conn-2", disconnected);
+
+        // when
+        int targetCount = registry.broadcast("HEARTBEAT", "heartbeat");
+
+        // then
+        assertThat(targetCount).isEqualTo(2);
+        assertReceived(alive, "HEARTBEAT", "heartbeat");
+        assertThat(disconnected.completed).isFalse();
+        assertThat(registry.find(2L, "conn-2")).isEmpty();
+        assertThat(registry.countAll()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("I/O가 아닌 전송 실패는 연결을 직접 종료하고 제거한다")
+    void nonIoSendFailureCompletesAndRemovesEmitter() {
+        // 테스트 목적:
+        // 직렬화 실패처럼 연결이 살아 있는 전송 실패는
+        // 컨테이너가 정리하지 않으므로 emitter를 직접 종료하고 Registry에서 제거하는지 검증한다.
+
+        // given
+        NotificationSseRegistry registry = new NotificationSseRegistry();
+        TestSseEmitter failed = new TestSseEmitter();
+        failed.runtimeFailure = new IllegalStateException("serialize failed");
+        registry.register(1L, "conn-1", failed);
+
+        // when
+        registry.broadcast("HEARTBEAT", "heartbeat");
+
+        // then
+        assertThat(failed.completed).isTrue();
+        assertThat(registry.find(1L, "conn-1")).isEmpty();
     }
 
     @Test
@@ -187,6 +235,7 @@ class NotificationSseRegistryTest {
         private boolean completed;
         private boolean sendAttempted;
         private IOException sendFailure;
+        private RuntimeException runtimeFailure;
         private Set<ResponseBodyEmitter.DataWithMediaType> sentData;
 
         @Override
@@ -194,6 +243,9 @@ class NotificationSseRegistryTest {
             sendAttempted = true;
             if (sendFailure != null) {
                 throw sendFailure;
+            }
+            if (runtimeFailure != null) {
+                throw runtimeFailure;
             }
             sentData = builder.build();
         }
