@@ -80,3 +80,8 @@ springdoc:
     enabled: true
   swagger-ui:
     enabled: true
+
+read-datasource:
+  url: jdbc:mysql://${DB_READ_HOST:${DB_HOST:localhost}}:${DB_READ_PORT:${DB_PORT:3307}}/${DB_NAME:meety}
+  username: ${DB_READ_USERNAME:${DB_USERNAME:root}}
+  password: ${DB_READ_PASSWORD:${DB_PASSWORD:meety}}

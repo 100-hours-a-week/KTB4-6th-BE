@@ -25,6 +25,13 @@ spring:
 kakao:
   unlink-uri: https://kapi.kakao.com/v1/user/unlink
 
+read-datasource:
+  hikari:
+    maximum-pool-size: ${DB_READ_POOL_SIZE:10}
+
+read-after-write:
+  window: ${READ_AFTER_WRITE_WINDOW:3s}
+
 auth:
   access-token-cookie-name: ${AUTH_ACCESS_TOKEN_COOKIE_NAME:accessToken}
 

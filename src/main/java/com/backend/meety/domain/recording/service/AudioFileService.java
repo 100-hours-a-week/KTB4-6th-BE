@@ -1,5 +1,6 @@
 package com.backend.meety.domain.recording.service;
 
+import com.backend.meety.global.config.DataSourceConfig;
 import com.backend.meety.domain.recording.dto.AudioFileDeleteResponse;
 import com.backend.meety.domain.recording.dto.AudioFileDetailResponse;
 import com.backend.meety.domain.recording.dto.AudioFileDownloadUrlResponse;
@@ -34,6 +35,7 @@ import javax.sql.DataSource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -55,7 +57,7 @@ public class AudioFileService {
     private DataSource dataSource;
 
     @Autowired(required = false)
-    void setDataSource(DataSource dataSource) {
+    void setDataSource(@Qualifier(DataSourceConfig.WRITE_DATA_SOURCE_BEAN_NAME) DataSource dataSource) {
         this.dataSource = dataSource;
     }
 

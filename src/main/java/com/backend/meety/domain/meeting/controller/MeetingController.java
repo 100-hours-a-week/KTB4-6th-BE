@@ -1,5 +1,6 @@
 package com.backend.meety.domain.meeting.controller;
 
+import com.backend.meety.global.config.DataSourceConfig;
 import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
 import com.backend.meety.domain.meeting.dto.MeetingCreateResponse;
 import com.backend.meety.domain.meeting.dto.MeetingCalendarResponse;
@@ -27,6 +28,7 @@ import javax.sql.DataSource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -59,7 +61,7 @@ public class MeetingController {
     private DataSource dataSource;
 
     @Autowired(required = false)
-    void setDataSource(DataSource dataSource) {
+    void setDataSource(@Qualifier(DataSourceConfig.WRITE_DATA_SOURCE_BEAN_NAME) DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
