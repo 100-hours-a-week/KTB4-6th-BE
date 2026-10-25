@@ -14,6 +14,7 @@ import com.backend.meety.global.security.AccessTokenBlacklist;
 import com.backend.meety.global.security.CustomAuthenticationEntryPoint;
 import com.backend.meety.global.security.JwtTokenProvider;
 import com.backend.meety.global.security.SecurityConfig;
+import jakarta.servlet.DispatcherType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -72,5 +73,22 @@ class NotificationControllerSecurityTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.error.code").value("AUTHENTICATION_REQUIRED"));
         verifyNoInteractions(notificationSseService);
+    }
+
+    @Test
+    @DisplayName("SSE 종료 시 async dispatch는 인증이 없어도 인가에서 거부하지 않는다")
+    void asyncDispatchIsNotRejectedWithoutAuthentication() throws Exception {
+        // 테스트 목적:
+        // 이미 인증을 통과한 SSE 요청이 종료될 때의 async dispatch는
+        // 만료된 accessToken 때문에 인증 정보가 없어도 Access Denied가 되지 않는지 검증한다.
+
+        // when, then
+        mvc.perform(get("/api/v1/notifications/events")
+                        .accept("text/event-stream")
+                        .with(request -> {
+                            request.setDispatcherType(DispatcherType.ASYNC);
+                            return request;
+                        }))
+                .andExpect(status().isOk());
     }
 }
