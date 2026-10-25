@@ -89,9 +89,12 @@ public class NotificationSseRegistry {
         } catch (AsyncRequestNotUsableException e) {
             log.debug("알림 SSE 클라이언트 연결이 끊겼습니다. userId={}, connectionId={}, eventName={}",
                     connection.userId(), connection.connectionId(), eventName);
-            complete(connection);
             remove(connection.userId(), connection.connectionId(), connection.emitter());
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException e) {
+            log.warn("알림 SSE 이벤트 전송에 실패했습니다. userId={}, connectionId={}, eventName={}",
+                    connection.userId(), connection.connectionId(), eventName, e);
+            remove(connection.userId(), connection.connectionId(), connection.emitter());
+        } catch (RuntimeException e) {
             log.warn("알림 SSE 이벤트 전송에 실패했습니다. userId={}, connectionId={}, eventName={}",
                     connection.userId(), connection.connectionId(), eventName, e);
             complete(connection);

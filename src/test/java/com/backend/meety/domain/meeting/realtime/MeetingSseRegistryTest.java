@@ -220,7 +220,7 @@ class MeetingSseRegistryTest {
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
                 .contains(event);
         assertThat(user10.completed).isTrue();
-        assertThat(user20.completed).isTrue();
+        assertThat(user20.completed).isFalse();
         assertThat(user30.completed).isTrue();
         assertThat(registry.count(100L)).isZero();
         assertThat(registry.countAll()).isZero();
@@ -304,7 +304,7 @@ class MeetingSseRegistryTest {
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
                 .contains(event);
         assertThat(user20.sendAttempted).isTrue();
-        assertThat(user20.completed).isTrue();
+        assertThat(user20.completed).isFalse();
         assertThat(user30.sentData)
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
                 .contains(event);
@@ -374,12 +374,33 @@ class MeetingSseRegistryTest {
 
         // then
         assertThat(emitterCount).isEqualTo(2);
-        assertThat(disconnected.completed).isTrue();
+        assertThat(disconnected.completed).isFalse();
         assertThat(alive.sentData)
                 .extracting(ResponseBodyEmitter.DataWithMediaType::getData)
                 .contains(event);
         assertThat(registry.find(100L, 10L)).isEmpty();
         assertThat(registry.find(100L, 20L)).contains(alive);
+    }
+
+    @Test
+    @DisplayName("I/O가 아닌 브로드캐스트 실패는 연결을 직접 종료하고 제거한다")
+    void broadcastNonIoFailureCompletesAndRemovesEmitter() {
+        // 테스트 목적:
+        // 직렬화 실패처럼 연결이 살아 있는 전송 실패는
+        // 컨테이너가 정리하지 않으므로 emitter를 직접 종료하고 Registry에서 제거하는지 검증한다.
+
+        // given
+        MeetingSseRegistry registry = new MeetingSseRegistry(new SimpleMeterRegistry());
+        TestSseEmitter failed = new TestSseEmitter();
+        failed.runtimeFailure = new IllegalStateException("serialize failed");
+        registry.register(100L, 10L, failed);
+
+        // when
+        registry.broadcast(100L, "TRANSCRIPT_CREATED", "transcript");
+
+        // then
+        assertThat(failed.completed).isTrue();
+        assertThat(registry.find(100L, 10L)).isEmpty();
     }
 
     private static class TestSseEmitter extends SseEmitter {
@@ -390,6 +411,7 @@ class MeetingSseRegistryTest {
         private boolean sendAttempted;
         private boolean sentBeforeComplete;
         private IOException sendFailure;
+        private RuntimeException runtimeFailure;
         private Set<ResponseBodyEmitter.DataWithMediaType> sentData;
 
         @Override
@@ -398,6 +420,9 @@ class MeetingSseRegistryTest {
             sentBeforeComplete = !completeAttempted;
             if (sendFailure != null) {
                 throw sendFailure;
+            }
+            if (runtimeFailure != null) {
+                throw runtimeFailure;
             }
             sentData = builder.build();
         }

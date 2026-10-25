@@ -212,7 +212,7 @@ class NotificationSseServiceTest {
         // then
         assertReceived(firstTab, "NOTIFICATION_CREATED", event);
         assertThat(failedTab.sendAttempted).isTrue();
-        assertThat(failedTab.completed).isTrue();
+        assertThat(failedTab.completed).isFalse();
         assertReceived(thirdTab, "NOTIFICATION_CREATED", event);
         assertThat(registry.find(1L, "conn-2")).isEmpty();
         assertThat(registry.count(1L)).isEqualTo(2);
@@ -261,7 +261,7 @@ class NotificationSseServiceTest {
         NotificationSseHeartbeatEvent expected = NotificationSseHeartbeatEvent.heartbeat(NOW);
         assertReceived(first, "HEARTBEAT", expected);
         assertThat(failed.sendAttempted).isTrue();
-        assertThat(failed.completed).isTrue();
+        assertThat(failed.completed).isFalse();
         assertReceived(otherUser, "HEARTBEAT", expected);
         assertThat(registry.find(1L, "conn-2")).isEmpty();
         assertThat(registry.countAll()).isEqualTo(2);

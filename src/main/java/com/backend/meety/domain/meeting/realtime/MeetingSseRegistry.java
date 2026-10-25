@@ -134,16 +134,21 @@ public class MeetingSseRegistry {
         }
         try {
             sendEmitter(emitter, eventName, data);
+            completeEmitter(meetingId, userId, emitter);
         } catch (AsyncRequestNotUsableException e) {
             sendFailures.increment();
             log.debug("SSE 클라이언트 연결이 끊겼습니다. meetingId={}, userId={}, eventName={}",
                     meetingId, userId, eventName);
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException e) {
             sendFailures.increment();
             log.warn("SSE 이벤트 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
                     meetingId, userId, eventName, e);
-        } finally {
+        } catch (RuntimeException e) {
+            sendFailures.increment();
+            log.warn("SSE 이벤트 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
+                    meetingId, userId, eventName, e);
             completeEmitter(meetingId, userId, emitter);
+        } finally {
             remove(meetingId, userId, emitter);
         }
     }
@@ -164,9 +169,13 @@ public class MeetingSseRegistry {
             sendFailures.increment();
             log.debug("SSE 클라이언트 연결이 끊겼습니다. meetingId={}, userId={}, eventName={}",
                     meetingId, userId, eventName);
-            completeEmitter(meetingId, userId, emitter);
             remove(meetingId, userId, emitter);
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException e) {
+            sendFailures.increment();
+            log.warn("SSE broadcast 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
+                    meetingId, userId, eventName, e);
+            remove(meetingId, userId, emitter);
+        } catch (RuntimeException e) {
             sendFailures.increment();
             log.warn("SSE broadcast 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
                     meetingId, userId, eventName, e);
