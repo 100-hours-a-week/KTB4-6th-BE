@@ -33,14 +33,12 @@ COPY src src
 RUN ./gradlew --init-script /tmp/sentry-sdk-version.init.gradle bootJar --no-daemon -x test
 
 # ---------- Runtime Stage ----------
-FROM eclipse-temurin:25-jre-jammy AS runtime
+FROM eclipse-temurin:25-jre-jammy AS runtime-base
 ARG SENTRY_SDK_VERSION
 WORKDIR /app
 
 # 애플리케이션을 root 대신 spring 사용자로 실행
 RUN groupadd -r spring && useradd -r -g spring spring
-
-COPY --from=build /app/build/libs/*.jar app.jar
 
 # spring이 agent를 읽을 수 있도록 설정
 # 파일 수정 권한은 root만 유지
@@ -61,3 +59,11 @@ EXPOSE 8080
 
 # agent와 애플리케이션 경로를 절대 경로로 지정
 ENTRYPOINT ["java", "-javaagent:/app/sentry-opentelemetry-agent.jar", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"]
+
+# CI는 테스트와 함께 생성한 JAR를 복사해 중복 컴파일을 생략한다.
+FROM runtime-base AS ci-runtime
+COPY build/ci/app.jar /app/app.jar
+
+# 일반 docker build는 기존처럼 소스에서 JAR를 생성한다.
+FROM runtime-base AS runtime
+COPY --from=build /app/build/libs/*.jar /app/app.jar
