@@ -71,7 +71,8 @@ public class TranscriptService {
                 message.payload().content(),
                 message.payload().startedAtMs(),
                 message.payload().endedAtMs(),
-                message.payload().recognizedAt()
+                message.payload().recognizedAt(),
+                message.payload().speakerId()
         );
 
         TranscriptSegment savedSegment;

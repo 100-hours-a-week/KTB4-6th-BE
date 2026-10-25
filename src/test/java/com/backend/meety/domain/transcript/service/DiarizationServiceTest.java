@@ -83,8 +83,8 @@ class DiarizationServiceTest {
         meeting = meeting(team, member);
         session = session(meeting, member);
         aiRequest = withId(AiRequest.create(team, member, KEY, AiRequestType.DIARIZATION), AI_REQUEST_ID);
-        first = withId(TranscriptSegment.createFinal(meeting, "k-1", 0L, "첫 발화", 0L, 1000L, NOW), 101L);
-        second = withId(TranscriptSegment.createFinal(meeting, "k-2", 1L, "둘째 발화", 1000L, null, NOW), 102L);
+        first = withId(TranscriptSegment.createFinal(meeting, "k-1", 0L, "첫 발화", 0L, 1000L, NOW, null), 101L);
+        second = withId(TranscriptSegment.createFinal(meeting, "k-2", 1L, "둘째 발화", 1000L, null, NOW, null), 102L);
         when(aiRequests.claimAccepted(eq(AI_REQUEST_ID), anyString())).thenAnswer(invocation -> {
             if (!aiRequest.isAccepted()) {
                 return 0;
