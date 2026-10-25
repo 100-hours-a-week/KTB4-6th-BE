@@ -20,6 +20,9 @@ README.md
 # Windows 전용 스크립트 (Linux 베이스 이미지에서 불필요)
 gradlew.bat
 
-# Gradle 빌드 산출물/캐시 (매번 새로 생성되므로 컨텍스트에 포함할 이유 없음)
-build/
+# Gradle 산출물은 제외하되 CI에서 검증한 실행 JAR 하나만 허용한다.
+build/*
+!build/ci/
+build/ci/*
+!build/ci/app.jar
 .gradle/

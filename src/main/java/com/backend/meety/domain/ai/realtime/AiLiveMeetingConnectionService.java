@@ -5,11 +5,10 @@ import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
 import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
-import com.backend.meety.domain.transcript.service.TranscriptService;
+import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import java.net.URI;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalLong;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -31,14 +30,19 @@ public class AiLiveMeetingConnectionService {
     private final AiStopTimeoutScheduler stopTimeoutScheduler;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
-    private final TranscriptService transcriptService;
+    private final TranscriptSaveDispatcher transcriptSaveDispatcher;
     private final RecordingOwnerService ownerService;
     private final MeetingParticipantRepository meetingParticipantRepository;
+    private final AiAudioAckService audioAckService;
+    private final AiHeartbeatService heartbeatService;
+    private final AiRecoveryRegistry recoveries;
 
     void notifyTranscriptFinalized(AiLiveMeetingConnection connection) {
-        eventPublisher.publishEvent(new MeetingTranscriptFinalizedEvent(
-                connection.meetingId(), connection.recordingSessionId()));
-        releaseOwner(connection);
+        transcriptSaveDispatcher.submitFinalize(connection.recordingSessionId(), () -> {
+            eventPublisher.publishEvent(new MeetingTranscriptFinalizedEvent(
+                    connection.meetingId(), connection.recordingSessionId()));
+            releaseOwner(connection);
+        });
     }
 
     private void releaseOwner(AiLiveMeetingConnection connection) {
@@ -48,8 +52,10 @@ public class AiLiveMeetingConnectionService {
     }
 
     void markReady(AiLiveMeetingConnection connection) {
+        if (!isCurrent(connection)) { return; }
         connection.markReady();
         eventPublisher.publishEvent(new AiLiveMeetingReadyEvent(connection.recordingSessionId()));
+        progress(connection);
     }
 
     public boolean startAndAwaitReady(AudioWebSocketContext context) {
@@ -79,7 +85,6 @@ public class AiLiveMeetingConnectionService {
         AiLiveMeetingConnection connection = new AiLiveMeetingConnection(
                 context.recordingSessionId(),
                 context.meetingId(),
-                context.audioFormat(),
                 requestIdGenerator.sessionStartRequestId()
         );
         if (!registry.reserve(connection)) {
@@ -88,7 +93,7 @@ public class AiLiveMeetingConnectionService {
         }
         try {
             WebSocketSession aiSession = webSocketClient.connect(
-                    new AiLiveMeetingInboundHandler(connection, this, objectMapper, transcriptService),
+                    new AiLiveMeetingInboundHandler(connection, this, objectMapper, transcriptSaveDispatcher),
                     aiWebSocketUri()
             );
             connection.attach(aiSession);
@@ -102,18 +107,11 @@ public class AiLiveMeetingConnectionService {
         }
     }
 
-    public OptionalLong prepareStream(AudioWebSocketContext context) {
-        AiLiveMeetingConnection connection = openConnection(context.recordingSessionId()).orElse(null);
-        if (connection == null) {
-            if (!startAndAwaitReady(context)) {
-                return OptionalLong.empty();
-            }
-            connection = registry.find(context.recordingSessionId()).orElse(null);
-            if (connection == null) {
-                return OptionalLong.empty();
-            }
+    public boolean prepareStream(AudioWebSocketContext context) {
+        if (openConnection(context.recordingSessionId()).isPresent()) {
+            return true;
         }
-        return OptionalLong.of(connection.streamEpoch());
+        return startAndAwaitReady(context);
     }
 
     public boolean hasOpenConnection(Long recordingSessionId) {
@@ -121,7 +119,47 @@ public class AiLiveMeetingConnectionService {
     }
 
     public void closeConnection(Long recordingSessionId) {
+        registry.find(recordingSessionId).ifPresent(AiLiveMeetingConnection::requestStop);
+        recoveries.cancel(recordingSessionId);
         registry.find(recordingSessionId).ifPresent(this::cleanup);
+    }
+
+    public void closeForFatal(Long recordingSessionId, String owner) {
+        registry.find(recordingSessionId).filter(connection -> owner.equals(connection.owner()))
+                .ifPresent(connection -> {
+                    connection.requestStop();
+                    connection.fenceForRecovery();
+                });
+        recoveries.find(recordingSessionId).filter(context -> owner.equals(context.owner)).ifPresent(context -> {
+            synchronized (context) {
+                if (context.current != null && owner.equals(context.current.owner())) {
+                    context.current.requestStop();
+                    context.current.fenceForRecovery();
+                }
+                recoveries.remove(context);
+            }
+        });
+        registry.find(recordingSessionId).filter(connection -> owner.equals(connection.owner())).ifPresent(this::cleanup);
+    }
+
+    public boolean hasDifferentOwner(Long recordingSessionId, String owner) {
+        return registry.find(recordingSessionId).filter(connection -> !owner.equals(connection.owner())).isPresent();
+    }
+
+    void fatalFailure(AiLiveMeetingConnection connection,
+                      com.backend.meety.domain.recording.realtime.RealtimeFailureReason reason) {
+        if (!isCurrent(connection) || connection.isStopRequested()) { return; }
+        if (connection.owner() == null) { cleanup(connection); return; }
+        eventPublisher.publishEvent(new com.backend.meety.domain.ai.event.AiFatalFailureEvent(
+                connection.recordingSessionId(), connection.owner(), connection.sessionStartRequestId(), reason));
+    }
+
+    void transcriptFailure(AiLiveMeetingConnection connection, String ownerAtSubmission) {
+        if (ownerAtSubmission != null) {
+            eventPublisher.publishEvent(new com.backend.meety.domain.ai.event.AiFatalFailureEvent(
+                    connection.recordingSessionId(), ownerAtSubmission, null,
+                    com.backend.meety.domain.recording.realtime.RealtimeFailureReason.TRANSCRIPT_PROCESSING_FAILED));
+        }
     }
 
     public boolean awaitStreamable(Long recordingSessionId) {
@@ -137,60 +175,38 @@ public class AiLiveMeetingConnectionService {
         }
     }
 
-    public OptionalLong resetStream(Long recordingSessionId, AudioFormat audioFormat) {
-        return openConnection(recordingSessionId)
-                .map(connection -> resetDecoder(connection, audioFormat))
-                .orElse(OptionalLong.empty());
-    }
-
     private Optional<AiLiveMeetingConnection> openConnection(Long recordingSessionId) {
-        return registry.find(recordingSessionId).filter(found -> !found.isClosed());
+        return registry.find(recordingSessionId).filter(found -> !found.isClosed() && !found.isRecoveryFenced());
     }
 
-    private OptionalLong resetDecoder(AiLiveMeetingConnection connection, AudioFormat audioFormat) {
-        OptionalLong streamEpoch;
-        try {
-            streamEpoch = connection.sendDecoderReset(
-                    objectMapper, requestIdGenerator.decoderResetRequestId(), audioFormat);
-        } catch (Exception e) {
-            log.warn("AI WebSocket decoder.reset 전송에 실패했습니다. recordingSessionId={}",
-                    connection.recordingSessionId(), e);
-            cleanup(connection);
-            return OptionalLong.empty();
-        }
-        if (streamEpoch.isEmpty()) {
-            log.warn("AI WebSocket decoder.reset을 보낼 수 없는 상태입니다. recordingSessionId={}, state={}",
-                    connection.recordingSessionId(), connection.state());
-            return OptionalLong.empty();
-        }
-        try {
-            if (connection.awaitDecoderReady(AiLiveMeetingPolicy.READY_TIMEOUT)) {
-                return streamEpoch;
-            }
-            log.warn("AI WebSocket decoder.ready를 받지 못했습니다. recordingSessionId={}, state={}",
-                    connection.recordingSessionId(), connection.state());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("AI WebSocket decoder.ready 대기가 중단되었습니다. recordingSessionId={}",
-                    connection.recordingSessionId(), e);
-        }
-        if (connection.state() == AiLiveMeetingConnectionState.RESET_SENT) {
-            cleanup(connection);
-        }
-        return OptionalLong.empty();
-    }
-
-    public boolean forwardAudio(Long recordingSessionId, long streamEpoch, byte[] audio) {
+    public boolean forwardAudio(Long recordingSessionId, long feSequence, byte[] audio) {
         AiLiveMeetingConnection connection = registry.find(recordingSessionId).orElse(null);
         if (connection == null) {
             return false;
         }
         try {
-            return connection.forwardAudio(objectMapper, streamEpoch, audio);
+            boolean forwarded = audioAckService.forwardAudio(connection, objectMapper, feSequence, audio);
+            if (!forwarded && connection.state() == AiLiveMeetingConnectionState.READY
+                    && (connection.webSocketSession() == null || !connection.webSocketSession().isOpen())) {
+                recoverableFailure(connection, "AUDIO_FORWARD_FAILURE");
+            }
+            return forwarded;
         } catch (Exception e) {
             log.warn("AI WebSocket 오디오 전달에 실패했습니다. recordingSessionId={}", recordingSessionId, e);
+            if (e instanceof java.io.IOException || e instanceof IllegalStateException) {
+                recoverableFailure(connection, "AUDIO_FORWARD_FAILURE");
+            }
             return false;
         }
+    }
+
+    void receiveAudioAck(AiLiveMeetingConnection connection, tools.jackson.databind.JsonNode message) {
+        audioAckService.receive(connection, message, objectMapper);
+        progress(connection);
+    }
+
+    void receiveHeartbeatPong(AiLiveMeetingConnection connection, tools.jackson.databind.JsonNode message) {
+        heartbeatService.receivePong(connection, message);
     }
 
     public Optional<AiLiveMeetingConnectionState> findState(Long recordingSessionId) {
@@ -198,16 +214,20 @@ public class AiLiveMeetingConnectionService {
     }
 
     public void pause(Long recordingSessionId) {
+        if (recoveries.deferPause(recordingSessionId, true)) { return; }
         registry.find(recordingSessionId).ifPresentOrElse(this::pause,
                 () -> log.info("일시정지할 AI WebSocket connection이 없습니다. recordingSessionId={}", recordingSessionId));
     }
 
     public void resume(Long recordingSessionId) {
+        if (recoveries.deferPause(recordingSessionId, false)) { return; }
         registry.find(recordingSessionId).ifPresentOrElse(this::resume,
                 () -> log.info("재개할 AI WebSocket connection이 없습니다. recordingSessionId={}", recordingSessionId));
     }
 
     public void stop(Long recordingSessionId) {
+        registry.find(recordingSessionId).ifPresent(AiLiveMeetingConnection::requestStop);
+        recoveries.cancel(recordingSessionId);
         registry.find(recordingSessionId).ifPresentOrElse(this::stop,
                 () -> log.info("종료할 AI WebSocket connection이 없습니다. recordingSessionId={}", recordingSessionId));
     }
@@ -223,8 +243,7 @@ public class AiLiveMeetingConnectionService {
                 .map(AiSessionParticipant::from)
                 .toList();
         String payload = objectMapper.writeValueAsString(AiSessionStartMessage.of(connection, participants));
-        aiSession.sendMessage(new TextMessage(payload));
-        connection.markStartSent();
+        connection.sendStart(new TextMessage(payload));
     }
 
     private void pause(AiLiveMeetingConnection connection) {
@@ -260,7 +279,8 @@ public class AiLiveMeetingConnectionService {
                 log.info("AI WebSocket session.stop을 전송하지 않습니다. recordingSessionId={}, state={}",
                         connection.recordingSessionId(), connection.state());
                 if (connection.state() == AiLiveMeetingConnectionState.CONNECTING
-                        || connection.state() == AiLiveMeetingConnectionState.START_SENT) {
+                        || connection.state() == AiLiveMeetingConnectionState.START_SENT
+                        || connection.state() == AiLiveMeetingConnectionState.CLOSED) {
                     notifyTranscriptFinalized(connection);
                     cleanup(connection);
                 }
@@ -290,8 +310,18 @@ public class AiLiveMeetingConnectionService {
     }
 
     void cleanup(AiLiveMeetingConnection connection) {
+        recoveries.cancelConnection(connection);
+        cleanup(connection, false);
+    }
+
+    public void retireForRecovery(AiLiveMeetingConnection connection) {
+        connection.fenceForRecovery();
+        cleanup(connection, true);
+    }
+
+    private void cleanup(AiLiveMeetingConnection connection, boolean keepOwnerPlaceholder) {
         connection.cancelStopTimeout();
-        connection.close();
+        audioAckService.cleanup(connection);
         WebSocketSession aiSession = connection.webSocketSession();
         if (aiSession != null && aiSession.isOpen()) {
             try {
@@ -301,6 +331,53 @@ public class AiLiveMeetingConnectionService {
                         connection.recordingSessionId(), e);
             }
         }
-        registry.remove(connection.recordingSessionId(), connection);
+        if (!keepOwnerPlaceholder) { registry.remove(connection.recordingSessionId(), connection); }
+    }
+
+    public boolean isCurrent(AiLiveMeetingConnection connection) {
+        return registry.find(connection.recordingSessionId()).orElse(null) == connection
+                && !connection.isClosed() && !connection.isRecoveryFenced();
+    }
+
+    void recoverableFailure(AiLiveMeetingConnection connection, String reason) {
+        if (!isCurrent(connection) || connection.isStopRequested() || connection.state() == AiLiveMeetingConnectionState.STOP_SENT
+                || connection.state() == AiLiveMeetingConnectionState.ENDED) { return; }
+        if (connection.owner() == null) { cleanup(connection); return; }
+        eventPublisher.publishEvent(new com.backend.meety.domain.ai.event.AiRecoverableFailureEvent(
+                connection.recordingSessionId(), connection.sessionStartRequestId(), reason));
+    }
+
+    private void progress(AiLiveMeetingConnection connection) {
+        if (connection.isRecoveryConnection() && isCurrent(connection)) {
+            eventPublisher.publishEvent(new com.backend.meety.domain.ai.event.AiRecoveryProgressEvent(
+                    connection.recordingSessionId(), connection.sessionStartRequestId()));
+        }
+    }
+
+    public AiLiveMeetingConnection reserveRecovery(AiLiveMeetingConnection previous, long fromSequence, long transcriptStart) {
+        var next = new AiLiveMeetingConnection(previous.recordingSessionId(), previous.meetingId(),
+                requestIdGenerator.sessionStartRequestId(), fromSequence, transcriptStart);
+        next.assignOwner(previous.owner());
+        return registry.reserve(next) ? next : null;
+    }
+
+    public void connectRecovery(AiLiveMeetingConnection connection, java.time.Duration timeout) throws Exception {
+        if (!isCurrent(connection)) { return; }
+        if (timeout.isNegative() || timeout.isZero()) { throw new java.util.concurrent.TimeoutException("Recovery deadline elapsed"); }
+        var session = webSocketClient.connect(new AiLiveMeetingInboundHandler(connection, this, objectMapper, transcriptSaveDispatcher),
+                aiWebSocketUri(), timeout);
+        if (!connection.attachIfActive(session, () -> registry.find(connection.recordingSessionId()).orElse(null) == connection)) {
+            session.close(CloseStatus.NORMAL);
+            return;
+        }
+        sendSessionStart(connection, session);
+    }
+
+    public boolean restoreRecoveryPause(AiLiveMeetingConnection connection) throws java.io.IOException {
+        return connection.sendPause(objectMapper, requestIdGenerator.sessionPauseRequestId());
+    }
+
+    public void detachRecovery(AiLiveMeetingConnection connection) {
+        registry.detachRecovery(connection);
     }
 }

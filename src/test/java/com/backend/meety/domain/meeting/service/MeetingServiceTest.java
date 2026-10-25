@@ -53,6 +53,8 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.context.ApplicationEventPublisher;
@@ -64,6 +66,7 @@ class MeetingServiceTest {
     private static final Long USER_ID = 1L;
     private static final Long TEAM_ID = 2L;
     private static final Long TEAM_MEMBER_ID = 3L;
+    private static final LocalDateTime SCHEDULED_AT = LocalDateTime.of(2026, 10, 22, 15, 0);
     private static final ZoneId KST_ZONE_ID = ZoneId.of("Asia/Seoul");
     private static final Clock FIXED_CLOCK = Clock.fixed(
             Instant.parse("2026-09-15T03:00:00Z"),
@@ -110,10 +113,16 @@ class MeetingServiceTest {
     }
 
     @Test
-    @DisplayName("오늘 생성된 회의가 4개이면 5번째 회의를 생성할 수 있다")
-    void createFifthMeeting() {
-        MeetingCreateResponse response = createMeetingWithTodayCount(4L, createRequest(30, "API 명세 검토"));
+    @DisplayName("오늘 생성된 회의가 19개이면 20번째 회의를 생성할 수 있다")
+    void createTwentiethMeeting() {
+        // 테스트 목적:
+        // 예정 날짜와 관계없이 생성 횟수 경계인 20번째 회의를 허용하는지 검증한다.
+        // given
+        MeetingCreateRequest request = createRequest(30, "API 명세 검토");
+        // when
+        MeetingCreateResponse response = createMeetingWithTodayCount(19L, request);
 
+        // then
         assertThat(response.meetingId()).isEqualTo(100L);
         assertThat(response.status()).isEqualTo(MeetingStatus.WAITING);
     }
@@ -145,6 +154,9 @@ class MeetingServiceTest {
     @Test
     @DisplayName("팀 row lock 이후 회의를 저장한다")
     void createMeetingWithLockAndCountBeforeSave() {
+        // 테스트 목적:
+        // Team 잠금 아래 생성 제한을 검사하고 서버 시각 대신 요청 예정 시각을 저장하는지 검증한다.
+        // given
         Team team = mock(Team.class);
         TeamMember teamMember = mock(TeamMember.class);
         MeetingCreateRequest request = createRequest(30, "API 명세 검토");
@@ -164,16 +176,21 @@ class MeetingServiceTest {
             return meeting;
         });
 
+        // when
         MeetingCreateResponse response = meetingService.createMeeting(USER_ID, TEAM_ID, request);
 
+        // then
         assertThat(response.title()).isEqualTo(request.title());
         assertThat(response.purpose()).isEqualTo(request.purpose());
         assertThat(response.note()).isEqualTo(request.note());
-        assertThat(response.scheduledAt()).isEqualTo(LocalDateTime.now(FIXED_CLOCK));
+        assertThat(response.scheduledAt()).isEqualTo(SCHEDULED_AT);
+        assertThat(response.createdAt()).isNotEqualTo(response.scheduledAt());
 
         ArgumentCaptor<Meeting> meetingCaptor = ArgumentCaptor.forClass(Meeting.class);
         InOrder inOrder = inOrder(teamRepository, teamMemberRepository, meetingRepository);
         inOrder.verify(teamRepository).findByIdForUpdate(TEAM_ID);
+        inOrder.verify(meetingRepository).countCreatedTodayByTeamId(TEAM_ID,
+                LocalDate.of(2026, 9, 15).atStartOfDay(), LocalDate.of(2026, 9, 16).atStartOfDay());
         inOrder.verify(teamMemberRepository).findByTeamIdAndUserIdAndMembershipStatus(
                 TEAM_ID,
                 USER_ID,
@@ -185,7 +202,7 @@ class MeetingServiceTest {
         assertThat(savedMeeting.getTeam()).isSameAs(team);
         assertThat(savedMeeting.getCreatedByTeamMember()).isSameAs(teamMember);
         assertThat(savedMeeting.getStatus()).isEqualTo(MeetingStatus.WAITING);
-        assertThat(savedMeeting.getScheduledAt()).isEqualTo(LocalDateTime.now(FIXED_CLOCK));
+        assertThat(savedMeeting.getScheduledAt()).isEqualTo(SCHEDULED_AT);
     }
 
     @Test
@@ -245,10 +262,15 @@ class MeetingServiceTest {
     }
 
     @Test
-    @DisplayName("오늘 생성된 회의가 5개이면 회의를 생성할 수 없다")
+    @DisplayName("오늘 생성된 회의가 20개이면 21번째 회의를 생성할 수 없다")
     void createMeetingWithDailyLimitExceeded() {
+        // 테스트 목적:
+        // 미래 예정 시각을 사용해도 이미 찬 일일 20개 제한을 우회하지 못하는지 검증한다.
+        // given
         setUpCreatableMemberWithTodayCount(TestMeetingPolicy.DAILY_CREATE_LIMIT);
 
+        // when
+        // then
         assertThatThrownBy(() -> meetingService.createMeeting(USER_ID, TEAM_ID, createRequest(30, "API 명세 검토")))
                 .isInstanceOf(MeetingException.class)
                 .extracting("errorCode")
@@ -258,10 +280,15 @@ class MeetingServiceTest {
     }
 
     @Test
-    @DisplayName("COMPLETED 회의를 포함해 오늘 생성된 회의가 5개이면 회의를 생성할 수 없다")
+    @DisplayName("COMPLETED 회의를 포함해 오늘 생성된 회의가 20개이면 회의를 생성할 수 없다")
     void createMeetingWithCompletedMeetingsIncludedInDailyLimit() {
+        // 테스트 목적:
+        // 완료 회의도 생성 횟수에 포함하는 기존 제한을 유지하는지 검증한다.
+        // given
         setUpCreatableMemberWithTodayCount(TestMeetingPolicy.DAILY_CREATE_LIMIT);
 
+        // when
+        // then
         assertThatThrownBy(() -> meetingService.createMeeting(USER_ID, TEAM_ID, createRequest(30, "API 명세 검토")))
                 .isInstanceOf(MeetingException.class)
                 .extracting("errorCode")
@@ -272,10 +299,15 @@ class MeetingServiceTest {
     }
 
     @Test
-    @DisplayName("soft deleted 회의를 포함해 오늘 생성된 회의가 5개이면 회의를 생성할 수 없다")
+    @DisplayName("soft deleted 회의를 포함해 오늘 생성된 회의가 20개이면 회의를 생성할 수 없다")
     void createMeetingWithSoftDeletedMeetingsIncludedInDailyLimit() {
+        // 테스트 목적:
+        // 삭제한 회의도 생성 횟수에 포함하는 기존 제한을 유지하는지 검증한다.
+        // given
         setUpCreatableMemberWithTodayCount(TestMeetingPolicy.DAILY_CREATE_LIMIT);
 
+        // when
+        // then
         assertThatThrownBy(() -> meetingService.createMeeting(USER_ID, TEAM_ID, createRequest(30, "API 명세 검토")))
                 .isInstanceOf(MeetingException.class)
                 .extracting("errorCode")
@@ -286,12 +318,17 @@ class MeetingServiceTest {
     }
 
     @Test
-    @DisplayName("어제 회의가 5개여도 오늘 생성된 회의가 0개이면 회의를 생성할 수 있다")
-    void createMeetingWithFiveMeetingsYesterdayAndZeroToday() {
+    @DisplayName("어제 회의가 20개여도 오늘 생성된 회의가 0개이면 회의를 생성할 수 있다")
+    void createMeetingWithTwentyMeetingsYesterdayAndZeroToday() {
+        // 테스트 목적:
+        // 생성 횟수 조회가 서버 Clock의 KST 오늘 날짜에만 적용되는지 검증한다.
+        // given
+        // when
         MeetingCreateResponse response = createMeetingWithTodayCount(0L, createRequest(30, "API 명세 검토"));
 
+        // then
         assertThat(response.meetingId()).isEqualTo(100L);
-        LocalDate today = LocalDate.now(KST_ZONE_ID);
+        LocalDate today = LocalDate.now(FIXED_CLOCK);
         verify(meetingRepository).countCreatedTodayByTeamId(
                 TEAM_ID,
                 today.atStartOfDay(),
@@ -300,12 +337,11 @@ class MeetingServiceTest {
     }
 
     @Test
-    @DisplayName("설정한 하루 생성 제한이 10개이면 오늘 5개 생성 후에도 회의를 생성할 수 있다")
+    @DisplayName("하루 생성 제한을 설정값으로 조정하는 기존 구조를 유지한다")
     void createMeetingWithConfiguredDailyLimit() {
 
         // 테스트 목적:
-        // 하루 회의 생성 제한이 설정값으로 높아진 경우
-        // 기존 기본 제한인 5개를 초과해도 회의를 생성할 수 있는지 검증한다.
+        // 기본 20개와 별도로 명시한 환경별 제한 설정을 사용하는 기존 구조를 검증한다.
 
         // given
         meetingService = new MeetingService(
@@ -324,6 +360,24 @@ class MeetingServiceTest {
         // then
         assertThat(response.meetingId()).isEqualTo(100L);
         verify(meetingRepository).saveAndFlush(any(Meeting.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2026-12-31T15:00:00Z", "2026-10-31T15:00:00Z"})
+    @DisplayName("UTC Clock에서도 월·연도 경계의 일일 생성 제한은 KST 자정 기준으로 계산한다")
+    void dailyLimitUsesKstDateAtMonthAndYearBoundary(String instant) {
+        // 테스트 목적:
+        // Clock의 시간대나 예정 날짜와 관계없이 KST 생성 당일의 반열린 구간을 조회하는지 검증한다.
+        // given
+        Clock utcClock = Clock.fixed(Instant.parse(instant), ZoneId.of("UTC"));
+        LocalDate kstDate = LocalDate.now(utcClock.withZone(KST_ZONE_ID));
+        meetingService = new MeetingService(meetingRepository, teamRepository, teamMemberRepository,
+                meetingParticipantRepository, utcClock, eventPublisher, TestMeetingPolicy.DEFAULT);
+        // when
+        createMeetingWithTodayCount(0, createRequest(30, null));
+        // then
+        verify(meetingRepository).countCreatedTodayByTeamId(TEAM_ID,
+                kstDate.atStartOfDay(), kstDate.plusDays(1).atStartOfDay());
     }
 
     @Test
@@ -1459,7 +1513,7 @@ class MeetingServiceTest {
 
     private MeetingCreateRequest attendeeRequest(List<Long> teamMemberIds, List<String> customNames) {
         return new MeetingCreateRequest(
-                "주간 스프린트 회의", "진행 상황과 이슈 공유", null, 30, teamMemberIds, customNames);
+                "주간 스프린트 회의", "진행 상황과 이슈 공유", null, 30, teamMemberIds, customNames, SCHEDULED_AT);
     }
 
     private TeamMember attendeeMember(Long id, String displayName) {
@@ -1503,7 +1557,8 @@ class MeetingServiceTest {
                 note,
                 targetDurationMinutes,
                 List.of(),
-                List.of("외부 디자이너")
+                List.of("외부 디자이너"),
+                SCHEDULED_AT
         );
     }
 

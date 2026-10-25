@@ -15,7 +15,8 @@ public record TranscriptCreatedSseEvent(
             String content,
             Long startedAtMs,
             Long endedAtMs,
-            java.time.LocalDateTime recognizedAt
+            java.time.LocalDateTime recognizedAt,
+            Long speakerId
     ) {
         return new TranscriptCreatedSseEvent(
                 TYPE,
@@ -27,7 +28,8 @@ public record TranscriptCreatedSseEvent(
                         startedAtMs,
                         endedAtMs,
                         recognizedAt,
-                        null
+                        null,
+                        speakerId
                 )
         );
     }

@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public record MeetingCreateRequest(
@@ -26,6 +27,9 @@ public record MeetingCreateRequest(
 
         List<Long> attendeeTeamMemberIds,
 
-        List<String> customAttendeeNames
+        List<String> customAttendeeNames,
+
+        @NotNull(message = "회의 예정 시작 일시를 입력해주세요.")
+        LocalDateTime scheduledAt
 ) {
 }

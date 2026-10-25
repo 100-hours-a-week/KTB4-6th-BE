@@ -4,8 +4,10 @@ import static com.backend.meety.domain.recording.RecordingFixtures.withId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -19,6 +21,7 @@ import com.backend.meety.domain.user.entity.User;
 import jakarta.persistence.EntityManager;
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -123,6 +126,99 @@ class NotificationWriterTest {
                 "test2 님이 팀에 합류했습니다"
         ))).isInstanceOf(DataIntegrityViolationException.class);
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("알림 일괄 저장 Writer는 별도 트랜잭션 하나에서 실행된다")
+    void createAllUsesRequiresNewTransaction() throws NoSuchMethodException {
+        // 테스트 목적:
+        // 팀원 전체 알림을 수신자별 트랜잭션이 아닌 하나의 REQUIRES_NEW 트랜잭션으로 저장하는지 검증한다.
+
+        // given
+        Method method = NotificationWriter.class.getMethod("createAll", List.class);
+
+        // when
+        Transactional transactional = method.getAnnotation(Transactional.class);
+
+        // then
+        assertThat(transactional).isNotNull();
+        assertThat(transactional.propagation()).isEqualTo(Propagation.REQUIRES_NEW);
+    }
+
+    @Test
+    @DisplayName("일괄 저장은 이미 알림을 받은 수신자를 제외하고 저장한 알림마다 이벤트를 발행한다")
+    void createAllSkipsExistingRecipientsAndPublishesPerSavedNotification() {
+        // 테스트 목적:
+        // 같은 이벤트 재처리로 일부 수신자에게 이미 알림이 있으면 그 수신자만 제외해 UNIQUE 충돌 없이 저장하고,
+        // 실제로 저장한 알림에 대해서만 수신자별 NotificationCreatedEvent를 발행하는지 검증한다.
+
+        // given
+        NotificationRepository notificationRepository = mock(NotificationRepository.class);
+        EntityManager entityManager = mock(EntityManager.class);
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        NotificationWriter writer = new NotificationWriter(notificationRepository, entityManager, eventPublisher);
+        Team team = withId(Team.create("미티팀"), 2L);
+        User first = withId(User.create(), 1L);
+        User third = withId(User.create(), 3L);
+        when(entityManager.getReference(Team.class, 2L)).thenReturn(team);
+        when(entityManager.getReference(User.class, 1L)).thenReturn(first);
+        when(entityManager.getReference(User.class, 3L)).thenReturn(third);
+        when(notificationRepository.findUserIdsByIdempotencyKeyAndUserIdIn(
+                "MEETING_STARTED:700", List.of(1L, 2L, 3L))).thenReturn(List.of(2L));
+        when(notificationRepository.saveAllAndFlush(anyList())).thenAnswer(invocation -> {
+            List<Notification> notifications = invocation.getArgument(0);
+            for (int i = 0; i < notifications.size(); i++) {
+                withId(notifications.get(i), 20L + i);
+            }
+            return notifications;
+        });
+
+        // when
+        writer.createAll(List.of(command(1L), command(2L), command(3L)));
+
+        // then
+        ArgumentCaptor<List<Notification>> savedCaptor = ArgumentCaptor.captor();
+        verify(notificationRepository).saveAllAndFlush(savedCaptor.capture());
+        assertThat(savedCaptor.getValue()).hasSize(2);
+        ArgumentCaptor<NotificationCreatedEvent> eventCaptor = ArgumentCaptor.forClass(NotificationCreatedEvent.class);
+        verify(eventPublisher, times(2)).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getAllValues())
+                .extracting(NotificationCreatedEvent::recipientUserId)
+                .containsExactly(1L, 3L);
+    }
+
+    @Test
+    @DisplayName("모든 수신자가 이미 알림을 받았으면 저장과 이벤트 발행을 하지 않는다")
+    void createAllDoesNothingWhenAllRecipientsAlreadyNotified() {
+        // 테스트 목적:
+        // 이벤트 전체가 재처리된 경우 빈 저장이나 중복 SSE 전송 없이 끝나는지 검증한다.
+
+        // given
+        NotificationRepository notificationRepository = mock(NotificationRepository.class);
+        EntityManager entityManager = mock(EntityManager.class);
+        ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
+        NotificationWriter writer = new NotificationWriter(notificationRepository, entityManager, eventPublisher);
+        when(notificationRepository.findUserIdsByIdempotencyKeyAndUserIdIn(
+                "MEETING_STARTED:700", List.of(1L, 2L))).thenReturn(List.of(1L, 2L));
+
+        // when
+        writer.createAll(List.of(command(1L), command(2L)));
+
+        // then
+        verify(notificationRepository, never()).saveAllAndFlush(anyList());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    private NotificationWriteCommand command(Long userId) {
+        return new NotificationWriteCommand(
+                2L,
+                userId,
+                NotificationType.MEETING_STARTED,
+                "MEETING_STARTED:700",
+                NotificationReferenceType.MEETING,
+                100L,
+                "리더 님이 회의를 시작했습니다"
+        );
     }
 
     private Notification notification(Team team, User user) {

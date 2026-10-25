@@ -11,7 +11,8 @@ public record TranscriptSegmentResponse(
         String content,
         Long startedAtMs,
         Long endedAtMs,
-        LocalDateTime recognizedAt
+        LocalDateTime recognizedAt,
+        Long speakerId
 ) {
 
     public static TranscriptSegmentResponse from(TranscriptSegment segment) {
@@ -23,7 +24,8 @@ public record TranscriptSegmentResponse(
                 segment.getContent(),
                 segment.getStartedAtMs(),
                 segment.getEndedAtMs(),
-                segment.getRecognizedAt()
+                segment.getRecognizedAt(),
+                segment.getAiSpeakerId()
         );
     }
 

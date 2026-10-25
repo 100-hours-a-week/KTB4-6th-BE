@@ -1,5 +1,6 @@
 package com.backend.meety.domain.notification.realtime;
 
+import com.backend.meety.global.config.SchedulingConfig;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -12,7 +13,7 @@ public class NotificationSseHeartbeatScheduler {
 
     private final NotificationSseService notificationSseService;
 
-    @Scheduled(fixedRate = HEARTBEAT_INTERVAL_MILLIS)
+    @Scheduled(fixedRate = HEARTBEAT_INTERVAL_MILLIS, scheduler = SchedulingConfig.CONNECTION_TASK_SCHEDULER_BEAN_NAME)
     public void sendHeartbeat() {
         notificationSseService.sendHeartbeat();
     }

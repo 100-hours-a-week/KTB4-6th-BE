@@ -56,6 +56,9 @@ public class TranscriptSegment extends BaseEntity {
     @Column(name = "recognized_at", nullable = false)
     private LocalDateTime recognizedAt;
 
+    @Column(name = "ai_speaker_id")
+    private Long aiSpeakerId;
+
     public static TranscriptSegment createFinal(
             Meeting meeting,
             String sourceSegmentKey,
@@ -63,7 +66,8 @@ public class TranscriptSegment extends BaseEntity {
             String content,
             Long startedAtMs,
             Long endedAtMs,
-            LocalDateTime recognizedAt
+            LocalDateTime recognizedAt,
+            Long aiSpeakerId
     ) {
         TranscriptSegment segment = new TranscriptSegment();
         segment.meeting = meeting;
@@ -73,6 +77,7 @@ public class TranscriptSegment extends BaseEntity {
         segment.startedAtMs = startedAtMs;
         segment.endedAtMs = endedAtMs;
         segment.recognizedAt = recognizedAt;
+        segment.aiSpeakerId = aiSpeakerId;
         segment.transcriptSpeaker = null;
         return segment;
     }

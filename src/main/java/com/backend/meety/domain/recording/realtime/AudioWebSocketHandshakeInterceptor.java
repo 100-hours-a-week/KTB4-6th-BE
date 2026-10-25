@@ -43,8 +43,7 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
             registry.find(recordingSessionId).ifPresent(previous ->
                     registry.closeAndRemove(recordingSessionId, previous, AudioWebSocketHandler.SUPERSEDED));
             boolean reusingAiConnection = aiConnectionService.hasOpenConnection(recordingSessionId);
-            OptionalLong streamEpoch = aiConnectionService.prepareStream(context);
-            if (streamEpoch.isEmpty()) {
+            if (!aiConnectionService.prepareStream(context)) {
                 log.warn("Audio WebSocket 핸드셰이크를 거절했습니다. recordingSessionId={}, reason=ai not ready",
                         recordingSessionId);
                 response.setStatusCode(HttpStatus.SERVICE_UNAVAILABLE);
@@ -55,7 +54,7 @@ public class AudioWebSocketHandshakeInterceptor implements HandshakeInterceptor 
                 return false;
             }
             restoreSequence(recordingSessionId);
-            attributes.put(CONTEXT_ATTRIBUTE, context.withStreamEpoch(streamEpoch.getAsLong()));
+            attributes.put(CONTEXT_ATTRIBUTE, context);
             log.info("Audio WebSocket 핸드셰이크를 승인했습니다. recordingSessionId={}, meetingId={}, openSessions={}",
                     recordingSessionId, context.meetingId(), registry.count());
             return true;

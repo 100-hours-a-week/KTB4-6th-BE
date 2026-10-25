@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -35,6 +36,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 class NotificationControllerTest {
@@ -136,6 +138,24 @@ class NotificationControllerTest {
                 .andExpect(jsonPath("$.data.hasNext").value(false));
 
         verify(notificationService).getNotifications(1L, "30", 20);
+    }
+
+    @Test
+    @DisplayName("클라이언트 연결이 끊긴 예외는 오류 응답을 쓰지 않는다")
+    void clientDisconnectDoesNotWriteErrorResponse() throws Exception {
+        // 테스트 목적:
+        // 클라이언트 이탈로 AsyncRequestNotUsableException이 전파돼도
+        // 공통 예외 처리기가 500 오류 응답을 쓰지 않는지 검증한다.
+
+        // given
+        when(notificationService.getNotifications(1L, null, null)).thenAnswer(invocation -> {
+            throw new AsyncRequestNotUsableException("Broken pipe");
+        });
+
+        // when, then
+        mvc.perform(get("/api/v1/notifications"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(""));
     }
 
     @Test

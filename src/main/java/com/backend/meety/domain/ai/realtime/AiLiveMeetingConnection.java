@@ -1,12 +1,18 @@
 package com.backend.meety.domain.ai.realtime;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
-import java.util.OptionalLong;
+import java.time.Instant;
+import java.util.NavigableMap;
+import java.util.TreeMap;
+import java.util.function.BiPredicate;
+import java.util.function.Consumer;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -15,31 +21,83 @@ import tools.jackson.databind.ObjectMapper;
 public class AiLiveMeetingConnection {
 
     private final Object sendLock = new Object();
-    private final AtomicLong audioSequence = new AtomicLong();
+    // Next sequence to reserve for an outgoing audio attempt; all access is under sendLock.
+    private long nextAudioSequence;
     private final CountDownLatch readyLatch = new CountDownLatch(1);
 
     private final Long recordingSessionId;
     private final Long meetingId;
-    private volatile AudioFormat audioFormat;
     private final String sessionStartRequestId;
+    private final Long startSequence;
+    private final Long transcriptSequenceStart;
+    private volatile boolean recoveryFenced;
+    private volatile boolean stopRequested;
+    private volatile boolean replayEnabled = true;
+    private volatile boolean strictRecoveryReplay;
+    private long lastAcceptedTranscriptSequence;
     private volatile WebSocketSession webSocketSession;
     private volatile AiLiveMeetingConnectionState state;
     private volatile String sessionPauseRequestId;
     private volatile String sessionResumeRequestId;
     private volatile String sessionStopRequestId;
-    private volatile String decoderResetRequestId;
-    private volatile CountDownLatch decoderReadyLatch = new CountDownLatch(0);
-    private volatile AiLiveMeetingConnectionState stateBeforeReset;
-    private long streamEpoch;
     private volatile ScheduledFuture<?> stopTimeoutFuture;
     private volatile String owner;
+    private final NavigableMap<Long, Long> pendingAudio = new TreeMap<>();
+    private long lastSentSequence = -1;
+    private long lastAckedSequence = -1;
+    private Instant lastAckReceivedAt;
+    private Instant lastAckProgressAt;
+    private boolean ackTimeoutReported;
+    private long requiredFeSequence = -1;
+    // Heartbeat state is independent of Audio ACK and protected by the existing sendLock.
+    private String lastPingRequestId;
+    private Instant lastPingSentAt;
+    private Instant lastPongReceivedAt;
+    private int consecutiveHeartbeatFailures;
+    private boolean heartbeatTimeoutReported;
+    private boolean heartbeatStopped;
 
-    public AiLiveMeetingConnection(Long recordingSessionId, Long meetingId,
-                                   AudioFormat audioFormat, String sessionStartRequestId) {
+    public record HeartbeatSnapshot(String lastPingRequestId, Instant lastPingSentAt,
+                                    Instant lastPongReceivedAt, int consecutiveHeartbeatFailures,
+                                    boolean timeoutReported) { }
+
+    public record HeartbeatTimeout(String requestId, int consecutiveFailures,
+                                   Instant detectedAt, boolean thresholdReached) { }
+
+    public record HeartbeatTick(boolean pingSent, HeartbeatTimeout timeout, Exception sendFailure) { }
+
+    public enum PongResult { ACCEPTED, STALE, EXPIRED, CLOSED }
+
+    public enum AckResult {
+        ADVANCED, DUPLICATE, STALE, INVALID, CLOSED
+    }
+
+    public record AckSnapshot(long nextAudioSequence, long lastSentSequence, long lastAckedSequence,
+                              Instant lastAckReceivedAt, Instant lastAckProgressAt) {
+        public long lag() {
+            return Math.max(0, lastSentSequence - lastAckedSequence);
+        }
+    }
+
+    public AiLiveMeetingConnection(Long recordingSessionId, Long meetingId, String sessionStartRequestId) {
+        this(recordingSessionId, meetingId, sessionStartRequestId, null, null);
+    }
+
+    public AiLiveMeetingConnection(Long recordingSessionId, Long meetingId, String sessionStartRequestId,
+                                   Long startSequence, Long transcriptSequenceStart) {
         this.recordingSessionId = recordingSessionId;
         this.meetingId = meetingId;
-        this.audioFormat = audioFormat;
         this.sessionStartRequestId = sessionStartRequestId;
+        this.startSequence = startSequence;
+        this.transcriptSequenceStart = transcriptSequenceStart;
+        lastAcceptedTranscriptSequence = transcriptSequenceStart == null ? 0 : transcriptSequenceStart - 1;
+        if (startSequence != null) {
+            nextAudioSequence = startSequence;
+            lastSentSequence = startSequence - 1;
+            lastAckedSequence = startSequence - 1;
+            replayEnabled = false;
+            strictRecoveryReplay = true;
+        }
         this.state = AiLiveMeetingConnectionState.CONNECTING;
     }
 
@@ -51,22 +109,51 @@ public class AiLiveMeetingConnection {
         return meetingId;
     }
 
-    public AudioFormat audioFormat() {
-        return audioFormat;
-    }
-
     public String sessionStartRequestId() {
         return sessionStartRequestId;
     }
 
-    public WebSocketSession webSocketSession() {
-        return webSocketSession;
+    public Long startSequence() { return startSequence; }
+    public Long transcriptSequenceStart() { return transcriptSequenceStart; }
+    public boolean isRecoveryConnection() { return startSequence != null; }
+    public boolean isRecoveryFenced() { return recoveryFenced; }
+    public boolean isStopRequested() { return stopRequested; }
+    public void requestStop() { stopRequested = true; }
+    public void fenceForRecovery() { recoveryFenced = true; }
+    public void enableReplay() { replayEnabled = true; }
+    public void finishRecoveryReplay() { strictRecoveryReplay = false; }
+
+    public boolean attachIfActive(WebSocketSession session, BooleanSupplier current) {
+        synchronized (sendLock) {
+            if (recoveryFenced || stopRequested || isClosed() || !current.getAsBoolean()) { return false; }
+            webSocketSession = session;
+            return true;
+        }
     }
 
-    public long streamEpoch() {
+    public boolean sendStart(TextMessage message) throws IOException {
         synchronized (sendLock) {
-            return streamEpoch;
+            if (recoveryFenced || stopRequested || state() != AiLiveMeetingConnectionState.CONNECTING) { return false; }
+            markStartSent();
+            webSocketSession.sendMessage(message);
+            return true;
         }
+    }
+
+    public boolean enqueueTranscriptIfActive(long sequence, BooleanSupplier enqueue) {
+        synchronized (sendLock) {
+            if (recoveryFenced || isClosed() || !enqueue.getAsBoolean()) { return false; }
+            lastAcceptedTranscriptSequence = Math.max(lastAcceptedTranscriptSequence, sequence);
+            return true;
+        }
+    }
+
+    public long lastAcceptedTranscriptSequence() {
+        synchronized (sendLock) { return lastAcceptedTranscriptSequence; }
+    }
+
+    public WebSocketSession webSocketSession() {
+        return webSocketSession;
     }
 
     public synchronized AiLiveMeetingConnectionState state() {
@@ -86,21 +173,180 @@ public class AiLiveMeetingConnection {
     }
 
     /**
-     * audio.meta와 바이너리 프레임을 한 쌍으로 전송한다. 현재 스트림 세대가 아니거나 READY가 아니면 전송하지 않고 false를 반환한다.
+     * audio.meta와 바이너리 프레임을 한 쌍으로 전송한다. READY가 아니면 전송하지 않고 false를 반환한다.
      */
-    public boolean forwardAudio(ObjectMapper objectMapper, long streamEpoch, byte[] audio) throws IOException {
+    public boolean forwardAudio(ObjectMapper objectMapper, byte[] audio,
+                                long feSequence, Clock clock, int maxPendingChunks) throws IOException {
         synchronized (sendLock) {
-            if (streamEpoch != this.streamEpoch || state() != AiLiveMeetingConnectionState.READY) {
+            if (recoveryFenced || !replayEnabled || state() != AiLiveMeetingConnectionState.READY) {
                 return false;
             }
+            if (strictRecoveryReplay && feSequence != nextAudioSequence) { return false; }
             WebSocketSession session = webSocketSession;
             if (session == null || !session.isOpen()) {
                 return false;
             }
-            AiAudioMetaMessage meta = AiAudioMetaMessage.of(audioSequence.getAndIncrement());
+            if (requiredFeSequence >= 0 && feSequence != requiredFeSequence) {
+                return false;
+            }
+            if (pendingAudio.size() >= maxPendingChunks) {
+                requiredFeSequence = feSequence;
+                return false;
+            }
+            // Do not cumulatively acknowledge past a chunk rejected by our own pending limit/write failure.
+            requiredFeSequence = feSequence;
+            long sequence = nextAudioSequence++;
+            AiAudioMetaMessage meta = AiAudioMetaMessage.of(sequence);
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(meta)));
             session.sendMessage(new BinaryMessage(audio));
+            Instant now = clock.instant();
+            if (lastSentSequence == lastAckedSequence) {
+                lastAckProgressAt = now;
+            }
+            lastSentSequence = sequence;
+            pendingAudio.put(sequence, feSequence);
+            requiredFeSequence = -1;
             return true;
+        }
+    }
+
+    /** Caller also holds the FE stream-state lock: stream state -> sendLock is the global lock order. */
+    public AckResult acknowledge(long sequence, Instant now, BiPredicate<Long, Integer> checkpoint) {
+        synchronized (sendLock) {
+            if (recoveryFenced || state() == AiLiveMeetingConnectionState.CLOSED || state() == AiLiveMeetingConnectionState.STOP_SENT
+                    || state() == AiLiveMeetingConnectionState.ENDED) {
+                return AckResult.CLOSED;
+            }
+            if (sequence < 0 || sequence > lastSentSequence) {
+                return AckResult.INVALID;
+            }
+            if (sequence < lastAckedSequence) {
+                return AckResult.STALE;
+            }
+            boolean duplicate = sequence == lastAckedSequence;
+            Long feSequence = pendingAudio.get(sequence);
+            if (!duplicate && feSequence == null) {
+                return AckResult.INVALID;
+            }
+            if (!duplicate) {
+                lastAckedSequence = sequence;
+                lastAckReceivedAt = now;
+                lastAckProgressAt = lastSentSequence > lastAckedSequence ? now : null;
+                ackTimeoutReported = false;
+            }
+            if (feSequence != null) {
+                NavigableMap<Long, Long> confirmed = pendingAudio.headMap(sequence, true);
+                if (checkpoint.test(feSequence, confirmed.size())) {
+                    confirmed.clear();
+                }
+            }
+            return duplicate ? AckResult.DUPLICATE : AckResult.ADVANCED;
+        }
+    }
+
+    public AckSnapshot ackSnapshot() {
+        synchronized (sendLock) {
+            return new AckSnapshot(nextAudioSequence, lastSentSequence, lastAckedSequence,
+                    lastAckReceivedAt, lastAckProgressAt);
+        }
+    }
+
+    public int pendingAudioCount() {
+        synchronized (sendLock) {
+            return pendingAudio.size();
+        }
+    }
+
+    public HeartbeatSnapshot heartbeatSnapshot() {
+        synchronized (sendLock) {
+            return new HeartbeatSnapshot(lastPingRequestId, lastPingSentAt, lastPongReceivedAt,
+                    consecutiveHeartbeatFailures, heartbeatTimeoutReported);
+        }
+    }
+
+    public HeartbeatTick heartbeatTick(ObjectMapper mapper, AiHeartbeatProperties properties,
+                                       Clock clock, Supplier<String> requestIds, BooleanSupplier isCurrent) {
+        synchronized (sendLock) {
+            if (!isCurrent.getAsBoolean() || !acceptsHeartbeatPong()) {
+                return new HeartbeatTick(false, null, null);
+            }
+            Instant now = clock.instant();
+            HeartbeatTimeout timeout = null;
+            if (lastPingRequestId != null) {
+                if (now.isBefore(lastPingSentAt.plus(properties.pongTimeout()))) {
+                    return new HeartbeatTick(false, null, null);
+                }
+                if (consecutiveHeartbeatFailures < Integer.MAX_VALUE) {
+                    consecutiveHeartbeatFailures++;
+                }
+                boolean reached = !heartbeatTimeoutReported
+                        && consecutiveHeartbeatFailures >= properties.failureThreshold();
+                heartbeatTimeoutReported |= reached;
+                timeout = new HeartbeatTimeout(lastPingRequestId, consecutiveHeartbeatFailures, now, reached);
+                lastPingRequestId = null;
+            }
+            if ((state() != AiLiveMeetingConnectionState.READY && state() != AiLiveMeetingConnectionState.PAUSED)
+                    || (lastPingSentAt != null && now.isBefore(lastPingSentAt.plus(properties.interval())))) {
+                return new HeartbeatTick(false, timeout, null);
+            }
+            WebSocketSession session = webSocketSession;
+            if (session == null || !session.isOpen()) {
+                return new HeartbeatTick(false, timeout, null);
+            }
+            try {
+                String requestId = requestIds.get();
+                session.sendMessage(new TextMessage(mapper.writeValueAsString(
+                        AiHeartbeatPingMessage.of(recordingSessionId, requestId))));
+                lastPingRequestId = requestId;
+                lastPingSentAt = clock.instant();
+                return new HeartbeatTick(true, timeout, null);
+            } catch (Exception e) {
+                return new HeartbeatTick(false, timeout, e);
+            }
+        }
+    }
+
+    public PongResult receiveHeartbeatPong(String requestId, Clock clock, Duration pongTimeout,
+                                           BooleanSupplier isCurrent) {
+        synchronized (sendLock) {
+            if (!isCurrent.getAsBoolean() || !acceptsHeartbeatPong()) {
+                return PongResult.CLOSED;
+            }
+            if (lastPingRequestId == null || !lastPingRequestId.equals(requestId)) {
+                return PongResult.STALE;
+            }
+            Instant now = clock.instant();
+            if (!now.isBefore(lastPingSentAt.plus(pongTimeout))) {
+                return PongResult.EXPIRED;
+            }
+            lastPongReceivedAt = now;
+            lastPingRequestId = null;
+            consecutiveHeartbeatFailures = 0;
+            heartbeatTimeoutReported = false;
+            return PongResult.ACCEPTED;
+        }
+    }
+
+    private boolean acceptsHeartbeatPong() {
+        if (heartbeatStopped || recoveryFenced) {
+            return false;
+        }
+        return switch (state()) {
+            case READY, PAUSED, PAUSE_SENT, RESUME_SENT -> true;
+            default -> false;
+        };
+    }
+
+    public void detectAckTimeout(Instant now, Duration timeout, Consumer<AckSnapshot> onTimeout) {
+        synchronized (sendLock) {
+            if (recoveryFenced || state() == AiLiveMeetingConnectionState.CLOSED
+                    || lastSentSequence <= lastAckedSequence || ackTimeoutReported) {
+                return;
+            }
+            if (lastAckProgressAt != null && !now.isBefore(lastAckProgressAt.plus(timeout))) {
+                ackTimeoutReported = true;
+                onTimeout.accept(ackSnapshot());
+            }
         }
     }
 
@@ -136,33 +382,10 @@ public class AiLiveMeetingConnection {
         }
     }
 
-    public OptionalLong sendDecoderReset(ObjectMapper objectMapper, String requestId, AudioFormat audioFormat)
-            throws IOException {
-        synchronized (sendLock) {
-            AiLiveMeetingConnectionState current = state();
-            if (current != AiLiveMeetingConnectionState.READY && current != AiLiveMeetingConnectionState.PAUSED) {
-                return OptionalLong.empty();
-            }
-            WebSocketSession session = webSocketSession;
-            if (session == null || !session.isOpen()) {
-                return OptionalLong.empty();
-            }
-            // forwardAudio와 같은 락에서 세대를 올려야 reset 뒤에 옛 스트림 청크가 AI로 가지 않는다
-            streamEpoch++;
-            this.stateBeforeReset = current;
-            this.state = AiLiveMeetingConnectionState.RESET_SENT;
-            this.audioFormat = audioFormat;
-            this.decoderResetRequestId = requestId;
-            this.decoderReadyLatch = new CountDownLatch(1);
-            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiDecoderResetMessage.create(this))));
-            return OptionalLong.of(streamEpoch);
-        }
-    }
-
     public boolean sendStop(ObjectMapper objectMapper, String requestId) throws IOException {
         synchronized (sendLock) {
-            if (state() != AiLiveMeetingConnectionState.READY && state() != AiLiveMeetingConnectionState.PAUSED
-                    && state() != AiLiveMeetingConnectionState.RESET_SENT) {
+            stopRequested = true;
+            if (state() != AiLiveMeetingConnectionState.READY && state() != AiLiveMeetingConnectionState.PAUSED) {
                 return false;
             }
             WebSocketSession session = webSocketSession;
@@ -171,7 +394,9 @@ public class AiLiveMeetingConnection {
             }
             this.sessionStopRequestId = requestId;
             this.state = AiLiveMeetingConnectionState.STOP_SENT;
+            clearHeartbeatState();
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiSessionStopMessage.of(this))));
+            clearAudioAckState();
             return true;
         }
     }
@@ -184,6 +409,8 @@ public class AiLiveMeetingConnection {
     }
 
     public synchronized void markReady() {
+        if (recoveryFenced || (state != AiLiveMeetingConnectionState.CONNECTING
+                && state != AiLiveMeetingConnectionState.START_SENT)) { return; }
         this.state = AiLiveMeetingConnectionState.READY;
         readyLatch.countDown();
         notifyAll();
@@ -200,22 +427,6 @@ public class AiLiveMeetingConnection {
             this.state = AiLiveMeetingConnectionState.READY;
             notifyAll();
         }
-    }
-
-    public synchronized void markDecoderReady() {
-        if (state == AiLiveMeetingConnectionState.RESET_SENT) {
-            this.state = stateBeforeReset;
-            decoderReadyLatch.countDown();
-            notifyAll();
-        }
-    }
-
-    public boolean awaitDecoderReady(Duration timeout) throws InterruptedException {
-        if (!decoderReadyLatch.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-            return false;
-        }
-        AiLiveMeetingConnectionState current = state();
-        return current == AiLiveMeetingConnectionState.READY || current == AiLiveMeetingConnectionState.PAUSED;
     }
 
     public synchronized boolean awaitState(AiLiveMeetingConnectionState expected, Duration timeout)
@@ -236,13 +447,18 @@ public class AiLiveMeetingConnection {
                 && state() == AiLiveMeetingConnectionState.READY;
     }
 
-    public synchronized boolean markStopSent(String requestId) {
-        if (state != AiLiveMeetingConnectionState.READY && state != AiLiveMeetingConnectionState.PAUSED) {
-            return false;
+    public boolean markStopSent(String requestId) {
+        synchronized (sendLock) {
+            synchronized (this) {
+                if (state != AiLiveMeetingConnectionState.READY && state != AiLiveMeetingConnectionState.PAUSED) {
+                    return false;
+                }
+                this.sessionStopRequestId = requestId;
+                this.state = AiLiveMeetingConnectionState.STOP_SENT;
+                clearHeartbeatState();
+                return true;
+            }
         }
-        this.sessionStopRequestId = requestId;
-        this.state = AiLiveMeetingConnectionState.STOP_SENT;
-        return true;
     }
 
     public String sessionPauseRequestId() {
@@ -253,17 +469,18 @@ public class AiLiveMeetingConnection {
         return sessionResumeRequestId;
     }
 
-    public String decoderResetRequestId() {
-        return decoderResetRequestId;
-    }
-
     public String sessionStopRequestId() {
         return sessionStopRequestId;
     }
 
-    public synchronized void markEnded() {
-        if (state == AiLiveMeetingConnectionState.STOP_SENT) {
-            this.state = AiLiveMeetingConnectionState.ENDED;
+    public void markEnded() {
+        synchronized (sendLock) {
+            synchronized (this) {
+                if (state == AiLiveMeetingConnectionState.STOP_SENT) {
+                    this.state = AiLiveMeetingConnectionState.ENDED;
+                    clearHeartbeatState();
+                }
+            }
         }
     }
 
@@ -282,10 +499,34 @@ public class AiLiveMeetingConnection {
         return state == AiLiveMeetingConnectionState.CLOSED;
     }
 
-    public synchronized void close() {
-        this.state = AiLiveMeetingConnectionState.CLOSED;
-        readyLatch.countDown();
-        decoderReadyLatch.countDown();
-        notifyAll();
+    public void close() {
+        synchronized (sendLock) {
+            synchronized (this) {
+                this.state = AiLiveMeetingConnectionState.CLOSED;
+                clearAudioAckState();
+                clearHeartbeatState();
+                readyLatch.countDown();
+                notifyAll();
+            }
+        }
+    }
+
+    private void clearAudioAckState() {
+        pendingAudio.clear();
+        lastSentSequence = -1;
+        lastAckedSequence = -1;
+        lastAckReceivedAt = null;
+        lastAckProgressAt = null;
+        ackTimeoutReported = false;
+        requiredFeSequence = -1;
+    }
+
+    private void clearHeartbeatState() {
+        heartbeatStopped = true;
+        lastPingRequestId = null;
+        lastPingSentAt = null;
+        lastPongReceivedAt = null;
+        consecutiveHeartbeatFailures = 0;
+        heartbeatTimeoutReported = false;
     }
 }

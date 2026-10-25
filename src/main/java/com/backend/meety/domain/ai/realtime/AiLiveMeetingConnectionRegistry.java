@@ -8,6 +8,13 @@ import org.springframework.stereotype.Component;
 @Component
 public class AiLiveMeetingConnectionRegistry {
 
+    private final AiRecoveryRegistry recoveries;
+
+    public AiLiveMeetingConnectionRegistry() { this.recoveries = null; }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AiLiveMeetingConnectionRegistry(AiRecoveryRegistry recoveries) { this.recoveries = recoveries; }
+
     private final ConcurrentHashMap<Long, AiLiveMeetingConnection> connections = new ConcurrentHashMap<>();
 
     public synchronized boolean reserve(AiLiveMeetingConnection connection) {
@@ -23,12 +30,39 @@ public class AiLiveMeetingConnectionRegistry {
         return Optional.ofNullable(connections.get(recordingSessionId));
     }
 
+    public void assignOwner(Long recordingSessionId, String owner) {
+        find(recordingSessionId).ifPresent(connection -> {
+            if (recoveries != null) {
+                recoveries.find(recordingSessionId).ifPresent(context -> {
+                    synchronized (context) {
+                        if (!owner.equals(context.owner)) {
+                            recoveries.remove(context);
+                            if (context.current == connection && !connection.isClosed() && !connection.isRecoveryFenced()) {
+                                connection.enableReplay();
+                                connection.finishRecoveryReplay();
+                            }
+                        }
+                    }
+                });
+            }
+            connection.assignOwner(owner);
+        });
+    }
+
     public void remove(Long recordingSessionId, AiLiveMeetingConnection connection) {
-        connections.remove(recordingSessionId, connection);
+        if (connections.remove(recordingSessionId, connection)) {
+            if (recoveries != null) { recoveries.cancelConnection(connection); }
+            connection.close();
+        }
     }
 
     public List<AiLiveMeetingConnection> findAll() {
         return List.copyOf(connections.values());
+    }
+
+    public void detachRecovery(AiLiveMeetingConnection connection) {
+        connection.fenceForRecovery();
+        connections.remove(connection.recordingSessionId(), connection);
     }
 
     public int count() {

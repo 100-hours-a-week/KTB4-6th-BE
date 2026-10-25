@@ -6,6 +6,10 @@ import org.springframework.stereotype.Component;
 @Component
 public class AiRequestIdGenerator {
 
+    public String heartbeatRequestId() {
+        return "hb-" + UUID.randomUUID();
+    }
+
     public String sessionStartRequestId() {
         return "start-" + UUID.randomUUID();
     }
@@ -20,9 +24,5 @@ public class AiRequestIdGenerator {
 
     public String sessionResumeRequestId() {
         return "resume-" + UUID.randomUUID();
-    }
-
-    public String decoderResetRequestId() {
-        return "reset-" + UUID.randomUUID();
     }
 }

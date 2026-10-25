@@ -1,6 +1,7 @@
 package com.backend.meety.domain.notification.repository;
 
 import com.backend.meety.domain.notification.entity.Notification;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
@@ -72,5 +73,16 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
             @Param("userId") Long userId,
             @Param("teamId") Long teamId,
             @Param("maxId") Long maxId
+    );
+
+    @Query("""
+            select n.user.id
+            from Notification n
+            where n.idempotencyKey = :idempotencyKey
+              and n.user.id in :userIds
+            """)
+    List<Long> findUserIdsByIdempotencyKeyAndUserIdIn(
+            @Param("idempotencyKey") String idempotencyKey,
+            @Param("userIds") Collection<Long> userIds
     );
 }

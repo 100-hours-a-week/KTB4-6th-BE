@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Slf4j
@@ -17,6 +18,7 @@ public class NotificationSseService {
     private static final String NOTIFICATION_CREATED_EVENT_NAME = "NOTIFICATION_CREATED";
     private static final String HEARTBEAT_EVENT_NAME = "HEARTBEAT";
     private static final long RECONNECT_TIME_MILLIS = 3_000L;
+    private static final String CLIENT_DISCONNECTED_REASON = "client_disconnected";
 
     private final NotificationSseRegistry registry;
     private final NotificationSseEmitterFactory emitterFactory;
@@ -72,10 +74,11 @@ public class NotificationSseService {
             Throwable throwable
     ) {
         registry.remove(userId, connectionId, emitter);
-        if (throwable == null) {
+        if (throwable == null || throwable instanceof AsyncRequestNotUsableException) {
             log.info("[NOTIFICATION_SSE] 연결이 종료되었습니다. userId={}, connectionId={}, reason={}, "
                             + "userEmitters={}, totalEmitters={}",
-                    userId, connectionId, reason, registry.count(userId), registry.countAll());
+                    userId, connectionId, throwable == null ? reason : CLIENT_DISCONNECTED_REASON,
+                    registry.count(userId), registry.countAll());
             return;
         }
         log.warn("[NOTIFICATION_SSE] 연결이 오류로 종료되었습니다. userId={}, connectionId={}, reason={}, "

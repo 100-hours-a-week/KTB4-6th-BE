@@ -5,8 +5,7 @@ import java.util.Optional;
 
 public enum AudioFormat {
 
-    WEBM_OPUS("webm_opus"),
-    MP4_AAC("mp4_aac");
+    PCM_S16LE("pcm_s16le");
 
     private final String value;
 

@@ -93,7 +93,7 @@ class TranscriptServiceTest {
     void saveFinalSegmentStoresTranscriptAndPublishesEvent() {
         // 테스트 목적:
         // AI가 전달한 최종 전사 세그먼트가 저장되고
-        // 저장된 전사 기준으로 TranscriptCreatedEvent가 발행되는지 검증한다.
+        // 저장된 전사와 AI 화자 식별자로 TranscriptCreatedEvent가 발행되는지 검증한다.
 
         // given
         when(transcriptSegments.saveAndFlush(any(TranscriptSegment.class)))
@@ -113,6 +113,7 @@ class TranscriptServiceTest {
         assertThat(segment.getStartedAtMs()).isEqualTo(12000L);
         assertThat(segment.getEndedAtMs()).isEqualTo(14500L);
         assertThat(segment.getRecognizedAt()).isEqualTo(RECOGNIZED_AT);
+        assertThat(segment.getAiSpeakerId()).isZero();
         assertThat(segment.getTranscriptSpeaker()).isNull();
 
         verify(eventPublisher).publishEvent(new TranscriptCreatedEvent(
@@ -122,7 +123,8 @@ class TranscriptServiceTest {
                 "final text",
                 12000L,
                 14500L,
-                RECOGNIZED_AT
+                RECOGNIZED_AT,
+                0L
         ));
     }
 
@@ -183,6 +185,51 @@ class TranscriptServiceTest {
         assertThat(response.segments()).extracting("sequenceNumber").containsExactly(1L, 2L);
         assertThat(response.segments()).extracting("content").containsExactly("first text", "second text");
         verify(meetingService).validateMeetingAccess(1L, 2L);
+    }
+
+    @Test
+    @DisplayName("전사 재조회는 저장된 AI speakerId 0과 미확인 null을 그대로 반환한다")
+    void getTranscriptsReturnsSavedAiSpeakerId() {
+        // 테스트 목적:
+        // 새로고침 후 전사를 조회해도 AI 화자 번호 0이 유지되고
+        // 화자 번호가 없는 기존 전사는 null로 반환되는지 검증한다.
+
+        // given
+        TranscriptSegment identified = withId(TranscriptSegment.createFinal(
+                meeting, "700:1", 1L, "첫 발화", 1000L, 1500L, RECOGNIZED_AT, 0L), 901L);
+        TranscriptSegment unknown = segment(902L, 2L, "화자 미확인");
+        when(transcriptSegments.findAllByMeetingIdOrderBySequence(100L))
+                .thenReturn(List.of(identified, unknown));
+
+        // when
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L);
+
+        // then
+        assertThat(response.segments().get(0).speakerId()).isZero();
+        assertThat(response.segments().get(1).speakerId()).isNull();
+        assertThat(response.segments().get(0).speakerDisplayName()).isNull();
+    }
+
+    @Test
+    @DisplayName("화자 매핑 이후 검색 조회에서도 AI 원본 speakerId는 바뀌지 않는다")
+    void searchTranscriptsKeepsAiSpeakerIdAfterSpeakerMapping() {
+        // 테스트 목적:
+        // 종료 후 별도 화자 매핑이 적용되어 표시명이 바뀌어도
+        // AI가 실시간 전사에서 보낸 원본 speakerId는 유지되는지 검증한다.
+
+        // given
+        TranscriptSegment segment = withId(TranscriptSegment.createFinal(
+                meeting, "700:1", 1L, "검색 대상", 1000L, 1500L, RECOGNIZED_AT, 0L), 901L);
+        segment.assignSpeaker(speaker(301L, "화자 1", null, "진행자"));
+        when(transcriptSegments.searchByMeetingIdAndContent(100L, "검색"))
+                .thenReturn(List.of(segment));
+
+        // when
+        TranscriptSegmentListResponse response = service.getTranscripts(1L, 100L, "검색");
+
+        // then
+        assertThat(response.segments().get(0).speakerId()).isZero();
+        assertThat(response.segments().get(0).speakerDisplayName()).isEqualTo("진행자");
     }
 
     @Test
@@ -1276,7 +1323,7 @@ class TranscriptServiceTest {
                 AiTranscriptSegmentMessage.TYPE,
                 100L,
                 700L,
-                new AiTranscriptSegmentPayload(31L, "final text", 12000L, 14500L, RECOGNIZED_AT)
+                new AiTranscriptSegmentPayload(31L, "final text", 12000L, 14500L, RECOGNIZED_AT, 0L)
         );
     }
 
@@ -1288,7 +1335,8 @@ class TranscriptServiceTest {
                 content,
                 sequenceNumber * 1000,
                 sequenceNumber * 1000 + 500,
-                RECOGNIZED_AT
+                RECOGNIZED_AT,
+                null
         ), id);
     }
 

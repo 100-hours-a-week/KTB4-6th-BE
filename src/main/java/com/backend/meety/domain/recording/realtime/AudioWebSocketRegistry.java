@@ -44,7 +44,32 @@ public class AudioWebSocketRegistry {
         return streamStates.computeIfAbsent(recordingSessionId, ignored -> new AudioStreamState());
     }
 
+    public void installRecoveryState(Long recordingSessionId, String connectionId, long checkpoint) {
+        // Publish a fully initialized state without locking the retired stream state.
+        AudioStreamState state = new AudioStreamState();
+        state.bind(connectionId);
+        state.restore(checkpoint);
+        streamStates.put(recordingSessionId, state);
+    }
+
     public void removeStreamState(Long recordingSessionId) {
-        streamStates.remove(recordingSessionId);
+        AudioStreamState state = streamStates.get(recordingSessionId);
+        if (state != null) {
+            synchronized (state) {
+                state.close();
+                streamStates.remove(recordingSessionId, state);
+            }
+        }
+    }
+
+    public Optional<AudioStreamState> findStreamState(Long recordingSessionId) {
+        return Optional.ofNullable(streamStates.get(recordingSessionId));
+    }
+
+    public void removeStreamState(Long recordingSessionId, AudioStreamState expected) {
+        synchronized (expected) {
+            expected.close();
+            streamStates.remove(recordingSessionId, expected);
+        }
     }
 }

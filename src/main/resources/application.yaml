@@ -38,6 +38,9 @@ notification:
     max-pool-size: ${NOTIFICATION_EXECUTOR_MAX_POOL_SIZE:4}
     queue-capacity: ${NOTIFICATION_EXECUTOR_QUEUE_CAPACITY:100}
 
+connection-scheduler:
+  pool-size: ${CONNECTION_SCHEDULER_POOL_SIZE:4}
+
 recording:
   owner:
     ttl: ${RECORDING_OWNER_TTL:30s}
@@ -56,6 +59,18 @@ meeting-sse:
     max-pending-per-meeting: ${MEETING_SSE_MAX_PENDING_PER_MEETING:100}
     max-pending-total: ${MEETING_SSE_MAX_PENDING_TOTAL:1000}
 
+transcript-save:
+  max-pending-per-recording: ${TRANSCRIPT_SAVE_MAX_PENDING_PER_RECORDING:500}
+  max-pending-total: ${TRANSCRIPT_SAVE_MAX_PENDING_TOTAL:5000}
+  retry-initial-backoff: ${TRANSCRIPT_SAVE_RETRY_INITIAL_BACKOFF:1s}
+  retry-max-backoff: ${TRANSCRIPT_SAVE_RETRY_MAX_BACKOFF:5s}
+  retry-max-duration: ${TRANSCRIPT_SAVE_RETRY_MAX_DURATION:60s}
+  executor:
+    core-pool-size: ${TRANSCRIPT_SAVE_EXECUTOR_CORE_POOL_SIZE:4}
+    max-pool-size: ${TRANSCRIPT_SAVE_EXECUTOR_MAX_POOL_SIZE:4}
+    queue-capacity: ${TRANSCRIPT_SAVE_EXECUTOR_QUEUE_CAPACITY:100}
+    shutdown-await-seconds: ${TRANSCRIPT_SAVE_EXECUTOR_SHUTDOWN_AWAIT_SECONDS:20}
+
 chat:
   executor:
     core-pool-size: ${CHAT_EXECUTOR_CORE_POOL_SIZE:8}
@@ -63,6 +78,26 @@ chat:
     queue-capacity: ${CHAT_EXECUTOR_QUEUE_CAPACITY:1000}
 
 ai:
+  stt:
+    prewarm:
+      http-url: ${AI_STT_PREWARM_HTTP_URL:${ai.http-url}}
+      scheduler-delay: ${AI_STT_PREWARM_SCHEDULER_DELAY:10s}
+      lookahead: ${AI_STT_PREWARM_LOOKAHEAD:1m}
+      read-timeout: ${AI_STT_PREWARM_READ_TIMEOUT:3s}
+  recovery:
+    max-attempts: ${AI_RECOVERY_MAX_ATTEMPTS:2}
+    attempt-timeout: ${AI_RECOVERY_ATTEMPT_TIMEOUT:5s}
+    success-ack-chunks: ${AI_RECOVERY_SUCCESS_ACK_CHUNKS:10}
+    workers: ${AI_RECOVERY_WORKERS:2}
+    queue-capacity: ${AI_RECOVERY_QUEUE_CAPACITY:64}
+  heartbeat:
+    interval: ${AI_HEARTBEAT_INTERVAL:5s}
+    pong-timeout: ${AI_HEARTBEAT_PONG_TIMEOUT:5s}
+    failure-threshold: ${AI_HEARTBEAT_FAILURE_THRESHOLD:2}
+  audio-ack:
+    timeout: ${AI_AUDIO_ACK_TIMEOUT:5s}
+    poll-delay: ${AI_AUDIO_ACK_POLL_DELAY:1s}
+    max-pending-chunks: ${AI_AUDIO_ACK_MAX_PENDING_CHUNKS:1024}
   request:
     recovery:
       processing-timeout: ${AI_REQUEST_PROCESSING_TIMEOUT:70m}

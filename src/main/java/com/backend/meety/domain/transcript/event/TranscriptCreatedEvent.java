@@ -9,6 +9,7 @@ public record TranscriptCreatedEvent(
         String content,
         Long startedAtMs,
         Long endedAtMs,
-        LocalDateTime recognizedAt
+        LocalDateTime recognizedAt,
+        Long speakerId
 ) {
 }

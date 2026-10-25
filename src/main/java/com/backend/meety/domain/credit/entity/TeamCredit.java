@@ -55,4 +55,9 @@ public class TeamCredit extends BaseEntity {
     public void use(long amount) {
         balance -= amount;
     }
+
+    /** Restores a previously charged amount in full, unlike a capped promotional grant. */
+    public void restore(long amount) {
+        balance = Math.addExact(balance, amount);
+    }
 }

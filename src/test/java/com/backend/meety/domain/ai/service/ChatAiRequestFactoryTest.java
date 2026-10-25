@@ -45,7 +45,7 @@ class ChatAiRequestFactoryTest {
         AiChatbotMessage failed = message(8801L, "담당자는요?");
         AiChatbotMessage current = message(8802L, "지금까지 결정된 사항 정리해줘");
         TranscriptSegment segment = withId(TranscriptSegment.createFinal(
-                meeting, "seg-1", 8L, "배포는 금요일에 진행합시다.", 12000L, 15000L, NOW), 801L);
+                meeting, "seg-1", 8L, "배포는 금요일에 진행합시다.", 12000L, 15000L, NOW, null), 801L);
         when(messages.findPreviousByMeetingId(100L, 8802L)).thenReturn(List.of(answered, failed));
         when(transcripts.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of(segment));
 
