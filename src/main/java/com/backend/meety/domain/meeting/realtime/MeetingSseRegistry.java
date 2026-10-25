@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Slf4j
@@ -133,6 +134,10 @@ public class MeetingSseRegistry {
         }
         try {
             sendEmitter(emitter, eventName, data);
+        } catch (AsyncRequestNotUsableException e) {
+            sendFailures.increment();
+            log.debug("SSE 클라이언트 연결이 끊겼습니다. meetingId={}, userId={}, eventName={}",
+                    meetingId, userId, eventName);
         } catch (IOException | RuntimeException e) {
             sendFailures.increment();
             log.warn("SSE 이벤트 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",
@@ -155,6 +160,12 @@ public class MeetingSseRegistry {
         }
         try {
             sendEmitter(emitter, eventName, data);
+        } catch (AsyncRequestNotUsableException e) {
+            sendFailures.increment();
+            log.debug("SSE 클라이언트 연결이 끊겼습니다. meetingId={}, userId={}, eventName={}",
+                    meetingId, userId, eventName);
+            completeEmitter(meetingId, userId, emitter);
+            remove(meetingId, userId, emitter);
         } catch (IOException | RuntimeException e) {
             sendFailures.increment();
             log.warn("SSE broadcast 전송에 실패했습니다. meetingId={}, userId={}, eventName={}",

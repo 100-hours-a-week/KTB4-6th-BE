@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -126,6 +127,32 @@ class NotificationSseRegistryTest {
         assertReceived(otherUser, "HEARTBEAT", "heartbeat");
         assertThat(registry.find(1L, "conn-2")).isEmpty();
         assertThat(registry.countAll()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("클라이언트가 끊긴 연결의 heartbeat 실패도 해당 emitter만 제거한다")
+    void heartbeatClientDisconnectRemovesOnlyDisconnectedEmitter() {
+        // 테스트 목적:
+        // 브라우저가 이미 떠나 heartbeat 전송이 AsyncRequestNotUsableException으로 실패해도
+        // 기존 전송 실패와 같이 해당 연결만 정리되는지 검증한다.
+
+        // given
+        NotificationSseRegistry registry = new NotificationSseRegistry();
+        TestSseEmitter alive = new TestSseEmitter();
+        TestSseEmitter disconnected = new TestSseEmitter();
+        disconnected.sendFailure = new AsyncRequestNotUsableException("Broken pipe");
+        registry.register(1L, "conn-1", alive);
+        registry.register(2L, "conn-2", disconnected);
+
+        // when
+        int targetCount = registry.broadcast("HEARTBEAT", "heartbeat");
+
+        // then
+        assertThat(targetCount).isEqualTo(2);
+        assertReceived(alive, "HEARTBEAT", "heartbeat");
+        assertThat(disconnected.completed).isTrue();
+        assertThat(registry.find(2L, "conn-2")).isEmpty();
+        assertThat(registry.countAll()).isEqualTo(1);
     }
 
     @Test

@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Slf4j
@@ -85,6 +86,11 @@ public class NotificationSseRegistry {
             connection.emitter().send(SseEmitter.event()
                     .name(eventName)
                     .data(data));
+        } catch (AsyncRequestNotUsableException e) {
+            log.debug("알림 SSE 클라이언트 연결이 끊겼습니다. userId={}, connectionId={}, eventName={}",
+                    connection.userId(), connection.connectionId(), eventName);
+            complete(connection);
+            remove(connection.userId(), connection.connectionId(), connection.emitter());
         } catch (IOException | RuntimeException e) {
             log.warn("알림 SSE 이벤트 전송에 실패했습니다. userId={}, connectionId={}, eventName={}",
                     connection.userId(), connection.connectionId(), eventName, e);
