@@ -9,11 +9,17 @@ permissions:
 
 env:
   IMAGE_NAME: ${{ vars.DOCKERHUB_USERNAME }}/meety-be
+  # CI에서 생성하는 JAR와 런타임 agent의 Sentry 버전을 일치시킨다.
+  BE_SENTRY_VERSION: 8.59.0
 
 jobs:
-  test:
-    name: BE 테스트
+  docker-build:
+    name: BE 테스트·빌드 및 이미지 게시
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.tag.outputs.value }}
+      # 테스트를 통과한 JAR를 담은 이미지를 digest로 고정해 배포한다.
+      image_digest: ${{ steps.build.outputs.digest }}
     services:
       mysql:
         image: mysql:8
@@ -46,36 +52,25 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: gradle
-      - name: Gradle 테스트 실행
-        run: ./gradlew test --no-daemon
+      - name: Gradle 테스트 및 실행 JAR 생성
+        run: |
+          # 기존 Docker 빌드와 같은 SDK 버전으로 테스트와 패키징을 한 번에 수행한다.
+          cat > "$RUNNER_TEMP/sentry-sdk-version.init.gradle" <<'GRADLE'
+          gradle.beforeProject { project ->
+              project.pluginManager.withPlugin("io.sentry.jvm.gradle") {
+                  project.extensions.getByName("sentry").autoInstallation.sentryVersion.set(System.getenv("BE_SENTRY_VERSION"))
+              }
+          }
+          GRADLE
+          ./gradlew --init-script "$RUNNER_TEMP/sentry-sdk-version.init.gradle" test bootJar --no-daemon
 
-  build:
-    name: BE 애플리케이션 빌드
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - name: 소스 코드 체크아웃
-        uses: actions/checkout@v4
-      - name: Java 설정
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "25"
-          cache: gradle
-      - name: Gradle 빌드 실행
-        run: ./gradlew build -x test --no-daemon
-
-  docker-build:
-    name: BE 이미지 빌드 및 게시
-    needs: build
-    runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.tag.outputs.value }}
-      # V2 배포는 태그 대신 바뀌지 않는 digest로 이미지를 고정한다.
-      image_digest: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: 소스 코드 체크아웃
-        uses: actions/checkout@v4
+          # CI 전용 경로에 이번 실행에서 만든 JAR 하나만 전달한다.
+          JARS=(build/libs/*.jar)
+          [ "${#JARS[@]}" -eq 1 ] && [ -f "${JARS[0]}" ] || {
+            echo "::error::실행 JAR가 정확히 하나여야 합니다"; exit 1;
+          }
+          mkdir -p build/ci
+          cp "${JARS[0]}" build/ci/app.jar
 
       # 전체 커밋 SHA를 이미지 태그로 사용해 배포 버전을 정확히 식별한다.
       - name: 이미지 태그 생성
@@ -94,6 +89,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          # CI에서 이미 검증한 JAR를 사용하며 Docker 안에서 다시 컴파일하지 않는다.
+          target: ci-runtime
+          build-args: |
+            SENTRY_SDK_VERSION=${{ env.BE_SENTRY_VERSION }}
           push: true
           platforms: linux/amd64
           tags: ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.value }}
@@ -414,18 +413,33 @@ jobs:
           EOF
           chmod +x "$RUNNER_TEMP/deploy.sh"
 
-      # 블루/그린: 새 버전이 헬스체크를 통과하고 트래픽이 넘어가면(BAKE_TIME) 성공으로 본다.
-      # 이전 버전은 관찰 시간(95분) 동안 기존 녹음 WebSocket과 SSE 연결을 계속 처리한 뒤 ECS가 정리한다.
-      - name: be-realtime 배포 (블루/그린)
+      # 같은 job의 배포 잠금을 유지하면서 두 서비스를 동시에 배포한다.
+      # realtime은 기존처럼 트래픽 전환까지, API는 롤링 배포 완료까지 기다린다.
+      - name: staging realtime 및 API 병렬 배포
         run: |
-          "$RUNNER_TEMP/deploy.sh" "$REALTIME_SERVICE" "${{ steps.register.outputs.task_definition }}" "BAKE_TIME CLEAN_UP"
+          "$RUNNER_TEMP/deploy.sh" "$REALTIME_SERVICE" "${{ steps.register.outputs.task_definition }}" "BAKE_TIME CLEAN_UP" &
+          REALTIME_PID=$!
+          "$RUNNER_TEMP/deploy.sh" "$API_SERVICE" "${{ steps.register.outputs.task_definition }}" "" &
+          API_PID=$!
 
-      # 롤링: 새 태스크가 헬스체크를 통과한 뒤 기존 태스크를 내린다. 배포가 끝날 때까지 기다린다.
-      - name: be-api 배포 (롤링)
-        run: |
-          "$RUNNER_TEMP/deploy.sh" "$API_SERVICE" "${{ steps.register.outputs.task_definition }}" ""
+          # 먼저 실패한 서비스가 있어도 나머지 배포 결과를 확인한다.
+          # 실패한 서비스는 기존 ECS 롤백 정책을 따르며, 성공한 서비스를 강제로 취소하지 않는다.
+          RESULT=0
+          if wait "$REALTIME_PID"; then
+            echo "${REALTIME_SERVICE} 트래픽 전환 완료"
+          else
+            echo "::error::${REALTIME_SERVICE} 배포 실패"; RESULT=1
+          fi
+          if wait "$API_PID"; then
+            echo "${API_SERVICE} 롤링 배포 완료"
+          else
+            echo "::error::${API_SERVICE} 배포 실패"; RESULT=1
+          fi
+          exit "$RESULT"
 
       - name: 배포 결과 확인
+        # 한쪽이 실패했을 때도 두 서비스의 최종 상태를 로그에 남긴다.
+        if: ${{ !cancelled() && steps.register.outcome == 'success' }}
         run: |
           for svc in "$REALTIME_SERVICE" "$API_SERVICE"; do
             echo "$svc: $(aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
@@ -448,7 +462,7 @@ jobs:
 
   notify-failure:
     name: BE 실패 알림
-    needs: [test, build, docker-build, check-migration-label, deploy]
+    needs: [docker-build, check-migration-label, deploy]
     if: ${{ always() && contains(needs.*.result, 'failure') }}
     runs-on: ubuntu-latest
     steps:
