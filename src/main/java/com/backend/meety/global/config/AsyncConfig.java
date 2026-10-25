@@ -22,6 +22,7 @@ public class AsyncConfig {
         executor.setMaxPoolSize(properties.maxPoolSize());
         executor.setQueueCapacity(properties.queueCapacity());
         executor.setThreadNamePrefix("notification-");
+        executor.setTaskDecorator(ReadMasterContext.taskDecorator());
         return executor;
     }
 
