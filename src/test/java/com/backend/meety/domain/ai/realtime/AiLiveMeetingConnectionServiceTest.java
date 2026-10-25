@@ -503,9 +503,15 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     @Test
+    @DisplayName("AI 전사 메시지의 speakerId 0을 그대로 전사 저장 서비스에 전달한다")
     void transcriptSegmentFinalIsSavedWhenReady() throws Exception {
+        // 테스트 목적:
+        // READY 상태에서 AI가 전달한 화자 식별자 0이 누락되지 않고 전사 저장 경로로 전달되는지 검증한다.
+
+        // given
         AiLiveMeetingConnection connection = readyConnection();
 
+        // when
         client.receive("""
                 {
                   "type": "transcript.committed",
@@ -516,11 +522,13 @@ class AiLiveMeetingConnectionServiceTest {
                     "content": "final text",
                     "startedAtMs": 176200,
                     "endedAtMs": 179800,
+                    "speakerId": 0,
                     "recognizedAt": "2026-09-21T05:30:04.500Z"
                   }
                 }
                 """);
 
+        // then
         verify(transcriptService).saveFinalSegment(new AiTranscriptSegmentMessage(
                 AiTranscriptSegmentMessage.TYPE,
                 42L,
@@ -530,7 +538,8 @@ class AiLiveMeetingConnectionServiceTest {
                         "final text",
                         176200L,
                         179800L,
-                        LocalDateTime.of(2026, 9, 21, 5, 30, 4, 500_000_000)
+                        LocalDateTime.of(2026, 9, 21, 5, 30, 4, 500_000_000),
+                        0L
                 )
         ));
         assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.READY);
@@ -538,10 +547,16 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     @Test
+    @DisplayName("화자 식별자가 없는 마지막 전사도 STOP_SENT 상태에서 저장한다")
     void transcriptSegmentFinalIsSavedWhenStopSent() throws Exception {
+        // 테스트 목적:
+        // AI가 화자 식별자 없이 전사를 보내더라도 기존 종료 중 전사 수신 동작이 유지되는지 검증한다.
+
+        // given
         AiLiveMeetingConnection connection = readyConnection();
         service.stop(88L);
 
+        // when
         client.receive("""
                 {
                   "type": "transcript.committed",
@@ -556,12 +571,13 @@ class AiLiveMeetingConnectionServiceTest {
                 }
                 """);
 
+        // then
         verify(transcriptService).saveFinalSegment(new AiTranscriptSegmentMessage(
                 AiTranscriptSegmentMessage.TYPE,
                 42L,
                 88L,
                 new AiTranscriptSegmentPayload(32L, "last final text", 180000L, null,
-                        LocalDateTime.of(2026, 9, 21, 5, 30, 5))
+                        LocalDateTime.of(2026, 9, 21, 5, 30, 5), null)
         ));
         assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.STOP_SENT);
         assertThat(registry.find(88L)).contains(connection);

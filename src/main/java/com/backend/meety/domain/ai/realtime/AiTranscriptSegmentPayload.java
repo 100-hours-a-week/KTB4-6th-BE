@@ -11,7 +11,8 @@ public record AiTranscriptSegmentPayload(
         String content,
         Long startedAtMs,
         Long endedAtMs,
-        LocalDateTime recognizedAt
+        LocalDateTime recognizedAt,
+        Long speakerId
 ) {
 
     public static AiTranscriptSegmentPayload from(JsonNode payload) {
@@ -30,7 +31,8 @@ public record AiTranscriptSegmentPayload(
                 content,
                 startedAtMs,
                 endedAtMs,
-                requiredRecognizedAt(payload)
+                requiredRecognizedAt(payload),
+                optionalLong(payload, "speakerId")
         );
     }
 

@@ -355,7 +355,8 @@ class TranscriptSaveDispatcherTest {
 
     private static AiTranscriptSegmentMessage message(Long recordingSessionId, Long sequenceNumber) {
         return new AiTranscriptSegmentMessage(AiTranscriptSegmentMessage.TYPE, 42L, recordingSessionId,
-                new AiTranscriptSegmentPayload(sequenceNumber, "text", 0L, 1000L, LocalDateTime.of(2026, 10, 21, 0, 0)));
+                new AiTranscriptSegmentPayload(sequenceNumber, "text", 0L, 1000L,
+                        LocalDateTime.of(2026, 10, 21, 0, 0), null));
     }
 
 
