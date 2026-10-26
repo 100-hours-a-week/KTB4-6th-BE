@@ -13,14 +13,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 /**
- * AI 실시간 전사에 화자 정보가 없어 v1은 화자 없이 조립한다 (AI팀 합의).
- * 화자가 도입되면 이 클래스와 전사 저장부만 수정한다.
+ * 실시간 전사에 저장된 AI 화자 ID를 요약 입력에 그대로 전달한다.
+ * 화자 ID 0도 유효한 값이며, 화자 정보가 없는 구간은 null을 유지한다.
  */
 @Component
 @RequiredArgsConstructor
 public class SummaryAiRequestFactory {
-
-    private static final long UNKNOWN_SPEAKER_ID = 0L;
 
     private final TranscriptSegmentRepository transcriptSegmentRepository;
 
@@ -47,7 +45,7 @@ public class SummaryAiRequestFactory {
         Long endedAtMs = segment.getEndedAtMs() != null ? segment.getEndedAtMs() : segment.getStartedAtMs();
         return new SummaryAiSegment(
                 segment.getId(),
-                UNKNOWN_SPEAKER_ID,
+                segment.getAiSpeakerId(),
                 segment.getSequenceNumber(),
                 segment.getContent(),
                 segment.getStartedAtMs(),

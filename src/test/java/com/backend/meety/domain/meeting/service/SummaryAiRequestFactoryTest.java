@@ -16,6 +16,7 @@ import com.backend.meety.domain.meeting.entity.MeetingSummary;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
+import com.backend.meety.domain.transcript.entity.TranscriptSpeaker;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -28,7 +29,7 @@ class SummaryAiRequestFactoryTest {
     private final SummaryAiRequestFactory factory = new SummaryAiRequestFactory(transcripts);
 
     @Test
-    @DisplayName("화자 없이 전사 구간을 순서대로 조립한다")
+    @DisplayName("화자 정보가 없는 전사도 순서와 요약 재생성 정보를 유지한다")
     void buildsRequestWithoutSpeakers() {
         Team team = team();
         TeamMember member = member(team);
@@ -54,11 +55,44 @@ class SummaryAiRequestFactoryTest {
         assertThat(request.speakers()).isEmpty();
         assertThat(request.segments()).hasSize(2);
         assertThat(request.segments().getFirst().segmentId()).isEqualTo(101L);
-        assertThat(request.segments().getFirst().speakerId()).isZero();
+        assertThat(request.segments()).allSatisfy(segment -> assertThat(segment.speakerId()).isNull());
         assertThat(request.segments().getFirst().endedAtMs()).isEqualTo(3500L);
         assertThat(request.segments().getLast().endedAtMs())
                 .as("endedAtMs가 null이면 startedAtMs로 대체한다")
                 .isEqualTo(4000L);
+    }
+
+    @Test
+    @DisplayName("실시간 화자 ID 0·1·2와 미확인 null을 후처리 화자 매핑과 관계없이 유지한다")
+    void preservesRealtimeSpeakerIdsRegardlessOfSpeakerMapping() {
+        Team team = team();
+        TeamMember member = member(team);
+        Meeting meeting = meeting(team, member);
+        meeting.start(LocalDateTime.of(2026, 9, 25, 14, 0));
+        AiRequest aiRequest = withId(AiRequest.create(team, member, "key", AiRequestType.SUMMARY), 900L);
+        TranscriptSegment first = withId(TranscriptSegment.createFinal(
+                meeting, "1:1", 1L, "첫 화자 발언", 1000L, 2000L, LocalDateTime.now(), 0L), 101L);
+        TranscriptSegment second = withId(TranscriptSegment.createFinal(
+                meeting, "1:2", 2L, "다른 화자 발언", 2000L, 3000L, LocalDateTime.now(), 1L), 102L);
+        TranscriptSegment third = withId(TranscriptSegment.createFinal(
+                meeting, "1:3", 3L, "세 번째 화자 발언", 3000L, 4000L, LocalDateTime.now(), 2L), 103L);
+        TranscriptSegment unknown = withId(TranscriptSegment.createFinal(
+                meeting, "1:4", 4L, "화자 미확인 발언", 4000L, 5000L, LocalDateTime.now(), null), 104L);
+        TranscriptSpeaker mappedSpeaker = withId(TranscriptSpeaker.create(meeting, "화자 1"), 301L);
+        mappedSpeaker.mapToTeamMember(member);
+        first.assignSpeaker(mappedSpeaker);
+        unknown.assignSpeaker(mappedSpeaker);
+        when(transcripts.findAllByMeetingIdOrderBySequence(100L))
+                .thenReturn(List.of(first, second, third, unknown));
+        MeetingSummary summary = MeetingSummary.createPending(aiRequest, team, meeting, 1L, null);
+
+        SummaryAiRequest request = factory.create(aiRequest, summary);
+
+        assertThat(request.segments()).extracting(segment -> segment.speakerId())
+                .containsExactly(0L, 1L, 2L, null);
+        assertThat(request.segments()).extracting(segment -> segment.segmentId())
+                .containsExactly(101L, 102L, 103L, 104L);
+        assertThat(request.speakers()).isEmpty();
     }
 
     @Test
