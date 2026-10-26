@@ -277,17 +277,33 @@ jobs:
           EOF
           chmod +x "$RUNNER_TEMP/deploy.sh"
 
-      # prod는 관찰과 정리까지 완료되어야 성공으로 판정한다. 회의 없는 시간에 최초 이전한다.
-      - name: be-realtime 배포 (블루/그린)
+      # 같은 job의 배포 잠금을 유지하면서 두 서비스를 동시에 배포한다.
+      # prod realtime은 관찰과 정리까지, API는 롤링 배포 완료까지 기다린다.
+      - name: prod realtime 및 API 병렬 배포
         run: |
-          "$RUNNER_TEMP/deploy.sh" "$REALTIME_SERVICE" "${{ steps.register.outputs.task_definition }}" ""
+          "$RUNNER_TEMP/deploy.sh" "$REALTIME_SERVICE" "${{ steps.register.outputs.task_definition }}" "" &
+          REALTIME_PID=$!
+          "$RUNNER_TEMP/deploy.sh" "$API_SERVICE" "${{ steps.register.outputs.task_definition }}" "" &
+          API_PID=$!
 
-      # 롤링: 새 태스크가 헬스체크를 통과한 뒤 기존 태스크를 내린다. 배포가 끝날 때까지 기다린다.
-      - name: be-api 배포 (롤링)
-        run: |
-          "$RUNNER_TEMP/deploy.sh" "$API_SERVICE" "${{ steps.register.outputs.task_definition }}" ""
+          # 한쪽이 실패해도 다른 서비스의 배포 결과까지 확인한다.
+          # 각 서비스는 기존 ECS 롤백 정책을 따른다.
+          RESULT=0
+          if wait "$REALTIME_PID"; then
+            echo "${REALTIME_SERVICE} 배포 완료 (관찰 및 정리 포함)"
+          else
+            echo "::error::${REALTIME_SERVICE} 배포 실패"; RESULT=1
+          fi
+          if wait "$API_PID"; then
+            echo "${API_SERVICE} 롤링 배포 완료"
+          else
+            echo "::error::${API_SERVICE} 배포 실패"; RESULT=1
+          fi
+          exit "$RESULT"
 
       - name: 배포 결과 확인
+        # 한쪽이 실패했을 때도 두 서비스의 최종 상태를 로그에 남긴다.
+        if: ${{ !cancelled() && steps.register.outcome == 'success' }}
         run: |
           for svc in "$REALTIME_SERVICE" "$API_SERVICE"; do
             echo "$svc: $(aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
