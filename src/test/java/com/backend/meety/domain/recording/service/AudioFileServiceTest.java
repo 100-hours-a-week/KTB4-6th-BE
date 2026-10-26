@@ -76,7 +76,7 @@ class AudioFileServiceTest {
         starter = member(team);
         meeting = meeting(team, starter);
         recordingSession = session(meeting, starter);
-        when(recordings.findByIdAndDeletedAtIsNull(700L)).thenReturn(Optional.of(recordingSession));
+        when(recordings.findByIdForUpdateAndDeletedAtIsNull(700L)).thenReturn(Optional.of(recordingSession));
         when(members.findByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE))
                 .thenReturn(Optional.of(starter));
         when(audioFiles.save(any(AudioFile.class))).thenAnswer(call -> withId(call.getArgument(0), 800L));
@@ -129,7 +129,7 @@ class AudioFileServiceTest {
     @Test
     @DisplayName("녹음 세션이 없으면 발급하지 않는다")
     void rejectsMissingRecordingSession() {
-        when(recordings.findByIdAndDeletedAtIsNull(700L)).thenReturn(Optional.empty());
+        when(recordings.findByIdForUpdateAndDeletedAtIsNull(700L)).thenReturn(Optional.empty());
 
         assertCode(() -> service.createUploadUrl(1L, 700L, "audio/mp4"), RecordingErrorCode.RECORDING_SESSION_NOT_FOUND);
     }
@@ -156,13 +156,74 @@ class AudioFileServiceTest {
     }
 
     @Test
-    @DisplayName("이미 발급된 음성 파일이 있으면 중복 발급하지 않는다")
-    void rejectsDuplicateAudioFile() {
-        when(audioFiles.existsByRecordingSessionIdAndDeletedAtIsNull(700L)).thenReturn(true);
+    @DisplayName("업로드가 끝난 음성 파일이 있으면 중복 발급하지 않는다")
+    void rejectsDuplicateAudioFile() throws Exception {
+        AudioFile available = withId(AudioFile.create(recordingSession, STORAGE_KEY, "audio/mp4"), 800L);
+        available.markAvailable(1_024L, 60_000L, NOW, NOW.plus(AudioFilePolicy.RETENTION));
+        when(audioFiles.findAllByRecordingSessionIdAndDeletedAtIsNull(700L)).thenReturn(List.of(available));
 
         assertCode(() -> service.createUploadUrl(1L, 700L, "audio/mp4"), AudioFileErrorCode.AUDIO_FILE_ALREADY_EXISTS);
 
         verify(audioFiles, never()).save(any());
+        verify(storage, never()).createUploadUrl(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("업로드 중인 음성 파일이 있으면 같은 파일로 업로드 URL을 다시 발급한다")
+    void reissuesUploadUrlForUploadingAudioFile() throws Exception {
+        // 테스트 목적:
+        // 업로드 URL이 만료된 뒤 다시 요청하면 새 행을 만들지 않고
+        // 기존 audioFileId와 storage key로 새 URL을 발급하는지 검증한다.
+
+        // given
+        AudioFile uploading = withId(AudioFile.create(recordingSession, STORAGE_KEY, "audio/mp4"), 800L);
+        when(audioFiles.findAllByRecordingSessionIdAndDeletedAtIsNull(700L)).thenReturn(List.of(uploading));
+
+        // when
+        AudioFileUploadUrlResponse response = service.createUploadUrl(1L, 700L, "audio/mp4");
+
+        // then
+        assertThat(response.audioFileId()).isEqualTo(800L);
+        assertThat(response.uploadUrl()).isEqualTo(UPLOAD_URL);
+        assertThat(response.uploadUrlExpiresAt()).isEqualTo(NOW.plus(AudioFilePolicy.UPLOAD_URL_VALIDITY));
+        verify(storage).createUploadUrl(eq(STORAGE_KEY), eq("audio/mp4"), eq(AudioFilePolicy.UPLOAD_URL_VALIDITY));
+        verify(audioFiles, never()).save(any());
+        assertThat(uploading.getStatus()).isEqualTo(AudioFileStatus.UPLOADING);
+    }
+
+    @Test
+    @DisplayName("업로드 중인 음성 파일과 형식이 다르면 다시 발급하지 않는다")
+    void rejectsReissueWithDifferentContentType() throws Exception {
+        // 테스트 목적:
+        // 업로드 URL은 content type까지 서명되므로, 기존 파일과 다른 형식으로는
+        // 이어서 업로드할 URL을 발급하지 않는지 검증한다.
+
+        // given
+        AudioFile uploading = withId(AudioFile.create(recordingSession, STORAGE_KEY, "audio/webm"), 800L);
+        when(audioFiles.findAllByRecordingSessionIdAndDeletedAtIsNull(700L)).thenReturn(List.of(uploading));
+
+        // when, then
+        assertCode(() -> service.createUploadUrl(1L, 700L, "audio/mp4"),
+                AudioFileErrorCode.AUDIO_FILE_CONTENT_TYPE_MISMATCH);
+        verify(storage, never()).createUploadUrl(any(), any(), any());
+        verify(audioFiles, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("녹음 세션 행을 잠근 뒤 기존 음성 파일을 확인한다")
+    void locksRecordingSessionBeforeCheckingAudioFiles() {
+        // 테스트 목적:
+        // 동시 요청이 각자 빈 목록을 보고 음성 파일을 두 개 만들지 않도록
+        // 녹음 세션 행 Lock을 먼저 잡은 뒤 기존 음성 파일을 조회하는지 검증한다.
+
+        // when
+        service.createUploadUrl(1L, 700L, "audio/mp4");
+
+        // then
+        var order = org.mockito.Mockito.inOrder(recordings, audioFiles);
+        order.verify(recordings).findByIdForUpdateAndDeletedAtIsNull(700L);
+        order.verify(audioFiles).findAllByRecordingSessionIdAndDeletedAtIsNull(700L);
+        order.verify(audioFiles).save(any(AudioFile.class));
     }
 
     @Test

@@ -12,6 +12,8 @@ public enum AudioFileErrorCode implements BaseCode {
     INVALID_AUDIO_CONTENT_TYPE(HttpStatus.BAD_REQUEST, "INVALID_AUDIO_CONTENT_TYPE", "지원하지 않는 음성 형식입니다."),
     AUDIO_FILE_CREATE_FORBIDDEN(HttpStatus.FORBIDDEN, "AUDIO_FILE_CREATE_FORBIDDEN", "음성 파일을 생성할 권한이 없습니다."),
     AUDIO_FILE_ALREADY_EXISTS(HttpStatus.CONFLICT, "AUDIO_FILE_ALREADY_EXISTS", "이미 생성된 음성 파일이 있습니다."),
+    AUDIO_FILE_CONTENT_TYPE_MISMATCH(HttpStatus.CONFLICT, "AUDIO_FILE_CONTENT_TYPE_MISMATCH",
+            "업로드 중인 음성 파일과 형식이 다릅니다."),
     AUDIO_UPLOAD_URL_CREATE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "AUDIO_UPLOAD_URL_CREATE_FAILED", "음성 업로드 준비에 실패했습니다."),
     AUDIO_FILE_ACCESS_DENIED(HttpStatus.FORBIDDEN, "AUDIO_FILE_ACCESS_DENIED", "음성 파일에 접근할 권한이 없습니다."),
     AUDIO_FILE_NOT_FOUND(HttpStatus.NOT_FOUND, "AUDIO_FILE_NOT_FOUND", "음성 파일을 찾을 수 없습니다."),

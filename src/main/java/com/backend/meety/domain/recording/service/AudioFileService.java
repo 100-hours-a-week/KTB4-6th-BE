@@ -28,6 +28,7 @@ import com.zaxxer.hikari.HikariPoolMXBean;
 import java.net.URL;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -75,7 +76,7 @@ public class AudioFileService {
         long segmentStartedAt = System.nanoTime();
         log.info("[AUDIO_UPLOAD_URL] recording session lookup start recordingSessionId={}, userId={}",
                 recordingSessionId, userId);
-        RecordingSession session = recordingRepository.findByIdAndDeletedAtIsNull(recordingSessionId)
+        RecordingSession session = recordingRepository.findByIdForUpdateAndDeletedAtIsNull(recordingSessionId)
                 .orElseThrow(() -> new RecordingException(RecordingErrorCode.RECORDING_SESSION_NOT_FOUND));
         logElapsed("[AUDIO_UPLOAD_URL] recording session lookup completed recordingSessionId={}, userId={}, "
                         + "meetingId={}, teamId={}, elapsedMs={}",
@@ -92,26 +93,17 @@ public class AudioFileService {
                         + "elapsedMs={}",
                 elapsedMs(segmentStartedAt), recordingSessionId, userId, session.getMeeting().getTeam().getId());
 
-        // TODO: audio_files.recording_session_id에 UNIQUE가 없어 동시 요청 시 중복 발급이 가능하다. 스키마 변경 확정 후 제약을 추가한다.
-        // TODO: 업로드가 실패해 UPLOADING으로 남은 행도 중복으로 세어 재발급이 막힌다. 재발급 허용 정책 확정 후 조건을 조정한다.
         segmentStartedAt = System.nanoTime();
-        log.info("[AUDIO_UPLOAD_URL] audio file existence check start recordingSessionId={}, userId={}",
+        log.info("[AUDIO_UPLOAD_URL] audio file lookup start recordingSessionId={}, userId={}",
                 recordingSessionId, userId);
-        if (audioFileRepository.existsByRecordingSessionIdAndDeletedAtIsNull(recordingSessionId)) {
-            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_ALREADY_EXISTS);
-        }
-        logElapsed("[AUDIO_UPLOAD_URL] audio file existence check completed recordingSessionId={}, userId={}, "
-                        + "elapsedMs={}",
-                elapsedMs(segmentStartedAt), recordingSessionId, userId);
-
-        segmentStartedAt = System.nanoTime();
-        log.info("[AUDIO_UPLOAD_URL] audio file save start recordingSessionId={}, userId={}",
-                recordingSessionId, userId);
-        AudioFile audioFile = audioFileRepository.save(
-                AudioFile.create(session, storageKey(session), contentType));
-        logElapsed("[AUDIO_UPLOAD_URL] audio file save completed recordingSessionId={}, userId={}, audioFileId={}, "
-                        + "elapsedMs={}",
-                elapsedMs(segmentStartedAt), recordingSessionId, userId, audioFile.getId());
+        List<AudioFile> existingFiles = audioFileRepository.findAllByRecordingSessionIdAndDeletedAtIsNull(
+                recordingSessionId);
+        AudioFile audioFile = existingFiles.isEmpty()
+                ? audioFileRepository.save(AudioFile.create(session, storageKey(session), contentType))
+                : uploadingFileToReissue(existingFiles, contentType);
+        logElapsed("[AUDIO_UPLOAD_URL] audio file lookup completed recordingSessionId={}, userId={}, audioFileId={}, "
+                        + "reissued={}, elapsedMs={}",
+                elapsedMs(segmentStartedAt), recordingSessionId, userId, audioFile.getId(), !existingFiles.isEmpty());
         LocalDateTime now = LocalDateTime.now(clock);
         segmentStartedAt = System.nanoTime();
         log.info("[AUDIO_UPLOAD_URL] presign start recordingSessionId={}, userId={}, audioFileId={}",
@@ -269,6 +261,17 @@ public class AudioFileService {
                 UUID.randomUUID(),
                 AudioFilePolicy.EXTENSION
         );
+    }
+
+    private AudioFile uploadingFileToReissue(List<AudioFile> existingFiles, String contentType) {
+        if (existingFiles.size() != 1 || !existingFiles.getFirst().isUploading()) {
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_ALREADY_EXISTS);
+        }
+        AudioFile audioFile = existingFiles.getFirst();
+        if (!audioFile.getContentType().equals(contentType)) {
+            throw new AudioFileException(AudioFileErrorCode.AUDIO_FILE_CONTENT_TYPE_MISMATCH);
+        }
+        return audioFile;
     }
 
     private String uploadUrl(AudioFile audioFile) {
