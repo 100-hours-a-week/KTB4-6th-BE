@@ -6,6 +6,7 @@ import com.backend.meety.domain.team.exception.TeamErrorCode;
 import com.backend.meety.domain.team.exception.TeamException;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.user.entity.User;
+import com.backend.meety.domain.user.event.UserWithdrawnEvent;
 import com.backend.meety.domain.user.entity.UserAuthAccount;
 import com.backend.meety.domain.user.exception.UserErrorCode;
 import com.backend.meety.domain.user.exception.UserException;
@@ -15,6 +16,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +29,7 @@ public class UserAccountService {
     private final RefreshTokenService refreshTokenService;
     private final TeamMemberRepository teamMemberRepository;
     private final Clock clock;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public User findOrCreate(String provider, String providerUserId) {
@@ -59,6 +62,7 @@ public class UserAccountService {
         userAuthAccountRepository.findAllByUserId(userId)
                 .forEach(account -> account.withdraw(now));
         refreshTokenService.revokeAll(userId);
+        eventPublisher.publishEvent(new UserWithdrawnEvent(userId));
     }
 
     private void endActiveMembership(Long userId, LocalDateTime now) {

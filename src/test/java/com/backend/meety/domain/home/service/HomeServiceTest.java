@@ -24,6 +24,7 @@ import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.repository.TeamInvitationCodeRepository;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.user.entity.User;
+import com.backend.meety.domain.user.repository.UserRepository;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -49,6 +50,7 @@ class HomeServiceTest {
     private TeamInvitationCodeRepository teamInvitationCodeRepository;
     private MeetingRepository meetingRepository;
     private MeetingMetricRepository meetingMetricRepository;
+    private UserRepository userRepository;
     private HomeService homeService;
 
     @BeforeEach
@@ -57,13 +59,16 @@ class HomeServiceTest {
         teamInvitationCodeRepository = mock(TeamInvitationCodeRepository.class);
         meetingRepository = mock(MeetingRepository.class);
         meetingMetricRepository = mock(MeetingMetricRepository.class);
+        userRepository = mock(UserRepository.class);
         homeService = new HomeService(
                 teamMemberRepository,
                 teamInvitationCodeRepository,
                 meetingRepository,
                 meetingMetricRepository,
+                userRepository,
                 FIXED_CLOCK
         );
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(User.create()));
     }
 
     @Test
@@ -132,6 +137,36 @@ class HomeServiceTest {
                         HomeMeetingDisplayStatus.IN_PROGRESS,
                         HomeMeetingDisplayStatus.COMPLETED
                 );
+        assertThat(response.hasVoiceConsent()).isFalse();
+        assertThat(response.hasVoiceProfile()).isFalse();
+    }
+
+    @Test
+    @DisplayName("음성 수집에 동의하고 사전 녹음을 등록한 사용자는 홈 응답에 둘 다 true로 내려준다")
+    void getHomeWithVoiceProfile() {
+        // 테스트 목적:
+        // 홈 응답의 사전 녹음 동의·등록 여부가 사용자 정보에서 채워지는지 검증한다.
+
+        // given
+        User user = User.create();
+        user.consentToVoiceCollection(LocalDateTime.of(2026, 9, 17, 10, 0));
+        user.registerVoiceProfile("voice-profiles/1.mp4", List.of(0.1, -0.2), "speaker-embedding-v1");
+        when(userRepository.findById(USER_ID)).thenReturn(Optional.of(user));
+        when(teamMemberRepository.findByUserIdAndMembershipStatusWithTeam(USER_ID, MembershipStatus.ACTIVE))
+                .thenReturn(Optional.of(activeTeamMember(team())));
+        when(meetingRepository.aggregateCompletedMeetingSummary(TEAM_ID)).thenReturn(summary(0L, 0L));
+        when(meetingRepository.findTodayMeetingsByTeamIdAndEffectiveStartAtBetween(
+                TEAM_ID,
+                LocalDateTime.of(2026, 9, 17, 0, 0),
+                LocalDateTime.of(2026, 9, 18, 0, 0)
+        )).thenReturn(List.of());
+
+        // when
+        HomeResponse response = homeService.getHome(USER_ID);
+
+        // then
+        assertThat(response.hasVoiceConsent()).isTrue();
+        assertThat(response.hasVoiceProfile()).isTrue();
     }
 
     @Test

@@ -1,5 +1,7 @@
 package com.backend.meety.domain.home.service;
 
+import com.backend.meety.domain.auth.exception.AuthErrorCode;
+import com.backend.meety.domain.auth.exception.AuthException;
 import com.backend.meety.domain.home.dto.HomeMeetingMetricsResponse;
 import com.backend.meety.domain.home.dto.HomeMeetingSummaryResponse;
 import com.backend.meety.domain.home.dto.HomeResponse;
@@ -17,6 +19,8 @@ import com.backend.meety.domain.team.entity.TeamInvitationCode;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.repository.TeamInvitationCodeRepository;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
+import com.backend.meety.domain.user.entity.User;
+import com.backend.meety.domain.user.repository.UserRepository;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -36,6 +40,7 @@ public class HomeService {
     private final TeamInvitationCodeRepository teamInvitationCodeRepository;
     private final MeetingRepository meetingRepository;
     private final MeetingMetricRepository meetingMetricRepository;
+    private final UserRepository userRepository;
     private final Clock clock;
 
     @Transactional(readOnly = true)
@@ -76,7 +81,10 @@ public class HomeService {
                 .map(HomeTodayMeetingResponse::from)
                 .toList();
 
-        return HomeResponse.of(teamResponse, meetingSummary, meetingMetrics, todayMeetingResponses);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new AuthException(AuthErrorCode.AUTHENTICATION_REQUIRED));
+        return HomeResponse.of(teamResponse, meetingSummary, meetingMetrics, todayMeetingResponses,
+                user.hasVoiceConsent(), user.hasVoiceProfile());
     }
 
     private String findActiveInvitationCode(Long teamId) {
