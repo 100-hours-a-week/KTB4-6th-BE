@@ -118,6 +118,25 @@ class UserAccountServiceTest {
     }
 
     @Test
+    @DisplayName("탈퇴하면 음성 수집 동의와 사전 녹음 데이터를 지운다")
+    void withdrawClearsVoiceProfile() {
+        // given
+        User user = User.create();
+        user.consentToVoiceCollection(LocalDateTime.now());
+        user.registerVoiceProfile("voice-profiles/1.mp4", List.of(0.1, -0.2), "speaker-embedding-v1");
+        given(userRepository.findById(1L)).willReturn(Optional.of(user));
+
+        // when
+        userAccountService.withdraw(1L);
+
+        // then
+        assertThat(user.hasVoiceConsent()).isFalse();
+        assertThat(user.hasVoiceProfile()).isFalse();
+        assertThat(user.getVoiceSampleKey()).isNull();
+        assertThat(user.getEmbeddingVersion()).isNull();
+    }
+
+    @Test
     @DisplayName("이미 탈퇴 처리된 사용자는 다시 처리하지 않는다")
     void withdrawIsIdempotent() {
         User user = User.create();
