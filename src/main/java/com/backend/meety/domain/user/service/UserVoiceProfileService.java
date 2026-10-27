@@ -33,7 +33,6 @@ public class UserVoiceProfileService {
     private final UserRepository userRepository;
     private final AudioFileStorage audioFileStorage;
     private final SpeakerEmbeddingAiClient speakerEmbeddingAiClient;
-    private final UserVoiceProfileSaveService userVoiceProfileSaveService;
     private final Clock clock;
 
     @Transactional
@@ -56,13 +55,15 @@ public class UserVoiceProfileService {
     }
 
     public UserVoiceProfileResponse register(Long userId) {
-        validateConsented(findActiveUser(userId));
+        User user = findActiveUser(userId);
+        validateConsented(user);
         String storageKey = VoiceProfilePolicy.storageKey(userId);
         if (audioFileStorage.findObjectSize(storageKey).isEmpty()) {
             throw new AudioFileException(AudioFileErrorCode.AUDIO_OBJECT_NOT_FOUND);
         }
         SpeakerEmbeddingAiResponse response = requestEmbedding(userId, storageKey);
-        userVoiceProfileSaveService.save(userId, storageKey, response.embedding(), response.modelVersion());
+        user.registerVoiceProfile(storageKey, response.embedding(), response.modelVersion());
+        userRepository.save(user);
         return new UserVoiceProfileResponse(true);
     }
 

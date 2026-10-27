@@ -3,8 +3,6 @@ package com.backend.meety.domain.user.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
@@ -61,15 +59,12 @@ class UserVoiceProfileServiceTest {
     @Mock
     private SpeakerEmbeddingAiClient speakerEmbeddingAiClient;
 
-    @Mock
-    private UserVoiceProfileSaveService userVoiceProfileSaveService;
-
     private UserVoiceProfileService userVoiceProfileService;
 
     @BeforeEach
     void setUp() {
         userVoiceProfileService = new UserVoiceProfileService(
-                userRepository, audioFileStorage, speakerEmbeddingAiClient, userVoiceProfileSaveService, CLOCK);
+                userRepository, audioFileStorage, speakerEmbeddingAiClient, CLOCK);
     }
 
     @Test
@@ -188,7 +183,8 @@ class UserVoiceProfileServiceTest {
         // 등록 시 S3 파일 확인 → 다운로드 URL로 AI 호출 → 고정 키·벡터·버전 저장 순서로 처리되는지 검증한다.
 
         // given
-        given(userRepository.findById(USER_ID)).willReturn(Optional.of(consentedUser()));
+        User user = consentedUser();
+        given(userRepository.findById(USER_ID)).willReturn(Optional.of(user));
         given(audioFileStorage.findObjectSize(STORAGE_KEY)).willReturn(Optional.of(48_000L));
         given(audioFileStorage.createDownloadUrl(STORAGE_KEY, AudioFilePolicy.DOWNLOAD_URL_VALIDITY))
                 .willReturn(url("https://bucket.s3.amazonaws.com/voice-profiles/1.mp4?download"));
@@ -201,7 +197,10 @@ class UserVoiceProfileServiceTest {
 
         // then
         assertThat(response.hasVoiceProfile()).isTrue();
-        then(userVoiceProfileSaveService).should().save(USER_ID, STORAGE_KEY, EMBEDDING, MODEL_VERSION);
+        then(userRepository).should().save(user);
+        assertThat(user.getVoiceSampleKey()).isEqualTo(STORAGE_KEY);
+        assertThat(user.getVoiceEmbedding()).isEqualTo(EMBEDDING);
+        assertThat(user.getEmbeddingVersion()).isEqualTo(MODEL_VERSION);
     }
 
     @Test
@@ -264,7 +263,7 @@ class UserVoiceProfileServiceTest {
                 .isInstanceOf(UserException.class)
                 .extracting("errorCode")
                 .isEqualTo(UserErrorCode.VOICE_PROFILE_EXTRACTION_FAILED);
-        then(userVoiceProfileSaveService).should(never()).save(any(), anyString(), anyList(), anyString());
+        then(userRepository).should(never()).save(any());
     }
 
     @Test
@@ -287,7 +286,7 @@ class UserVoiceProfileServiceTest {
                     .extracting("errorCode")
                     .isEqualTo(UserErrorCode.VOICE_PROFILE_EXTRACTION_FAILED);
         }
-        then(userVoiceProfileSaveService).shouldHaveNoInteractions();
+        then(userRepository).should(never()).save(any());
     }
 
     private void givenUploadedObject() throws Exception {
