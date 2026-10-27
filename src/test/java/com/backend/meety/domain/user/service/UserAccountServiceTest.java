@@ -13,7 +13,6 @@ import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.user.entity.UserAuthAccount;
-import com.backend.meety.domain.user.event.UserWithdrawnEvent;
 import com.backend.meety.domain.user.repository.UserAuthAccountRepository;
 import com.backend.meety.domain.user.repository.UserRepository;
 import java.time.Clock;
@@ -29,7 +28,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class UserAccountServiceTest {
@@ -51,15 +49,12 @@ class UserAccountServiceTest {
     @Mock
     private TeamMemberRepository teamMemberRepository;
 
-    @Mock
-    private ApplicationEventPublisher eventPublisher;
-
     private UserAccountService userAccountService;
 
     @BeforeEach
     void setUp() {
         userAccountService = new UserAccountService(userRepository, userAuthAccountRepository,
-                refreshTokenService, teamMemberRepository, CLOCK, eventPublisher);
+                refreshTokenService, teamMemberRepository, CLOCK);
     }
 
     @Test
@@ -123,11 +118,8 @@ class UserAccountServiceTest {
     }
 
     @Test
-    @DisplayName("탈퇴하면 음성 수집 동의와 사전 녹음 데이터를 지우고 탈퇴 이벤트를 발행한다")
+    @DisplayName("탈퇴하면 음성 수집 동의와 사전 녹음 데이터를 지운다")
     void withdrawClearsVoiceProfile() {
-        // 테스트 목적:
-        // 탈퇴 시 음성 컬럼·동의 시각을 비우고, 커밋 후 S3 음성 파일을 지우도록 이벤트를 발행하는지 검증한다.
-
         // given
         User user = User.create();
         user.consentToVoiceCollection(LocalDateTime.now());
@@ -142,7 +134,6 @@ class UserAccountServiceTest {
         assertThat(user.hasVoiceProfile()).isFalse();
         assertThat(user.getVoiceSampleKey()).isNull();
         assertThat(user.getEmbeddingVersion()).isNull();
-        then(eventPublisher).should().publishEvent(new UserWithdrawnEvent(1L));
     }
 
     @Test
@@ -155,7 +146,6 @@ class UserAccountServiceTest {
         userAccountService.withdraw(1L);
 
         then(refreshTokenService).shouldHaveNoInteractions();
-        then(eventPublisher).shouldHaveNoInteractions();
     }
 
     @Test

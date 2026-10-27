@@ -1,12 +1,15 @@
 package com.backend.meety.domain.user.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 
 import com.backend.meety.domain.auth.client.OAuthProviderClient;
+import com.backend.meety.domain.recording.storage.AudioFileStorage;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
@@ -51,6 +54,9 @@ class UserServiceTest {
     @Mock
     private AccessTokenBlacklist accessTokenBlacklist;
 
+    @Mock
+    private AudioFileStorage audioFileStorage;
+
     private static final String ACCESS_TOKEN = "access-token";
 
     private UserService userService;
@@ -58,7 +64,8 @@ class UserServiceTest {
     @BeforeEach
     void setUp() {
         userService = new UserService(userRepository, userAuthAccountRepository,
-                userAccountService, teamMemberRepository, Map.of("kakao", kakaoOAuthClient), accessTokenBlacklist);
+                userAccountService, teamMemberRepository, Map.of("kakao", kakaoOAuthClient), accessTokenBlacklist,
+                audioFileStorage);
     }
 
     @Test
@@ -75,6 +82,21 @@ class UserServiceTest {
         then(kakaoOAuthClient).should().unlink("12345");
         then(userAccountService).should().withdraw(1L);
         then(accessTokenBlacklist).should().register(ACCESS_TOKEN);
+        then(audioFileStorage).should().deleteObject("voice-profiles/1.mp4");
+    }
+
+    @Test
+    @DisplayName("탈퇴 후 사전 녹음 음성 삭제에 실패해도 탈퇴는 성공한다")
+    void withdrawSucceedsWhenVoiceSampleDeleteFails() {
+        // given
+        User user = User.create();
+        given(userRepository.findById(1L)).willReturn(Optional.of(user));
+        given(userAuthAccountRepository.findAllByUserId(1L)).willReturn(List.of());
+        willThrow(new IllegalStateException("s3 down")).given(audioFileStorage).deleteObject("voice-profiles/1.mp4");
+
+        // when, then
+        assertThatCode(() -> userService.withdraw(1L, ACCESS_TOKEN)).doesNotThrowAnyException();
+        then(userAccountService).should().withdraw(1L);
     }
 
     @Test
@@ -89,6 +111,7 @@ class UserServiceTest {
         then(kakaoOAuthClient).shouldHaveNoInteractions();
         then(userAccountService).should(never()).withdraw(1L);
         then(accessTokenBlacklist).shouldHaveNoInteractions();
+        then(audioFileStorage).shouldHaveNoInteractions();
     }
 
     @Test
