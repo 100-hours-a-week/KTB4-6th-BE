@@ -11,7 +11,7 @@ import org.springframework.web.client.RestClient;
 public class AiHttpClientConfig {
 
     private static final Duration AI_CONNECT_TIMEOUT = Duration.ofSeconds(3);
-    private static final Duration AI_READ_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration AI_READ_TIMEOUT = Duration.ofSeconds(180);
     /**
      * 화자 분리는 AI가 최대 3600초 처리하므로 그보다 길게 잡아 AI의 최종 응답(200·502·504)을 받는다.
      */
