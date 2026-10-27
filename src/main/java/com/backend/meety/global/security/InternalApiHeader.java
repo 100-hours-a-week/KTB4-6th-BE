@@ -8,4 +8,5 @@ public final class InternalApiHeader {
 
     public static final String API_KEY = "X-Internal-Api-Key";
     public static final String AI_REQUEST_ID = "X-Ai-Request-Id";
+    public static final String RECORDING_SESSION_ID = "X-Recording-Session-Id";
 }

@@ -26,7 +26,8 @@ public class AiInternalQnaController {
 
     @GetMapping("/teams/{teamId}/meetings")
     public ResponseEntity<ApiResponse<MeetingListResponse>> getMeetings(
-            @RequestHeader(InternalApiHeader.AI_REQUEST_ID) Long aiRequestId,
+            @RequestHeader(name = InternalApiHeader.AI_REQUEST_ID, required = false) Long aiRequestId,
+            @RequestHeader(name = InternalApiHeader.RECORDING_SESSION_ID, required = false) Long recordingSessionId,
             @PathVariable Long teamId,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -34,24 +35,28 @@ public class AiInternalQnaController {
             @RequestParam(required = false) String cursor
     ) {
         return ResponseEntity.ok(ApiResponse.success(
-                aiInternalQueryService.getMeetings(aiRequestId, keyword, from, to, cursor)));
+                aiInternalQueryService.getMeetings(
+                        aiRequestId, recordingSessionId, teamId, keyword, from, to, cursor)));
     }
 
     @GetMapping("/meetings/{meetingId}/transcripts")
     public ResponseEntity<ApiResponse<TranscriptSegmentListResponse>> getTranscripts(
-            @RequestHeader(InternalApiHeader.AI_REQUEST_ID) Long aiRequestId,
+            @RequestHeader(name = InternalApiHeader.AI_REQUEST_ID, required = false) Long aiRequestId,
+            @RequestHeader(name = InternalApiHeader.RECORDING_SESSION_ID, required = false) Long recordingSessionId,
             @PathVariable Long meetingId,
             @RequestParam(required = false) String keyword
     ) {
         return ResponseEntity.ok(ApiResponse.success(
-                aiInternalQueryService.getTranscripts(aiRequestId, meetingId, keyword)));
+                aiInternalQueryService.getTranscripts(aiRequestId, recordingSessionId, meetingId, keyword)));
     }
 
     @GetMapping("/meetings/{meetingId}/summaries")
     public ResponseEntity<ApiResponse<InternalSummaryResponse>> getLatestSummary(
-            @RequestHeader(InternalApiHeader.AI_REQUEST_ID) Long aiRequestId,
+            @RequestHeader(name = InternalApiHeader.AI_REQUEST_ID, required = false) Long aiRequestId,
+            @RequestHeader(name = InternalApiHeader.RECORDING_SESSION_ID, required = false) Long recordingSessionId,
             @PathVariable Long meetingId
     ) {
-        return ResponseEntity.ok(ApiResponse.success(aiInternalQueryService.getLatestSummary(aiRequestId, meetingId)));
+        return ResponseEntity.ok(ApiResponse.success(
+                aiInternalQueryService.getLatestSummary(aiRequestId, recordingSessionId, meetingId)));
     }
 }

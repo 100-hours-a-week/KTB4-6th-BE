@@ -14,7 +14,10 @@ public enum AiChatErrorCode implements BaseCode {
     MEETING_NOT_IN_PROGRESS(HttpStatus.CONFLICT, "MEETING_NOT_IN_PROGRESS", "진행 중인 회의에서만 질문할 수 있습니다."),
     AI_MESSAGE_ALREADY_PROCESSING(HttpStatus.CONFLICT, "AI_MESSAGE_ALREADY_PROCESSING", "이전 질문의 답변이 완료된 후 질문할 수 있습니다."),
     AI_MESSAGE_REQUEST_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "AI_MESSAGE_REQUEST_FAILED", "AI 질문 요청에 실패했습니다."),
-    AI_REQUEST_ACCESS_DENIED(HttpStatus.FORBIDDEN, "AI_REQUEST_ACCESS_DENIED", "처리 중인 AI 질문이 아닙니다.");
+    AI_REQUEST_ACCESS_DENIED(HttpStatus.FORBIDDEN, "AI_REQUEST_ACCESS_DENIED", "처리 중인 AI 질문이 아닙니다."),
+    INTERNAL_QUERY_IDENTIFIER_INVALID(HttpStatus.BAD_REQUEST, "INTERNAL_QUERY_IDENTIFIER_INVALID",
+            "AI 요청 ID와 녹음 세션 ID 중 하나만 보내야 합니다."),
+    RECORDING_SESSION_ACCESS_DENIED(HttpStatus.FORBIDDEN, "RECORDING_SESSION_ACCESS_DENIED", "진행 중인 녹음 세션이 아닙니다.");
 
     private final HttpStatus httpStatus;
     private final String code;
