@@ -70,9 +70,6 @@ class UserVoiceProfileServiceTest {
     @Test
     @DisplayName("처음 동의하면 현재 시각을 동의 시각으로 저장해 반환한다")
     void consent() {
-        // 테스트 목적:
-        // 동의 API가 현재 시각으로 동의를 기록하는지 검증한다.
-
         // given
         User user = User.create();
         given(userRepository.findById(USER_ID)).willReturn(Optional.of(user));
@@ -88,9 +85,6 @@ class UserVoiceProfileServiceTest {
     @Test
     @DisplayName("이미 동의한 사용자는 처음 동의 시각을 그대로 반환한다")
     void consentIsIdempotent() {
-        // 테스트 목적:
-        // 동의를 여러 번 요청해도 처음 동의 시각이 바뀌지 않는지 검증한다.
-
         // given
         User user = User.create();
         LocalDateTime firstConsentedAt = NOW.minusDays(3);
@@ -120,9 +114,6 @@ class UserVoiceProfileServiceTest {
     @Test
     @DisplayName("동의한 사용자에게 고정 키의 업로드 URL을 10분 유효로 발급한다")
     void createUploadUrl() throws Exception {
-        // 테스트 목적:
-        // 업로드 URL이 사용자별 고정 키(voice-profiles/{userId}.mp4)로 발급되고 만료 시각이 녹음 파일 정책과 같은지 검증한다.
-
         // given
         given(userRepository.findById(USER_ID)).willReturn(Optional.of(consentedUser()));
         given(audioFileStorage.createUploadUrl(STORAGE_KEY, CONTENT_TYPE, AudioFilePolicy.UPLOAD_URL_VALIDITY))
@@ -179,9 +170,6 @@ class UserVoiceProfileServiceTest {
     @Test
     @DisplayName("업로드된 음성의 다운로드 URL을 AI에 보내 받은 벡터와 버전을 저장한다")
     void register() throws Exception {
-        // 테스트 목적:
-        // 등록 시 S3 파일 확인 → 다운로드 URL로 AI 호출 → 고정 키·벡터·버전 저장 순서로 처리되는지 검증한다.
-
         // given
         User user = consentedUser();
         given(userRepository.findById(USER_ID)).willReturn(Optional.of(user));
@@ -250,9 +238,6 @@ class UserVoiceProfileServiceTest {
     @Test
     @DisplayName("AI 호출이 실패하거나 시간 초과되면 기존 등록을 유지하고 추출 실패로 응답한다")
     void registerWhenAiFails() throws Exception {
-        // 테스트 목적:
-        // AI 오류·타임아웃은 원인 구분 없이 502로 응답하고, 저장을 시도하지 않아 기존 벡터가 유지되는지 검증한다.
-
         // given
         givenUploadedObject();
         given(speakerEmbeddingAiClient.requestEmbedding(any()))
@@ -269,9 +254,6 @@ class UserVoiceProfileServiceTest {
     @Test
     @DisplayName("AI가 빈 벡터나 유효하지 않은 숫자를 주면 저장하지 않고 추출 실패로 응답한다")
     void registerWithInvalidAiResponse() throws Exception {
-        // 테스트 목적:
-        // 빈 배열, NaN, 버전 누락 응답을 성공으로 저장하지 않는지 검증한다.
-
         // given
         givenUploadedObject();
         given(speakerEmbeddingAiClient.requestEmbedding(any())).willReturn(

@@ -144,9 +144,6 @@ class HomeServiceTest {
     @Test
     @DisplayName("음성 수집에 동의하고 사전 녹음을 등록한 사용자는 홈 응답에 둘 다 true로 내려준다")
     void getHomeWithVoiceProfile() {
-        // 테스트 목적:
-        // 홈 응답의 사전 녹음 동의·등록 여부가 사용자 정보에서 채워지는지 검증한다.
-
         // given
         User user = User.create();
         user.consentToVoiceCollection(LocalDateTime.of(2026, 9, 17, 10, 0));
