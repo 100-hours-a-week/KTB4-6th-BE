@@ -3,6 +3,7 @@ package com.backend.meety.domain.ai.realtime;
 import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
 import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
+import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
@@ -32,6 +33,7 @@ public class AiLiveMeetingConnectionService {
     private final ApplicationEventPublisher eventPublisher;
     private final TranscriptSaveDispatcher transcriptSaveDispatcher;
     private final RecordingOwnerService ownerService;
+    private final MeetingRepository meetingRepository;
     private final MeetingParticipantRepository meetingParticipantRepository;
     private final AiAudioAckService audioAckService;
     private final AiHeartbeatService heartbeatService;
@@ -237,12 +239,14 @@ public class AiLiveMeetingConnectionService {
     }
 
     private void sendSessionStart(AiLiveMeetingConnection connection, WebSocketSession aiSession) throws Exception {
+        var meeting = meetingRepository.findByIdAndDeletedAtIsNull(connection.meetingId())
+                .orElseThrow(() -> new IllegalStateException("Meeting not found for session.start: " + connection.meetingId()));
         List<AiSessionParticipant> participants = meetingParticipantRepository
                 .findAttendeesByMeetingId(connection.meetingId())
                 .stream()
                 .map(AiSessionParticipant::from)
                 .toList();
-        String payload = objectMapper.writeValueAsString(AiSessionStartMessage.of(connection, participants));
+        String payload = objectMapper.writeValueAsString(AiSessionStartMessage.of(connection, meeting, participants));
         connection.sendStart(new TextMessage(payload));
     }
 

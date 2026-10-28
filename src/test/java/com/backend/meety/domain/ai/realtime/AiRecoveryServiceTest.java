@@ -5,7 +5,9 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.backend.meety.domain.ai.event.*;
+import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
+import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.recording.entity.RecordingSessionStatus;
 import com.backend.meety.domain.recording.owner.RecordingOwnerRepository;
@@ -16,6 +18,7 @@ import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepositor
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveProperties;
+import com.backend.meety.domain.team.entity.Team;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.net.URI;
 import java.time.*;
@@ -39,6 +42,9 @@ class AiRecoveryServiceTest {
     final TranscriptSegmentRepository transcriptRepository = mock(TranscriptSegmentRepository.class);
     final TranscriptService transcriptService = mock(TranscriptService.class);
     final RecordingSession recording = mock(RecordingSession.class);
+    final MeetingRepository meetingRepository = mock(MeetingRepository.class);
+    final Meeting meeting = mock(Meeting.class);
+    final Team team = mock(Team.class);
     final ObjectMapper mapper = new ObjectMapper();
     final TestClock clock = new TestClock();
     final SimpleMeterRegistry metrics = new SimpleMeterRegistry();
@@ -68,7 +74,7 @@ class AiRecoveryServiceTest {
     final AiLiveMeetingConnectionService connectionService = new AiLiveMeetingConnectionService(
             connections, this::connect, new AiLiveMeetingProperties(URI.create("ws://localhost/ai")),
             new AiRequestIdGenerator(), timers, mapper, this::publish, transcriptSaveDispatcher,
-            mock(RecordingOwnerService.class), mock(MeetingParticipantRepository.class), ack, heartbeat, contexts);
+            mock(RecordingOwnerService.class), meetingRepository, mock(MeetingParticipantRepository.class), ack, heartbeat, contexts);
     final AiRecoveryService recovery = new AiRecoveryService(contexts, connections, connectionService, ownerRepository,
             recordingRepository, transcriptRepository, checkpointRepository, audio, heartbeat, timers, work::add,
             new AiRecoveryProperties(2, Duration.ofSeconds(5), 10, 2, 64), mapper, clock, metrics, this::publish);
@@ -89,6 +95,12 @@ class AiRecoveryServiceTest {
         audio.replace(88L, fe);
         when(ownerRepository.find(88L)).thenAnswer(call -> Optional.ofNullable(owner.get()));
         when(recordingRepository.findByIdAndDeletedAtIsNull(88L)).thenReturn(Optional.of(recording));
+        when(meetingRepository.findByIdAndDeletedAtIsNull(42L)).thenReturn(Optional.of(meeting));
+        when(meeting.getTeam()).thenReturn(team);
+        when(team.getId()).thenReturn(7L);
+        when(meeting.getTitle()).thenReturn("주간 스프린트 회의");
+        when(meeting.getPurpose()).thenReturn("STT 맥락 생성 설계 검토");
+        when(meeting.getNote()).thenReturn("Modal, Qwen 관련 논의");
         when(recording.getStatus()).thenAnswer(call -> status.get());
         when(transcriptRepository.findMaxSequenceNumber(42L)).thenAnswer(call -> transcriptMax.get());
         when(checkpointRepository.find(88L)).thenAnswer(call -> checkpointBackend.get() == null
@@ -118,6 +130,10 @@ class AiRecoveryServiceTest {
         assertThat(start.path("startSequence").asLong()).isEqualTo(100);
         assertThat(start.path("transcriptSequenceStart").asLong()).isEqualTo(12);
         assertThat(start.path("meetingId").asLong()).isEqualTo(42);
+        assertThat(start.path("teamId").asLong()).isEqualTo(7);
+        assertThat(start.path("title").asText()).isEqualTo("주간 스프린트 회의");
+        assertThat(start.path("purpose").asText()).isEqualTo("STT 맥락 생성 설계 검토");
+        assertThat(start.path("notes").asText()).isEqualTo("Modal, Qwen 관련 논의");
         assertThat(feMessages).anyMatch(text -> text.contains("recording.recovering"))
                 .anyMatch(text -> text.contains("recording.replay.request") && text.contains("100"));
         assertThat(original.isClosed()).isTrue();
