@@ -45,6 +45,53 @@ class InternalApiSecurityTest {
         assertThat(response.body()).contains("AI_REQUEST_ACCESS_DENIED");
     }
 
+    @Test
+    @DisplayName("녹음 세션 ID로 호출해도 공유 키가 없으면 401이다")
+    void rejectsRecordingSessionWithoutKey() throws Exception {
+        HttpResponse<String> response = get(HttpRequest.newBuilder(uri())
+                .header(InternalApiHeader.RECORDING_SESSION_ID, "999999"));
+
+        assertThat(response.statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    @DisplayName("공유 키와 녹음 세션 ID로 호출하면 녹음 세션 권한 검사까지 간다")
+    void passesWithKeyAndRecordingSession() throws Exception {
+        HttpResponse<String> response = get(HttpRequest.newBuilder(uri())
+                .header(InternalApiHeader.API_KEY, LOCAL_INTERNAL_API_KEY)
+                .header(InternalApiHeader.RECORDING_SESSION_ID, "999999"));
+
+        assertThat(response.statusCode()).isEqualTo(403);
+        assertThat(response.body()).contains("RECORDING_SESSION_ACCESS_DENIED");
+    }
+
+    @Test
+    @DisplayName("식별 헤더가 없거나 둘 다 있으면 400이다")
+    void rejectsMissingOrBothIdentifiers() throws Exception {
+        HttpResponse<String> none = get(HttpRequest.newBuilder(uri())
+                .header(InternalApiHeader.API_KEY, LOCAL_INTERNAL_API_KEY));
+        HttpResponse<String> both = get(HttpRequest.newBuilder(uri())
+                .header(InternalApiHeader.API_KEY, LOCAL_INTERNAL_API_KEY)
+                .header(InternalApiHeader.AI_REQUEST_ID, "999999")
+                .header(InternalApiHeader.RECORDING_SESSION_ID, "999999"));
+
+        assertThat(none.statusCode()).isEqualTo(400);
+        assertThat(none.body()).contains("INTERNAL_QUERY_IDENTIFIER_INVALID");
+        assertThat(both.statusCode()).isEqualTo(400);
+        assertThat(both.body()).contains("INTERNAL_QUERY_IDENTIFIER_INVALID");
+    }
+
+    @Test
+    @DisplayName("녹음 세션 ID가 숫자가 아니면 400이다")
+    void rejectsMalformedRecordingSessionId() throws Exception {
+        HttpResponse<String> response = get(HttpRequest.newBuilder(uri())
+                .header(InternalApiHeader.API_KEY, LOCAL_INTERNAL_API_KEY)
+                .header(InternalApiHeader.RECORDING_SESSION_ID, "abc"));
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        assertThat(response.body()).contains("INVALID_INPUT_VALUE");
+    }
+
     private URI uri() {
         return URI.create("http://localhost:" + environment.getProperty("local.server.port") + SUMMARY_PATH);
     }
