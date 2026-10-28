@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.BooleanSupplier;
@@ -42,6 +43,7 @@ public class AiLiveMeetingConnection {
     private volatile String sessionStopRequestId;
     private volatile ScheduledFuture<?> stopTimeoutFuture;
     private volatile String owner;
+    private final AtomicBoolean transcriptFinalizationStarted = new AtomicBoolean();
     private final NavigableMap<Long, Long> pendingAudio = new TreeMap<>();
     private long lastSentSequence = -1;
     private long lastAckedSequence = -1;
@@ -165,7 +167,13 @@ public class AiLiveMeetingConnection {
     }
 
     public void assignOwner(String owner) {
-        this.owner = owner;
+        synchronized (sendLock) {
+            this.owner = owner;
+        }
+    }
+
+    public boolean beginTranscriptFinalization() {
+        return transcriptFinalizationStarted.compareAndSet(false, true);
     }
 
     public void attach(WebSocketSession webSocketSession) {
@@ -383,9 +391,18 @@ public class AiLiveMeetingConnection {
     }
 
     public boolean sendStop(ObjectMapper objectMapper, String requestId) throws IOException {
+        return sendStop(objectMapper, requestId, null);
+    }
+
+    public boolean sendStop(ObjectMapper objectMapper, String requestId, String expectedOwner) throws IOException {
         synchronized (sendLock) {
+            if (expectedOwner != null && (recoveryFenced || !expectedOwner.equals(owner))) {
+                return false;
+            }
             stopRequested = true;
-            if (state() != AiLiveMeetingConnectionState.READY && state() != AiLiveMeetingConnectionState.PAUSED) {
+            if (state() != AiLiveMeetingConnectionState.READY && state() != AiLiveMeetingConnectionState.PAUSED
+                    && state() != AiLiveMeetingConnectionState.PAUSE_SENT
+                    && state() != AiLiveMeetingConnectionState.RESUME_SENT) {
                 return false;
             }
             WebSocketSession session = webSocketSession;
