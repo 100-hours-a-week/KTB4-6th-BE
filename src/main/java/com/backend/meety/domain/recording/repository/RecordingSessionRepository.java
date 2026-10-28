@@ -14,6 +14,14 @@ import org.springframework.data.repository.query.Param;
 
 public interface RecordingSessionRepository extends JpaRepository<RecordingSession, Long> {
 
+    @Query("""
+            select new com.backend.meety.domain.recording.repository.RecordingStatusSnapshot(
+                r.id, r.meeting.id, r.status)
+            from RecordingSession r
+            where r.id in :sessionIds and r.deletedAt is null
+            """)
+    List<RecordingStatusSnapshot> findStatusSnapshotsByIdIn(@Param("sessionIds") Collection<Long> sessionIds);
+
     boolean existsByMeetingIdAndStatusInAndDeletedAtIsNull(Long meetingId, Collection<RecordingSessionStatus> statuses);
 
     Optional<RecordingSession> findByMeetingIdAndStatusInAndDeletedAtIsNull(

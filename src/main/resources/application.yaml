@@ -52,6 +52,9 @@ recording:
   owner:
     ttl: ${RECORDING_OWNER_TTL:30s}
     heartbeat-interval: ${RECORDING_OWNER_HEARTBEAT_INTERVAL:10s}
+  stop-reconciliation:
+    enabled: ${RECORDING_STOP_RECONCILIATION_ENABLED:false}
+    interval: ${RECORDING_STOP_RECONCILIATION_INTERVAL:3s}
   sequence:
     ttl: ${RECORDING_SEQUENCE_TTL:90m}
 

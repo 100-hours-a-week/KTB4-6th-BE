@@ -40,6 +40,9 @@ public class AiLiveMeetingConnectionService {
     private final AiRecoveryRegistry recoveries;
 
     void notifyTranscriptFinalized(AiLiveMeetingConnection connection) {
+        if (!connection.beginTranscriptFinalization()) {
+            return;
+        }
         transcriptSaveDispatcher.submitFinalize(connection.recordingSessionId(), () -> {
             eventPublisher.publishEvent(new MeetingTranscriptFinalizedEvent(
                     connection.meetingId(), connection.recordingSessionId()));
@@ -234,6 +237,24 @@ public class AiLiveMeetingConnectionService {
                 () -> log.info("종료할 AI WebSocket connection이 없습니다. recordingSessionId={}", recordingSessionId));
     }
 
+    /** Stop exactly the connection that was checked against the DB and Redis Owner. */
+    public boolean stopCurrent(AiLiveMeetingConnection expected, String owner) {
+        if (!isCurrent(expected) || !owner.equals(expected.owner()) || expected.isStopRequested()) {
+            return false;
+        }
+        AiLiveMeetingConnectionState state = expected.state();
+        if (state != AiLiveMeetingConnectionState.READY && state != AiLiveMeetingConnectionState.PAUSED
+                && state != AiLiveMeetingConnectionState.PAUSE_SENT
+                && state != AiLiveMeetingConnectionState.RESUME_SENT) {
+            return false;
+        }
+        if (!stop(expected, owner)) {
+            return false;
+        }
+        recoveries.cancel(expected.recordingSessionId());
+        return true;
+    }
+
     private URI aiWebSocketUri() {
         return properties.websocketUrl();
     }
@@ -276,10 +297,14 @@ public class AiLiveMeetingConnectionService {
         }
     }
 
-    private void stop(AiLiveMeetingConnection connection) {
+    private boolean stop(AiLiveMeetingConnection connection) {
+        return stop(connection, null);
+    }
+
+    private boolean stop(AiLiveMeetingConnection connection, String expectedOwner) {
         String requestId = requestIdGenerator.sessionStopRequestId();
         try {
-            if (!connection.sendStop(objectMapper, requestId)) {
+            if (!connection.sendStop(objectMapper, requestId, expectedOwner)) {
                 log.info("AI WebSocket session.stop을 전송하지 않습니다. recordingSessionId={}, state={}",
                         connection.recordingSessionId(), connection.state());
                 if (connection.state() == AiLiveMeetingConnectionState.CONNECTING
@@ -288,17 +313,19 @@ public class AiLiveMeetingConnectionService {
                     notifyTranscriptFinalized(connection);
                     cleanup(connection);
                 }
-                return;
+                return false;
             }
             connection.setStopTimeoutFuture(stopTimeoutScheduler.schedule(
                     () -> handleStopTimeout(connection),
                     AiLiveMeetingPolicy.STOP_TIMEOUT
             ));
+            return true;
         } catch (Exception e) {
             log.warn("AI WebSocket session.stop 전송에 실패했습니다. recordingSessionId={}",
                     connection.recordingSessionId(), e);
             notifyTranscriptFinalized(connection);
             cleanup(connection);
+            return true;
         }
     }
 

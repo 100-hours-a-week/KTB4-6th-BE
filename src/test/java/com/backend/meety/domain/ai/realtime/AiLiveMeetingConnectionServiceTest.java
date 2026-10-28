@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -277,6 +278,95 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(client.session.closeStatuses).contains(CloseStatus.NORMAL);
         assertThat(registry.find(88L)).isEmpty();
         assertThat(timeoutScheduler.future.cancelled).isTrue();
+    }
+
+    @Test
+    @DisplayName("DB 보정 STOP은 검증한 연결에만 한 번 전송하고 session.ended 후 전사를 확정한다")
+    void reconciledStopUsesExpectedConnectionAndFinalizesOnce() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+
+        assertThat(service.stopCurrent(connection, "server-a:1")).isTrue();
+        assertThat(service.stopCurrent(connection, "server-a:1")).isFalse();
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.STOP_SENT);
+        assertThat(client.session.sentMessages).hasSize(2);
+
+        client.receive(sessionEnded());
+        timeoutScheduler.runScheduledTask();
+
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.CLOSED);
+        assertThat(registry.find(88L)).isEmpty();
+        assertThat(readyEvents.stream().filter(MeetingTranscriptFinalizedEvent.class::isInstance)).hasSize(1);
+        verify(ownerService).release(88L, "server-a:1");
+    }
+
+    @Test
+    @DisplayName("Pub/Sub STOP과 DB 보정 STOP이 동시에 실행돼도 session.stop은 한 번만 보낸다")
+    void pubSubAndReconciliationStopRaceSendsOnce() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Runnable pubSub = () -> {
+            ready.countDown();
+            try {
+                start.await();
+                service.stop(88L);
+            } catch (Throwable e) {
+                failure.compareAndSet(null, e);
+            }
+        };
+        Runnable reconciliation = () -> {
+            ready.countDown();
+            try {
+                start.await();
+                service.stopCurrent(connection, "server-a:1");
+            } catch (Throwable e) {
+                failure.compareAndSet(null, e);
+            }
+        };
+        Thread first = Thread.ofVirtual().start(pubSub);
+        Thread second = Thread.ofVirtual().start(reconciliation);
+        ready.await();
+        start.countDown();
+        first.join();
+        second.join();
+
+        assertThat(failure.get()).isNull();
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.STOP_SENT);
+        assertThat(client.session.sentMessages).hasSize(2);
+        assertSessionStop(client.session.sentMessages.getLast());
+    }
+
+    @Test
+    @DisplayName("검증 당시 Owner와 현재 연결 Owner가 다르면 보정 STOP을 보내지 않는다")
+    void reconciledStopRejectsChangedOwnerAndFencedConnection() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-b:2");
+
+        assertThat(service.stopCurrent(connection, "server-a:1")).isFalse();
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.READY);
+        assertThat(client.session.sentMessages).hasSize(1);
+
+        connection.assignOwner("server-a:1");
+        connection.fenceForRecovery();
+        assertThat(service.stopCurrent(connection, "server-a:1")).isFalse();
+        assertThat(client.session.sentMessages).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("AI PAUSE 응답 대기 중에도 종료 목표가 확인되면 STOP을 전송한다")
+    void reconciledStopPreemptsPauseSent() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+        service.pause(88L);
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.PAUSE_SENT);
+
+        assertThat(service.stopCurrent(connection, "server-a:1")).isTrue();
+
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.STOP_SENT);
+        assertSessionStop(client.session.sentMessages.getLast());
     }
 
     @Test
