@@ -14,9 +14,11 @@ import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingParticipant;
 import com.backend.meety.domain.meeting.repository.MeetingParticipantRepository;
+import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveProperties;
 import com.backend.meety.domain.transcript.service.TranscriptService;
@@ -26,6 +28,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.ScheduledFuture;
@@ -33,6 +36,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -55,6 +59,7 @@ class AiLiveMeetingConnectionServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final TranscriptService transcriptService = mock(TranscriptService.class);
     private final RecordingOwnerService ownerService = mock(RecordingOwnerService.class);
+    private final MeetingRepository meetingRepository = mock(MeetingRepository.class);
     private final MeetingParticipantRepository meetingParticipantRepository = mock(MeetingParticipantRepository.class);
     private final AiLiveMeetingConnectionService service = new AiLiveMeetingConnectionService(
             registry,
@@ -68,6 +73,7 @@ class AiLiveMeetingConnectionServiceTest {
                     new TranscriptSaveProperties(500, 5000, Duration.ofMillis(1), Duration.ofMillis(1), Duration.ZERO),
                     transcriptService),
             ownerService,
+            meetingRepository,
             meetingParticipantRepository,
             new AiAudioAckService(registry, new com.backend.meety.domain.recording.realtime.AudioWebSocketRegistry(),
                     mock(com.backend.meety.domain.recording.realtime.AudioSequenceRepository.class),
@@ -76,6 +82,18 @@ class AiLiveMeetingConnectionServiceTest {
             mock(AiHeartbeatService.class),
             new AiRecoveryRegistry()
     );
+
+    @BeforeEach
+    void setUpMeeting() {
+        Meeting meeting = mock(Meeting.class);
+        Team team = mock(Team.class);
+        when(meetingRepository.findByIdAndDeletedAtIsNull(42L)).thenReturn(Optional.of(meeting));
+        when(meeting.getTeam()).thenReturn(team);
+        when(team.getId()).thenReturn(7L);
+        when(meeting.getTitle()).thenReturn("주간 스프린트 회의");
+        when(meeting.getPurpose()).thenReturn("STT 맥락 생성 설계 검토");
+        when(meeting.getNote()).thenReturn("Modal, Qwen 관련 논의");
+    }
 
     @Test
     void connectSendSessionStartAndMarkReadyWhenSessionReadyReceived() throws Exception {
@@ -217,6 +235,18 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(root.path("participants").get(1).has("teamMemberId")).isTrue();
         assertThat(root.path("participants").get(1).path("teamMemberId").isNull()).isTrue();
         assertThat(root.path("participants").get(1).path("name").asText()).isEqualTo("외부 디자이너");
+    }
+
+    @Test
+    @DisplayName("비고가 없는 회의의 session.start에서는 notes 필드를 생략한다")
+    void sessionStartOmitsNullNotes() throws Exception {
+        when(meetingRepository.findByIdAndDeletedAtIsNull(42L).orElseThrow().getNote()).thenReturn(null);
+
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isTrue();
+
+        JsonNode root = objectMapper.readTree(client.session.sentMessages.getFirst());
+        assertThat(root.has("notes")).isFalse();
+        assertThat(root.path("teamId").asLong()).isEqualTo(7L);
     }
 
     @Test
@@ -1064,13 +1094,17 @@ class AiLiveMeetingConnectionServiceTest {
 
     private void assertSessionStart(String json) throws Exception {
         JsonNode root = objectMapper.readTree(json);
-        assertThat(root.size()).isEqualTo(6);
+        assertThat(root.size()).isEqualTo(10);
         assertThat(root.path("type").asText()).isEqualTo("session.start");
         assertThat(root.path("requestId").asText()).isEqualTo("start-test");
         assertThat(root.path("meetingId").isIntegralNumber()).isTrue();
         assertThat(root.path("meetingId").asLong()).isEqualTo(42L);
         assertThat(root.path("recordingSessionId").isIntegralNumber()).isTrue();
         assertThat(root.path("recordingSessionId").asLong()).isEqualTo(88L);
+        assertThat(root.path("teamId").asLong()).isEqualTo(7L);
+        assertThat(root.path("title").asText()).isEqualTo("주간 스프린트 회의");
+        assertThat(root.path("purpose").asText()).isEqualTo("STT 맥락 생성 설계 검토");
+        assertThat(root.path("notes").asText()).isEqualTo("Modal, Qwen 관련 논의");
         assertThat(root.has("payload")).isFalse();
         assertThat(root.path("participantCount").asInt()).isZero();
         assertThat(root.path("participants").isArray()).isTrue();
