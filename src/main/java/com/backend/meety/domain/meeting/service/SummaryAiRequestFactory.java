@@ -13,7 +13,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 /**
- * 실시간 전사에 저장된 AI 화자 ID를 요약 입력에 그대로 전달한다.
+ * 실시간 전사의 AI 화자 ID와 현재 표시 이름을 요약 입력에 전달한다.
  * 화자 ID 0도 유효한 값이며, 화자 정보가 없는 구간은 null을 유지한다.
  */
 @Component
@@ -46,6 +46,8 @@ public class SummaryAiRequestFactory {
         return new SummaryAiSegment(
                 segment.getId(),
                 segment.getAiSpeakerId(),
+                segment.getAiSpeakerId() == null || segment.getTranscriptSpeaker() == null
+                        ? null : segment.getTranscriptSpeaker().displayName(),
                 segment.getSequenceNumber(),
                 segment.getContent(),
                 segment.getStartedAtMs(),

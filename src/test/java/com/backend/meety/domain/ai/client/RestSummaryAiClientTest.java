@@ -20,6 +20,7 @@ import com.backend.meety.domain.meeting.service.SummaryAiRequestFactory;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
+import com.backend.meety.domain.transcript.entity.TranscriptSpeaker;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -47,9 +48,13 @@ class RestSummaryAiClientTest {
         AiRequest aiRequest = withId(AiRequest.create(team, member, "key", AiRequestType.SUMMARY), 900L);
         MeetingSummary summary = MeetingSummary.createPending(aiRequest, team, meeting, 1L, null);
         TranscriptSegmentRepository transcripts = mock(TranscriptSegmentRepository.class);
+        TranscriptSpeaker mappedSpeaker = TranscriptSpeaker.create(meeting, "화자 1");
+        mappedSpeaker.mapToTeamMember(member);
+        TranscriptSegment mappedSegment = withId(TranscriptSegment.createFinal(
+                meeting, "1:1", 1L, "첫 화자 발언", 1000L, 2000L, startedAt, 0L), 101L);
+        mappedSegment.assignSpeaker(mappedSpeaker);
         when(transcripts.findAllByMeetingIdOrderBySequence(meeting.getId())).thenReturn(List.of(
-                withId(TranscriptSegment.createFinal(
-                        meeting, "1:1", 1L, "첫 화자 발언", 1000L, 2000L, startedAt, 0L), 101L),
+                mappedSegment,
                 withId(TranscriptSegment.createFinal(
                         meeting, "1:2", 2L, "다른 화자 발언", 2000L, 3000L, startedAt, 1L), 102L),
                 withId(TranscriptSegment.createFinal(
@@ -71,10 +76,14 @@ class RestSummaryAiClientTest {
                     assertThat(segments.size()).isEqualTo(4);
                     assertThat(segments.get(0).path("speakerId").isIntegralNumber()).isTrue();
                     assertThat(segments.get(0).path("speakerId").asLong()).isZero();
+                    assertThat(segments.get(0).has("displayName")).isTrue();
+                    assertThat(segments.get(0).path("displayName").asText()).isEqualTo(member.getDisplayName());
                     assertThat(segments.get(1).path("speakerId").asLong()).isEqualTo(1L);
                     assertThat(segments.get(2).path("speakerId").asLong()).isEqualTo(2L);
                     assertThat(segments.get(3).has("speakerId")).isTrue();
                     assertThat(segments.get(3).path("speakerId").isNull()).isTrue();
+                    assertThat(segments.get(3).has("displayName")).isTrue();
+                    assertThat(segments.get(3).path("displayName").isNull()).isTrue();
                     assertThat(body.path("speakers").isArray()).isTrue();
                     assertThat(body.path("speakers").size()).isZero();
                 })

@@ -56,6 +56,7 @@ class SummaryAiRequestFactoryTest {
         assertThat(request.segments()).hasSize(2);
         assertThat(request.segments().getFirst().segmentId()).isEqualTo(101L);
         assertThat(request.segments()).allSatisfy(segment -> assertThat(segment.speakerId()).isNull());
+        assertThat(request.segments()).allSatisfy(segment -> assertThat(segment.displayName()).isNull());
         assertThat(request.segments().getFirst().endedAtMs()).isEqualTo(3500L);
         assertThat(request.segments().getLast().endedAtMs())
                 .as("endedAtMs가 null이면 startedAtMs로 대체한다")
@@ -63,8 +64,8 @@ class SummaryAiRequestFactoryTest {
     }
 
     @Test
-    @DisplayName("실시간 화자 ID 0·1·2와 미확인 null을 후처리 화자 매핑과 관계없이 유지한다")
-    void preservesRealtimeSpeakerIdsRegardlessOfSpeakerMapping() {
+    @DisplayName("요약 입력은 세그먼트별 현재 매핑 이름을 전달하고 미확정 화자는 null을 유지한다")
+    void includesCurrentSpeakerDisplayNameAndPreservesUnknownSpeaker() {
         Team team = team();
         TeamMember member = member(team);
         Meeting meeting = meeting(team, member);
@@ -92,6 +93,8 @@ class SummaryAiRequestFactoryTest {
                 .containsExactly(0L, 1L, 2L, null);
         assertThat(request.segments()).extracting(segment -> segment.segmentId())
                 .containsExactly(101L, 102L, 103L, 104L);
+        assertThat(request.segments()).extracting(segment -> segment.displayName())
+                .containsExactly(member.getDisplayName(), null, null, null);
         assertThat(request.speakers()).isEmpty();
     }
 
