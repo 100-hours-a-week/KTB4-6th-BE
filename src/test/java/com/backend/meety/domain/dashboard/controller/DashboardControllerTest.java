@@ -73,7 +73,7 @@ class DashboardControllerTest {
                 new DashboardSummaryResponse(
                         1L, 120L, 120L, 0L,
                         BigDecimal.ZERO.setScale(2),
-                        BigDecimal.valueOf(1.5), BigDecimal.valueOf(1.25)),
+                        BigDecimal.valueOf(1.5), BigDecimal.valueOf(1.25), 120L),
                 List.of(new DashboardChartPointResponse(
                         DATE, DATE, 1L, 120L, 120L, 0L)),
                 List.of(new DashboardMeetingResponse(101L, "데일리 스크럼", 120L, 120L)),
@@ -90,6 +90,7 @@ class DashboardControllerTest {
                 .andExpect(jsonPath("$.data.endDate").value("2026-10-12"))
                 .andExpect(jsonPath("$.data.summary.totalMeetings").value(1))
                 .andExpect(jsonPath("$.data.summary.totalContextOutSeconds").value(1.5))
+                .andExpect(jsonPath("$.data.summary.contextOutMeetingDurationSeconds").value(120))
                 .andExpect(jsonPath("$.data.summary.overtimeDurationRate").doesNotExist())
                 .andExpect(jsonPath("$.data.chart.length()").value(1))
                 .andExpect(jsonPath("$.data.chart[0].meetingCount").value(1))
@@ -223,7 +224,7 @@ class DashboardControllerTest {
                 new DashboardSummaryResponse(
                         0L, 0L, 0L, 0L,
                         BigDecimal.ZERO.setScale(2),
-                        BigDecimal.ZERO, BigDecimal.ZERO.setScale(2)),
+                        BigDecimal.ZERO, BigDecimal.ZERO.setScale(2), 0L),
                 DATE.datesUntil(DATE.plusDays(7))
                         .map(date -> new DashboardChartPointResponse(date, date, 0L, 0L, 0L, 0L))
                         .toList(),

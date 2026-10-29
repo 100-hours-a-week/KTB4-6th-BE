@@ -203,6 +203,7 @@ class DashboardMySqlIntegrationTest {
         assertThat(response.topics().getFirst().durationSeconds()).isEqualByComparingTo("1.501");
         assertThat(response.summary().totalContextOutSeconds()).isEqualByComparingTo("1.501");
         assertThat(response.summary().contextOutRate()).isEqualByComparingTo("1.25");
+        assertThat(response.summary().contextOutMeetingDurationSeconds()).isEqualTo(120L);
     }
 
     @Test

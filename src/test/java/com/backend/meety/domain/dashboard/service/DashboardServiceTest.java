@@ -255,6 +255,7 @@ class DashboardServiceTest {
         // then
         assertThat(response.summary().totalContextOutSeconds()).isEqualByComparingTo("1.5");
         assertThat(response.summary().contextOutRate()).isEqualByComparingTo("1.25");
+        assertThat(response.summary().contextOutMeetingDurationSeconds()).isEqualTo(120L);
         assertThat(response.topics()).hasSize(1);
         assertThat(response.topics().getFirst().name()).isEqualTo("WebSocket ACK 방식");
         assertThat(response.topics().getFirst().durationSeconds()).isEqualByComparingTo("1.5");
@@ -318,6 +319,7 @@ class DashboardServiceTest {
         // then
         assertThat(response.summary().totalContextOutSeconds()).isEqualByComparingTo("0");
         assertThat(response.summary().contextOutRate()).isEqualByComparingTo("0.00");
+        assertThat(response.summary().contextOutMeetingDurationSeconds()).isZero();
         assertThat(response.topics()).isEmpty();
     }
 
@@ -407,6 +409,7 @@ class DashboardServiceTest {
         // then
         assertThat(response.summary().totalContextOutSeconds()).isEqualByComparingTo("60");
         assertThat(response.summary().contextOutRate()).isEqualByComparingTo("25.00");
+        assertThat(response.summary().contextOutMeetingDurationSeconds()).isEqualTo(240L);
     }
 
     @ParameterizedTest(name = "{1} 사용자는 대시보드 접근이 거부된다")
