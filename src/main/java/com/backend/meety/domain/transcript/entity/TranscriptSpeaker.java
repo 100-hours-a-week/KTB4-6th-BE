@@ -12,13 +12,17 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import com.backend.meety.domain.recording.entity.RecordingSession;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "transcript_speakers")
+@Table(name = "transcript_speakers", uniqueConstraints = @UniqueConstraint(
+        name = "uk_transcript_speakers_recording_ai_speaker",
+        columnNames = {"recording_session_id", "ai_speaker_id"}))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class TranscriptSpeaker extends BaseEntity {
 
@@ -31,6 +35,13 @@ public class TranscriptSpeaker extends BaseEntity {
     private Meeting meeting;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "recording_session_id")
+    private RecordingSession recordingSession;
+
+    @Column(name = "ai_speaker_id")
+    private Long aiSpeakerId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "mapped_team_member_id")
     private TeamMember mappedTeamMember;
 
@@ -40,6 +51,10 @@ public class TranscriptSpeaker extends BaseEntity {
     @Column(name = "custom_alias", length = 10)
     private String customAlias;
 
+    @jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(name = "mapping_source", length = 20)
+    private TranscriptSpeakerMappingSource mappingSource;
+
     public static TranscriptSpeaker create(Meeting meeting, String speakerLabel) {
         TranscriptSpeaker speaker = new TranscriptSpeaker();
         speaker.meeting = meeting;
@@ -47,18 +62,53 @@ public class TranscriptSpeaker extends BaseEntity {
         return speaker;
     }
 
+    public static TranscriptSpeaker createAiSpeaker(
+            Meeting meeting, RecordingSession recordingSession, Long aiSpeakerId, String speakerLabel) {
+        TranscriptSpeaker speaker = create(meeting, speakerLabel);
+        speaker.recordingSession = recordingSession;
+        speaker.aiSpeakerId = aiSpeakerId;
+        return speaker;
+    }
+
+    public void applyAiMapping(TeamMember teamMember) {
+        if (isManualMapping()) {
+            return;
+        }
+        this.mappedTeamMember = teamMember;
+        this.customAlias = null;
+        this.mappingSource = TranscriptSpeakerMappingSource.AI;
+    }
+
+    public boolean isAiMapped() {
+        return mappingSource == TranscriptSpeakerMappingSource.AI;
+    }
+
     public void mapToTeamMember(TeamMember teamMember) {
         this.mappedTeamMember = teamMember;
         this.customAlias = null;
+        this.mappingSource = TranscriptSpeakerMappingSource.MANUAL;
     }
 
     public void mapToCustomAlias(String customAlias) {
         this.mappedTeamMember = null;
         this.customAlias = customAlias;
+        this.mappingSource = TranscriptSpeakerMappingSource.MANUAL;
     }
 
     public void clearMapping() {
         this.mappedTeamMember = null;
         this.customAlias = null;
+        this.mappingSource = TranscriptSpeakerMappingSource.MANUAL;
+    }
+
+    private boolean isManualMapping() {
+        return mappingSource == TranscriptSpeakerMappingSource.MANUAL
+                || (mappingSource == null && (mappedTeamMember != null || customAlias != null));
+    }
+
+    public String displayName() {
+        if (customAlias != null) { return customAlias; }
+        if (mappedTeamMember != null) { return mappedTeamMember.getDisplayName(); }
+        return speakerLabel;
     }
 }

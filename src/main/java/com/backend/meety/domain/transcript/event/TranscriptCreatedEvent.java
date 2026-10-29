@@ -10,6 +10,9 @@ public record TranscriptCreatedEvent(
         Long startedAtMs,
         Long endedAtMs,
         LocalDateTime recognizedAt,
-        Long speakerId
+        Long speakerId,
+        Long speakerTeamMemberId,
+        String speakerDisplayName,
+        Long transcriptSpeakerId
 ) {
 }

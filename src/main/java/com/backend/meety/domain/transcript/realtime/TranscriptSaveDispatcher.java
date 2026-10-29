@@ -1,6 +1,7 @@
 package com.backend.meety.domain.transcript.realtime;
 
 import com.backend.meety.domain.ai.realtime.AiTranscriptSegmentMessage;
+import com.backend.meety.domain.ai.realtime.AiSpeakerMappingMessage;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import com.backend.meety.global.config.AsyncConfig;
 import jakarta.annotation.PreDestroy;
@@ -58,8 +59,24 @@ public class TranscriptSaveDispatcher {
         return false;
     }
 
+    public boolean submitOrdered(Long recordingSessionId, String taskName, Runnable action, Runnable onFailure) {
+        String rejection = enqueue(recordingSessionId, () -> {
+            if (!runWithRetry(taskName, recordingSessionId, null, action)) { onFailure.run(); }
+        });
+        if (rejection == null) { return true; }
+        log.error("전사 순서 작업을 거절했습니다. taskName={}, reason={}, recordingSessionId={}",
+                taskName, rejection, recordingSessionId);
+        onFailure.run();
+        return false;
+    }
+
+    public boolean submitSpeakerMapping(AiSpeakerMappingMessage message, Runnable onFailure) {
+        return submitOrdered(message.recordingSessionId(), "화자 매핑 반영",
+                () -> transcriptService.applyAiSpeakerMapping(message), onFailure);
+    }
+
     public void submitFinalize(Long recordingSessionId, Runnable finalizer) {
-        String rejection = enqueue(recordingSessionId,
+        String rejection = enqueueFinalize(recordingSessionId,
                 () -> runWithRetry("전사 확정", recordingSessionId, null, finalizer));
         if (rejection == null) {
             return;
@@ -67,6 +84,32 @@ public class TranscriptSaveDispatcher {
         log.warn("전사 확정 작업이 큐에 들어가지 못해 남은 저장을 기다리지 않고 실행합니다. reason={}, recordingSessionId={}",
                 rejection, recordingSessionId);
         finalizer.run();
+    }
+
+    private String enqueueFinalize(Long recordingSessionId, Runnable action) {
+        synchronized (monitor) {
+            RecordingQueue queue = queues.get(recordingSessionId);
+            if (queue != null) {
+                // Finalization is a single task per recording and must remain behind already
+                // accepted transcript/mapping work even when ordinary queue capacity is full.
+                queue.tasks.addLast(action);
+                pendingTasks++;
+                return null;
+            }
+            if (closed) { return "closed"; }
+            RecordingQueue created = new RecordingQueue(recordingSessionId);
+            created.tasks.addLast(action);
+            pendingTasks++;
+            queues.put(recordingSessionId, created);
+            try {
+                executor.execute(() -> drain(created));
+                return null;
+            } catch (RejectedExecutionException e) {
+                queues.remove(recordingSessionId, created);
+                pendingTasks--;
+                return "executor";
+            }
+        }
     }
 
     private String enqueue(Long recordingSessionId, Runnable action) {

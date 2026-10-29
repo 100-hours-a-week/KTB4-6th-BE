@@ -303,6 +303,25 @@ class DiarizationServiceTest {
     }
 
     @Test
+    @DisplayName("후처리 화자 분리는 이미 연결된 실시간 recording scoped mapping을 덮어쓰지 않는다")
+    void completeProcessingPreservesRealtimeSpeakerMapping() {
+        aiRequest.markProcessing();
+        TranscriptSpeaker realtimeSpeaker = TranscriptSpeaker.createAiSpeaker(meeting, session, 0L, "화자 1");
+        realtimeSpeaker.mapToTeamMember(member);
+        first.assignSpeaker(realtimeSpeaker);
+        DiarizationAiResponse response = new DiarizationAiResponse(MEETING_ID, List.of(
+                new DiarizationAiResultSegment(101L, "첫 발화", 0L, 1000L, 0L)));
+
+        service.completeProcessing(AI_REQUEST_ID, "token-a", response);
+
+        assertThat(first.getTranscriptSpeaker()).isSameAs(realtimeSpeaker);
+        assertThat(first.getTranscriptSpeaker().getMappedTeamMember()).isSameAs(member);
+        ArgumentCaptor<Iterable<TranscriptSpeaker>> captor = ArgumentCaptor.forClass(Iterable.class);
+        verify(speakers).saveAll(captor.capture());
+        assertThat(captor.getValue()).isEmpty();
+    }
+
+    @Test
     @DisplayName("speakerId가 null이거나 모르는 구간은 화자를 비워 둔다")
     void completeProcessingLeavesUnknownSegmentsUnassigned() {
         aiRequest.markProcessing();

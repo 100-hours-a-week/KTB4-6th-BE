@@ -17,6 +17,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.realtime.AiTranscriptSegmentMessage;
+import com.backend.meety.domain.ai.realtime.AiSpeakerMappingMessage;
 import com.backend.meety.domain.ai.realtime.AiTranscriptSegmentPayload;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingParticipant;
@@ -44,6 +45,8 @@ import com.backend.meety.domain.transcript.exception.TranscriptErrorCode;
 import com.backend.meety.domain.transcript.exception.TranscriptException;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
 import com.backend.meety.domain.transcript.repository.TranscriptSpeakerRepository;
+import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
+import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.user.entity.User;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -61,6 +64,7 @@ class TranscriptServiceTest {
 
     private final TranscriptSegmentRepository transcriptSegments = mock(TranscriptSegmentRepository.class);
     private final TranscriptSpeakerRepository transcriptSpeakers = mock(TranscriptSpeakerRepository.class);
+    private final RecordingSessionRepository recordingSessions = mock(RecordingSessionRepository.class);
     private final MeetingRepository meetings = mock(MeetingRepository.class);
     private final MeetingParticipantRepository meetingParticipants = mock(MeetingParticipantRepository.class);
     private final MeetingService meetingService = mock(MeetingService.class);
@@ -69,6 +73,7 @@ class TranscriptServiceTest {
     private final TranscriptService service = new TranscriptService(
             transcriptSegments,
             transcriptSpeakers,
+            recordingSessions,
             meetings,
             meetingParticipants,
             meetingService,
@@ -96,6 +101,13 @@ class TranscriptServiceTest {
         // 저장된 전사와 AI 화자 식별자로 TranscriptCreatedEvent가 발행되는지 검증한다.
 
         // given
+        RecordingSession session = mock(RecordingSession.class);
+        when(session.getId()).thenReturn(700L);
+        when(session.getMeeting()).thenReturn(meeting);
+        when(recordingSessions.findByIdAndDeletedAtIsNull(700L)).thenReturn(Optional.of(session));
+        TranscriptSpeaker speaker = TranscriptSpeaker.createAiSpeaker(meeting, session, 0L, "화자 1");
+        ReflectionTestUtils.setField(speaker, "id", 901L);
+        when(transcriptSpeakers.findAiSpeaker(700L, 0L)).thenReturn(Optional.of(speaker));
         when(transcriptSegments.saveAndFlush(any(TranscriptSegment.class)))
                 .thenAnswer(call -> withId(call.getArgument(0), 900L));
 
@@ -114,7 +126,7 @@ class TranscriptServiceTest {
         assertThat(segment.getEndedAtMs()).isEqualTo(14500L);
         assertThat(segment.getRecognizedAt()).isEqualTo(RECOGNIZED_AT);
         assertThat(segment.getAiSpeakerId()).isZero();
-        assertThat(segment.getTranscriptSpeaker()).isNull();
+        assertThat(segment.getTranscriptSpeaker()).isSameAs(speaker);
 
         verify(eventPublisher).publishEvent(new TranscriptCreatedEvent(
                 100L,
@@ -124,8 +136,97 @@ class TranscriptServiceTest {
                 12000L,
                 14500L,
                 RECOGNIZED_AT,
-                0L
+                0L,
+                null,
+                "화자 1",
+                901L
         ));
+    }
+
+    @Test
+    @DisplayName("AI mapping snapshot은 동일 recording scope의 화자를 멱등하게 바꾸고 수동 매핑을 보존한다")
+    void appliesAiMappingSnapshotWithinRecordingScope() {
+        RecordingSession session = mock(RecordingSession.class);
+        when(session.getId()).thenReturn(700L);
+        when(session.getMeeting()).thenReturn(meeting);
+        when(recordingSessions.findByIdAndDeletedAtIsNull(700L)).thenReturn(Optional.of(session));
+        TranscriptSpeaker speaker = TranscriptSpeaker.createAiSpeaker(meeting, session, 0L, "화자 1");
+        when(transcriptSpeakers.findAllAiSpeakers(700L)).thenReturn(List.of(speaker));
+        TeamMember first = member(meeting.getTeam());
+        TeamMember second = member(meeting.getTeam());
+        ReflectionTestUtils.setField(second, "id", 11L);
+        when(teamMembers.findById(10L)).thenReturn(Optional.of(first));
+        when(teamMembers.findById(11L)).thenReturn(Optional.of(second));
+        when(meetingParticipants.findByMeetingIdAndTeamMemberId(100L, 10L))
+                .thenReturn(Optional.of(mock(MeetingParticipant.class)));
+        when(meetingParticipants.findByMeetingIdAndTeamMemberId(100L, 11L))
+                .thenReturn(Optional.of(mock(MeetingParticipant.class)));
+
+        service.applyAiSpeakerMapping(mapping(10L));
+        assertThat(speaker.getMappedTeamMember()).isSameAs(first);
+        service.applyAiSpeakerMapping(mapping(11L));
+        assertThat(speaker.getMappedTeamMember()).isSameAs(second);
+        service.applyAiSpeakerMapping(mapping(null));
+        assertThat(speaker.getMappedTeamMember()).isNull();
+        assertThat(speaker.displayName()).isEqualTo("화자 1");
+        speaker.mapToCustomAlias("내 별칭");
+        service.applyAiSpeakerMapping(mapping(10L));
+        assertThat(speaker.getCustomAlias()).isEqualTo("내 별칭");
+        assertThat(speaker.getMappedTeamMember()).isNull();
+    }
+
+    @Test
+    @DisplayName("화자 미확정 전사는 speaker 연결 및 표시 이름 없이 저장하고 session 조회를 하지 않는다")
+    void savesUnidentifiedTranscriptWithoutSpeakerLookup() {
+        AiTranscriptSegmentMessage unidentified = new AiTranscriptSegmentMessage(
+                AiTranscriptSegmentMessage.TYPE, 100L, 700L,
+                new AiTranscriptSegmentPayload(32L, "미확정 발화", 15000L, 16000L, RECOGNIZED_AT, null));
+        when(transcriptSegments.saveAndFlush(any(TranscriptSegment.class)))
+                .thenAnswer(call -> withId(call.getArgument(0), 902L));
+
+        service.saveFinalSegment(unidentified);
+
+        ArgumentCaptor<TranscriptSegment> segment = ArgumentCaptor.forClass(TranscriptSegment.class);
+        verify(transcriptSegments).saveAndFlush(segment.capture());
+        assertThat(segment.getValue().getAiSpeakerId()).isNull();
+        assertThat(segment.getValue().getTranscriptSpeaker()).isNull();
+        verifyNoInteractions(recordingSessions, transcriptSpeakers);
+        verify(eventPublisher).publishEvent(new TranscriptCreatedEvent(
+                100L, 902L, 32L, "미확정 발화", 15000L, 16000L, RECOGNIZED_AT, null, null, null, null));
+    }
+
+    @Test
+    @DisplayName("mapping 이전에 도착한 전사는 recording session 화자 placeholder를 생성해 연결한다")
+    void createsPlaceholderSpeakerBeforeMappingArrives() {
+        RecordingSession session = mock(RecordingSession.class);
+        when(session.getId()).thenReturn(700L);
+        when(session.getMeeting()).thenReturn(meeting);
+        when(recordingSessions.findByIdAndDeletedAtIsNull(700L)).thenReturn(Optional.of(session));
+        when(transcriptSpeakers.findAiSpeaker(700L, 0L)).thenReturn(Optional.empty());
+        when(transcriptSpeakers.saveAndFlush(any(TranscriptSpeaker.class))).thenAnswer(call -> {
+            TranscriptSpeaker speaker = call.getArgument(0);
+            ReflectionTestUtils.setField(speaker, "id", 903L);
+            return speaker;
+        });
+        when(transcriptSegments.saveAndFlush(any(TranscriptSegment.class)))
+                .thenAnswer(call -> withId(call.getArgument(0), 904L));
+
+        service.saveFinalSegment(message());
+
+        ArgumentCaptor<TranscriptSpeaker> speaker = ArgumentCaptor.forClass(TranscriptSpeaker.class);
+        verify(transcriptSpeakers).saveAndFlush(speaker.capture());
+        assertThat(speaker.getValue().getRecordingSession()).isSameAs(session);
+        assertThat(speaker.getValue().getAiSpeakerId()).isZero();
+        ArgumentCaptor<TranscriptSegment> segment = ArgumentCaptor.forClass(TranscriptSegment.class);
+        verify(transcriptSegments).saveAndFlush(segment.capture());
+        assertThat(segment.getValue().getTranscriptSpeaker()).isSameAs(speaker.getValue());
+        verify(eventPublisher).publishEvent(new TranscriptCreatedEvent(
+                100L, 904L, 31L, "final text", 12000L, 14500L, RECOGNIZED_AT, 0L, null, "화자 1", 903L));
+    }
+
+    private AiSpeakerMappingMessage mapping(Long teamMemberId) {
+        return new AiSpeakerMappingMessage(100L, 700L,
+                List.of(new AiSpeakerMappingMessage.Mapping(0L, teamMemberId)));
     }
 
     @Test
@@ -154,6 +255,12 @@ class TranscriptServiceTest {
         // 중복 전사로 보고 이벤트를 발행하지 않는지 검증한다.
 
         // given
+        RecordingSession session = mock(RecordingSession.class);
+        when(session.getId()).thenReturn(700L);
+        when(session.getMeeting()).thenReturn(meeting);
+        when(recordingSessions.findByIdAndDeletedAtIsNull(700L)).thenReturn(Optional.of(session));
+        when(transcriptSpeakers.findAiSpeaker(700L, 0L)).thenReturn(Optional.of(
+                TranscriptSpeaker.createAiSpeaker(meeting, session, 0L, "화자 1")));
         when(transcriptSegments.saveAndFlush(any(TranscriptSegment.class)))
                 .thenThrow(new DataIntegrityViolationException("duplicate"));
 

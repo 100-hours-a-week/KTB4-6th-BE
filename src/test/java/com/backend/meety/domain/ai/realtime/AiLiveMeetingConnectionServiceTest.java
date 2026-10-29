@@ -19,6 +19,7 @@ import com.backend.meety.domain.recording.owner.RecordingOwnerService;
 import com.backend.meety.domain.recording.realtime.AudioWebSocketContext;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.entity.Team;
+import com.backend.meety.domain.user.entity.User;
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveProperties;
 import com.backend.meety.domain.transcript.service.TranscriptService;
@@ -223,7 +224,7 @@ class AiLiveMeetingConnectionServiceTest {
         TeamMember member = mock(TeamMember.class);
         when(member.getId()).thenReturn(10L);
         when(member.getDisplayName()).thenReturn("김지우");
-        when(meetingParticipantRepository.findAttendeesByMeetingId(42L)).thenReturn(List.of(
+        when(meetingParticipantRepository.findAttendeesWithVoiceProfilesByMeetingId(42L)).thenReturn(List.of(
                 MeetingParticipant.createAttendee(meeting, member),
                 MeetingParticipant.createCustomAttendee(meeting, "외부 디자이너")));
 
@@ -236,6 +237,37 @@ class AiLiveMeetingConnectionServiceTest {
         assertThat(root.path("participants").get(1).has("teamMemberId")).isTrue();
         assertThat(root.path("participants").get(1).path("teamMemberId").isNull()).isTrue();
         assertThat(root.path("participants").get(1).path("name").asText()).isEqualTo("외부 디자이너");
+    }
+
+    @Test
+    @DisplayName("session.start는 참석자의 192차원 음성 프로필을 포함하고 사용자 프로필이 없으면 null을 보낸다")
+    void sessionStartIncludesVoiceProfilesWithinMessageLimit() throws Exception {
+        Meeting meeting = mock(Meeting.class);
+        List<MeetingParticipant> attendees = new ArrayList<>();
+        for (int i = 0; i < 9; i++) {
+            TeamMember member = mock(TeamMember.class);
+            User user = User.create();
+            List<Double> embedding = java.util.Collections.nCopies(192, 0.123456789d);
+            user.registerVoiceProfile("profile-" + i, embedding, "redimnet2-plus-fd45d19-v1");
+            when(member.getId()).thenReturn((long) i + 1);
+            when(member.getDisplayName()).thenReturn("멤버" + i);
+            when(member.getUser()).thenReturn(user);
+            attendees.add(MeetingParticipant.createAttendee(meeting, member));
+        }
+        attendees.add(MeetingParticipant.createCustomAttendee(meeting, "외부 참석자"));
+        when(meetingParticipantRepository.findAttendeesWithVoiceProfilesByMeetingId(42L)).thenReturn(attendees);
+
+        assertThat(service.start(context(AudioFormat.PCM_S16LE))).isTrue();
+
+        String payload = client.session.sentMessages.getFirst();
+        JsonNode root = objectMapper.readTree(payload);
+        JsonNode participant = root.path("participants").get(0);
+        assertThat(participant.path("speakerEmbedding").path("modelVersion").asText())
+                .isEqualTo("redimnet2-plus-fd45d19-v1");
+        assertThat(participant.path("speakerEmbedding").path("embedding").size()).isEqualTo(192);
+        assertThat(root.path("participants").get(9).has("speakerEmbedding")).isTrue();
+        assertThat(root.path("participants").get(9).path("speakerEmbedding").isNull()).isTrue();
+        assertThat(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isLessThanOrEqualTo(65_536);
     }
 
     @Test

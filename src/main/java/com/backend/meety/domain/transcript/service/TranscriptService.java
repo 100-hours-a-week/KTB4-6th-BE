@@ -1,6 +1,7 @@
 package com.backend.meety.domain.transcript.service;
 
 import com.backend.meety.domain.ai.realtime.AiTranscriptSegmentMessage;
+import com.backend.meety.domain.ai.realtime.AiSpeakerMappingMessage;
 import com.backend.meety.domain.meeting.entity.MeetingParticipant;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
@@ -22,10 +23,13 @@ import com.backend.meety.domain.transcript.dto.TranscriptSpeakerResponse;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
 import com.backend.meety.domain.transcript.entity.TranscriptSpeaker;
 import com.backend.meety.domain.transcript.event.TranscriptCreatedEvent;
+import com.backend.meety.domain.transcript.event.TranscriptSpeakerMappingUpdatedEvent;
 import com.backend.meety.domain.transcript.exception.TranscriptErrorCode;
 import com.backend.meety.domain.transcript.exception.TranscriptException;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
 import com.backend.meety.domain.transcript.repository.TranscriptSpeakerRepository;
+import com.backend.meety.domain.recording.entity.RecordingSession;
+import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -46,6 +50,7 @@ public class TranscriptService {
 
     private final TranscriptSegmentRepository transcriptSegmentRepository;
     private final TranscriptSpeakerRepository transcriptSpeakerRepository;
+    private final RecordingSessionRepository recordingSessionRepository;
     private final MeetingRepository meetingRepository;
     private final MeetingParticipantRepository meetingParticipantRepository;
     private final MeetingService meetingService;
@@ -64,6 +69,14 @@ public class TranscriptService {
 
         Meeting meeting = meetingRepository.findByIdAndDeletedAtIsNull(message.meetingId())
                 .orElseThrow(() -> new MeetingException(MeetingErrorCode.MEETING_NOT_FOUND));
+        TranscriptSpeaker transcriptSpeaker = null;
+        if (message.payload().speakerId() != null) {
+            RecordingSession recordingSession = recordingSessionRepository
+                    .findByIdAndDeletedAtIsNull(message.recordingSessionId())
+                    .filter(session -> session.getMeeting().getId().equals(meeting.getId()))
+                    .orElseThrow(() -> new IllegalArgumentException("transcript recording session does not match meeting"));
+            transcriptSpeaker = findOrCreateAiSpeaker(meeting, recordingSession, message.payload().speakerId());
+        }
         TranscriptSegment segment = TranscriptSegment.createFinal(
                 meeting,
                 sourceSegmentKey,
@@ -74,6 +87,7 @@ public class TranscriptService {
                 message.payload().recognizedAt(),
                 message.payload().speakerId()
         );
+        if (transcriptSpeaker != null) { segment.assignSpeaker(transcriptSpeaker); }
 
         TranscriptSegment savedSegment;
         try {
@@ -95,10 +109,61 @@ public class TranscriptService {
                 savedSegment.getStartedAtMs(),
                 savedSegment.getEndedAtMs(),
                 savedSegment.getRecognizedAt(),
-                message.payload().speakerId()
+                message.payload().speakerId(),
+                transcriptSpeaker == null || transcriptSpeaker.getMappedTeamMember() == null
+                        ? null : transcriptSpeaker.getMappedTeamMember().getId(),
+                transcriptSpeaker == null ? null : transcriptSpeaker.displayName(),
+                transcriptSpeaker == null ? null : transcriptSpeaker.getId()
         ));
         log.debug("TranscriptCreatedEvent 발행. transcriptSegmentId={}, meetingId={}",
                 savedSegment.getId(), savedSegment.getMeeting().getId());
+    }
+
+    @Transactional
+    public void applyAiSpeakerMapping(AiSpeakerMappingMessage message) {
+        RecordingSession session = recordingSessionRepository.findByIdAndDeletedAtIsNull(message.recordingSessionId())
+                .filter(value -> value.getMeeting().getId().equals(message.meetingId()))
+                .orElseThrow(() -> new IllegalArgumentException("speaker mapping session does not match meeting"));
+        Meeting meeting = session.getMeeting();
+        java.util.Map<Long, TranscriptSpeaker> speakers = transcriptSpeakerRepository
+                .findAllAiSpeakers(session.getId()).stream()
+                .collect(java.util.stream.Collectors.toMap(TranscriptSpeaker::getAiSpeakerId, value -> value));
+        java.util.Map<Long, TeamMember> members = new java.util.HashMap<>();
+        java.util.Set<Long> snapshotSpeakerIds = message.mappings().stream()
+                .map(AiSpeakerMappingMessage.Mapping::speakerId).collect(java.util.stream.Collectors.toSet());
+        for (AiSpeakerMappingMessage.Mapping mapping : message.mappings()) {
+            if (mapping.teamMemberId() != null) {
+                TeamMember member = teamMemberRepository.findById(mapping.teamMemberId())
+                        .orElseThrow(() -> new IllegalArgumentException("speaker mapping team member does not exist"));
+                if (meetingParticipantRepository.findByMeetingIdAndTeamMemberId(meeting.getId(), member.getId()).isEmpty()) {
+                    throw new IllegalArgumentException("speaker mapping team member is not a meeting participant");
+                }
+                members.put(member.getId(), member);
+            }
+            TranscriptSpeaker speaker = speakers.computeIfAbsent(mapping.speakerId(), speakerId ->
+                    TranscriptSpeaker.createAiSpeaker(meeting, session, speakerId,
+                            com.backend.meety.domain.transcript.DiarizationPolicy.speakerLabel(speakerId)));
+            speaker.applyAiMapping(mapping.teamMemberId() == null ? null : members.get(mapping.teamMemberId()));
+        }
+        speakers.values().stream().filter(TranscriptSpeaker::isAiMapped)
+                .filter(speaker -> !snapshotSpeakerIds.contains(speaker.getAiSpeakerId()))
+                .forEach(speaker -> speaker.applyAiMapping(null));
+        transcriptSpeakerRepository.saveAllAndFlush(speakers.values());
+        List<TranscriptSpeakerMappingUpdatedEvent.Mapping> updated = speakers.values().stream()
+                .sorted(java.util.Comparator.comparing(TranscriptSpeaker::getAiSpeakerId)).map(speaker -> {
+            Long teamMemberId = speaker.getMappedTeamMember() == null ? null : speaker.getMappedTeamMember().getId();
+            return new TranscriptSpeakerMappingUpdatedEvent.Mapping(
+                    speaker.getAiSpeakerId(), teamMemberId, speaker.displayName());
+        }).toList();
+        eventPublisher.publishEvent(new TranscriptSpeakerMappingUpdatedEvent(
+                meeting.getId(), session.getId(), updated));
+    }
+
+    private TranscriptSpeaker findOrCreateAiSpeaker(Meeting meeting, RecordingSession session, Long speakerId) {
+        return transcriptSpeakerRepository.findAiSpeaker(session.getId(), speakerId).orElseGet(() ->
+                transcriptSpeakerRepository.saveAndFlush(TranscriptSpeaker.createAiSpeaker(
+                        meeting, session, speakerId,
+                        com.backend.meety.domain.transcript.DiarizationPolicy.speakerLabel(speakerId))));
     }
 
     @Transactional(readOnly = true)

@@ -9,7 +9,7 @@ public record TranscriptSegmentSseResponse(
         Long startedAtMs,
         Long endedAtMs,
         LocalDateTime recognizedAt,
-        Object speaker,
+        TranscriptSpeakerSseResponse speaker,
         Long speakerId
 ) {
 }

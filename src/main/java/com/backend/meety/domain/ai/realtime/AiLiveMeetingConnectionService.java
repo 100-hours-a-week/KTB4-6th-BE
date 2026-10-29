@@ -263,11 +263,15 @@ public class AiLiveMeetingConnectionService {
         var meeting = meetingRepository.findByIdAndDeletedAtIsNull(connection.meetingId())
                 .orElseThrow(() -> new IllegalStateException("Meeting not found for session.start: " + connection.meetingId()));
         List<AiSessionParticipant> participants = meetingParticipantRepository
-                .findAttendeesByMeetingId(connection.meetingId())
+                .findAttendeesWithVoiceProfilesByMeetingId(connection.meetingId())
                 .stream()
                 .map(AiSessionParticipant::from)
                 .toList();
         String payload = objectMapper.writeValueAsString(AiSessionStartMessage.of(connection, meeting, participants));
+        int payloadBytes = payload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        if (payloadBytes > 65_536) {
+            throw new IllegalStateException("session.start exceeds 64 KiB UTF-8 limit: " + payloadBytes);
+        }
         connection.sendStart(new TextMessage(payload));
     }
 
