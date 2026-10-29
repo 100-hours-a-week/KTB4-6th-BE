@@ -9,6 +9,15 @@ import org.springframework.data.jpa.repository.Query;
 class TranscriptSpeakerRepositoryTest {
 
     @Test
+    @DisplayName("AI 발화자 조회는 recordingSessionId와 aiSpeakerId를 함께 사용한다")
+    void aiSpeakerLookupUsesRecordingScopedIdentity() throws NoSuchMethodException {
+        Query query = TranscriptSpeakerRepository.class.getMethod("findAiSpeaker", Long.class, Long.class)
+                .getAnnotation(Query.class);
+        assertThat(query.value()).contains("ts.recordingSession.id = :recordingSessionId")
+                .contains("ts.aiSpeakerId = :speakerId");
+    }
+
+    @Test
     @DisplayName("발화자 단건 조회 쿼리는 발화자 ID와 회의 ID를 함께 제한한다")
     void findByIdAndMeetingIdAndDeletedAtIsNullUsesSpeakerAndMeetingFilter() throws NoSuchMethodException {
         // 테스트 목적:

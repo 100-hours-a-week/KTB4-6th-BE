@@ -144,8 +144,17 @@ public class AiLiveMeetingConnection {
 
     public boolean enqueueTranscriptIfActive(long sequence, BooleanSupplier enqueue) {
         synchronized (sendLock) {
-            if (recoveryFenced || isClosed() || !enqueue.getAsBoolean()) { return false; }
+            if (recoveryFenced || isClosed() || state() == AiLiveMeetingConnectionState.ENDED
+                    || !enqueue.getAsBoolean()) { return false; }
             lastAcceptedTranscriptSequence = Math.max(lastAcceptedTranscriptSequence, sequence);
+            return true;
+        }
+    }
+
+    public boolean enqueueOrderedIfActive(BooleanSupplier enqueue) {
+        synchronized (sendLock) {
+            if (recoveryFenced || isClosed() || state() == AiLiveMeetingConnectionState.ENDED
+                    || !enqueue.getAsBoolean()) { return false; }
             return true;
         }
     }

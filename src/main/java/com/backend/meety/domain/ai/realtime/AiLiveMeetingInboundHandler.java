@@ -21,6 +21,7 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
     private static final String SESSION_ENDED = "session.ended";
     private static final String ERROR = "error";
     private static final String TRANSCRIPT_SEGMENT_FINAL = AiTranscriptSegmentMessage.TYPE;
+    private static final String SPEAKER_MAPPING_UPDATED = AiSpeakerMappingMessage.TYPE;
     private static final String READY = "READY";
     private static final String PAUSED = "PAUSED";
     private static final String ENDED = "ENDED";
@@ -88,6 +89,10 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                 handleTranscriptSegmentFinal(root);
                 return;
             }
+            if (SPEAKER_MAPPING_UPDATED.equals(type)) {
+                handleSpeakerMappingUpdated(root);
+                return;
+            }
             log.warn("처리하지 않는 AI WebSocket 이벤트입니다. recordingSessionId={}, type={}",
                     connection.recordingSessionId(), type);
         } catch (Exception e) {
@@ -96,6 +101,20 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
             if (connection.isStopRequested()) { cleanup(); }
             else { connectionService.fatalFailure(connection, RealtimeFailureReason.AI_INBOUND_PROCESSING_FAILED); }
         }
+    }
+
+    private void handleSpeakerMappingUpdated(JsonNode root) {
+        AiSpeakerMappingMessage mapping = AiSpeakerMappingMessage.from(root);
+        if (!connection.meetingId().equals(mapping.meetingId())
+                || !connection.recordingSessionId().equals(mapping.recordingSessionId())) {
+            throw new IllegalArgumentException("speaker mapping does not match current connection");
+        }
+        if (root.has("requestId") && !root.path("requestId").asText().equals(connection.sessionStartRequestId())) {
+            throw new IllegalArgumentException("speaker mapping requestId does not match current connection generation");
+        }
+        String ownerAtSubmission = connection.owner();
+        connection.enqueueOrderedIfActive(() -> transcriptSaveDispatcher.submitSpeakerMapping(mapping,
+                () -> connectionService.transcriptFailure(connection, ownerAtSubmission)));
     }
 
     @Override
@@ -198,8 +217,11 @@ public class AiLiveMeetingInboundHandler extends TextWebSocketHandler {
                     connection.recordingSessionId(), root.path("payload").path("status").asText());
             return;
         }
-        connection.markEnded();
-        connectionService.notifyTranscriptFinalized(connection);
+        connection.enqueueOrderedIfActive(() -> {
+            connection.markEnded();
+            connectionService.notifyTranscriptFinalized(connection);
+            return true;
+        });
         cleanup();
     }
 

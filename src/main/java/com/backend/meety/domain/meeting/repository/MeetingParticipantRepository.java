@@ -45,4 +45,13 @@ public interface MeetingParticipantRepository extends JpaRepository<MeetingParti
             order by p.id asc
             """)
     List<MeetingParticipant> findAttendeesByMeetingId(@Param("meetingId") Long meetingId);
+
+    @Query("""
+            select p from MeetingParticipant p
+            left join fetch p.teamMember tm
+            left join fetch tm.user
+            where p.meeting.id = :meetingId and p.attendee = true
+            order by p.id asc
+            """)
+    List<MeetingParticipant> findAttendeesWithVoiceProfilesByMeetingId(@Param("meetingId") Long meetingId);
 }

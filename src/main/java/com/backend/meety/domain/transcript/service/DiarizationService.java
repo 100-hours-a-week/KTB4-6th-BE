@@ -153,6 +153,13 @@ public class DiarizationService {
                         aiRequestId, result.segmentId());
                 continue;
             }
+            // Real-time speaker mappings are recording-session scoped and already reference the
+            // canonical speaker row. Post-processing must not replace that mapping with a
+            // meeting-scoped row and thereby revert the live speaker name on transcript reload.
+            if (segment.getTranscriptSpeaker() != null
+                    && segment.getTranscriptSpeaker().getRecordingSession() != null) {
+                continue;
+            }
             TranscriptSpeaker speaker = speakersBySpeakerId.computeIfAbsent(result.speakerId(),
                     speakerId -> TranscriptSpeaker.create(resultMeeting, DiarizationPolicy.speakerLabel(speakerId)));
             segment.assignSpeaker(speaker);

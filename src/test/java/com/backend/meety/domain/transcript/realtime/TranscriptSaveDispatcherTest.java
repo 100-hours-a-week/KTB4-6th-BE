@@ -69,7 +69,7 @@ class TranscriptSaveDispatcherTest {
             }
             return null;
         }).when(transcriptService).saveFinalSegment(any());
-        TranscriptSaveDispatcher dispatcher = dispatcher(500, 5000, Duration.ofSeconds(1));
+        TranscriptSaveDispatcher dispatcher = dispatcher(1, 2, Duration.ofSeconds(1));
 
         // when
         assertThat(dispatcher.submitSave(message(88L, 1L))).isTrue();
@@ -83,6 +83,20 @@ class TranscriptSaveDispatcherTest {
         release.countDown();
         awaitIdle(dispatcher);
         assertThat(order).containsExactly("save-1", "save-2", "finalize");
+    }
+
+    @Test
+    @DisplayName("화자 매핑, 이후 전사 저장, 종료 확정이 녹음별 큐에서 제출 순서를 유지한다")
+    void keepsSpeakerMappingTranscriptAndFinalizeOrder() {
+        List<String> order = new CopyOnWriteArrayList<>();
+        TranscriptSaveDispatcher dispatcher = dispatcher(500, 5000, Duration.ofSeconds(1));
+
+        dispatcher.submitOrdered(88L, "mapping", () -> order.add("mapping"), () -> { });
+        dispatcher.submitOrdered(88L, "transcript", () -> order.add("transcript"), () -> { });
+        dispatcher.submitFinalize(88L, () -> order.add("finalize"));
+
+        awaitIdle(dispatcher);
+        assertThat(order).containsExactly("mapping", "transcript", "finalize");
     }
 
     @Test

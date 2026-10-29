@@ -8,6 +8,7 @@ import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.transcript.dto.TranscriptSegmentResponse;
 import com.backend.meety.domain.transcript.entity.TranscriptSegment;
 import com.backend.meety.domain.transcript.entity.TranscriptSpeaker;
+import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.user.entity.User;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
@@ -96,9 +97,21 @@ class TranscriptSpeakerIdMySqlIntegrationTest {
             Meeting meeting = Meeting.create(team, member, "회의", "전사", null,
                     LocalDateTime.of(2026, 10, 25, 15, 0), 30);
             entityManager.persist(meeting);
-            entityManager.persist(TranscriptSegment.createFinal(
+            RecordingSession firstSession = RecordingSession.start(meeting, member,
+                    LocalDateTime.of(2026, 10, 25, 15, 0));
+            RecordingSession secondSession = RecordingSession.start(meeting, member,
+                    LocalDateTime.of(2026, 10, 25, 16, 0));
+            entityManager.persist(firstSession);
+            entityManager.persist(secondSession);
+            TranscriptSpeaker firstSpeaker = TranscriptSpeaker.createAiSpeaker(meeting, firstSession, 0L, "화자 1");
+            TranscriptSpeaker secondSpeaker = TranscriptSpeaker.createAiSpeaker(meeting, secondSession, 0L, "화자 1");
+            entityManager.persist(firstSpeaker);
+            entityManager.persist(secondSpeaker);
+            TranscriptSegment first = TranscriptSegment.createFinal(
                     meeting, "1:1", 1L, "첫 발화", 0L, 1000L,
-                    LocalDateTime.of(2026, 10, 25, 6, 0), 0L));
+                    LocalDateTime.of(2026, 10, 25, 6, 0), 0L);
+            first.assignSpeaker(firstSpeaker);
+            entityManager.persist(first);
             entityManager.persist(TranscriptSegment.createFinal(
                     meeting, "1:2", 2L, "화자 미확인", 1000L, 2000L,
                     LocalDateTime.of(2026, 10, 25, 6, 1), null));
@@ -128,5 +141,9 @@ class TranscriptSpeakerIdMySqlIntegrationTest {
         assertThat(reloaded.get(1).speakerId()).isNull();
         assertThat(afterMapping.get(0).speakerId()).isZero();
         assertThat(afterMapping.get(0).speakerDisplayName()).isEqualTo("화자 1");
+        Long scopedSpeakerCount = transaction.execute(status -> entityManager.createQuery(
+                "select count(ts) from TranscriptSpeaker ts where ts.recordingSession is not null and ts.aiSpeakerId = 0",
+                Long.class).getSingleResult());
+        assertThat(scopedSpeakerCount).isEqualTo(2L);
     }
 }
