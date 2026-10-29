@@ -100,7 +100,7 @@ class DashboardControllerSecurityTest {
         LocalDate date = LocalDate.of(2026, 10, 12);
         when(service.getDashboard(1L, 2L, date, date)).thenReturn(new DashboardResponse(
                 1, date, date,
-                new DashboardSummaryResponse(0L, 0L, 0L, 0L, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO),
+                new DashboardSummaryResponse(0L, 0L, 0L, 0L, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, 0L),
                 List.of(new DashboardChartPointResponse(date, date, 0L, 0L, 0L, 0L)), List.of(), List.of()));
 
         // when, then

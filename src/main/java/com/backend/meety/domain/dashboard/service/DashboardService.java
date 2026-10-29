@@ -189,7 +189,8 @@ public class DashboardService {
                 overtimeMeetings,
                 percentage(overtimeMeetings, totalMeetings),
                 msToSeconds(contextOut.contextOutDurationMs()),
-                percentage(contextOut.contextOutDurationMs(), contextOut.meetingDurationMs())
+                percentage(contextOut.contextOutDurationMs(), contextOut.meetingDurationMs()),
+                contextOut.meetingDurationSeconds()
         );
     }
 
@@ -199,6 +200,7 @@ public class DashboardService {
     ) {
         long contextOutDurationMs = 0L;
         long meetingDurationMs = 0L;
+        long meetingDurationSeconds = 0L;
         for (Map.Entry<Long, MeetingMetric> entry : latestMetrics.entrySet()) {
             Long contextOut = entry.getValue().getContextOutDurationMs();
             if (contextOut == null) {
@@ -210,8 +212,9 @@ public class DashboardService {
             }
             contextOutDurationMs += contextOut;
             meetingDurationMs += duration.actualDurationMs();
+            meetingDurationSeconds += duration.actualDurationSeconds();
         }
-        return new MetricContextOutAggregate(contextOutDurationMs, meetingDurationMs);
+        return new MetricContextOutAggregate(contextOutDurationMs, meetingDurationMs, meetingDurationSeconds);
     }
 
     private List<DashboardChartPointResponse> buildChart(
@@ -344,7 +347,11 @@ public class DashboardService {
         }
     }
 
-    private record MetricContextOutAggregate(Long contextOutDurationMs, Long meetingDurationMs) {
+    private record MetricContextOutAggregate(
+            Long contextOutDurationMs,
+            Long meetingDurationMs,
+            Long meetingDurationSeconds
+    ) {
     }
 
     private record MetricPayload(List<MetricAgendaPayload> agendas) {

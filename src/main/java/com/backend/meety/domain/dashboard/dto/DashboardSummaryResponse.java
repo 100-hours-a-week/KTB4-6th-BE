@@ -9,6 +9,7 @@ public record DashboardSummaryResponse(
         Long overtimeMeetings,
         BigDecimal overtimeMeetingRate,
         BigDecimal totalContextOutSeconds,
-        BigDecimal contextOutRate
+        BigDecimal contextOutRate,
+        Long contextOutMeetingDurationSeconds
 ) {
 }
