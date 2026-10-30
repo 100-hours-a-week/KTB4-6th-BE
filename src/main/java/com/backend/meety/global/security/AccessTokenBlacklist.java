@@ -2,21 +2,24 @@ package com.backend.meety.global.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.HexFormat;
-import lombok.RequiredArgsConstructor;
+import org.slf4j.MDC;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class AccessTokenBlacklist {
 
     private static final String KEY_PREFIX = "at:blacklist:";
@@ -25,6 +28,15 @@ public class AccessTokenBlacklist {
     private final StringRedisTemplate redisTemplate;
     private final JwtTokenProvider jwtTokenProvider;
     private final Clock clock;
+    private final Counter redisUnavailable;
+
+    public AccessTokenBlacklist(StringRedisTemplate redisTemplate, JwtTokenProvider jwtTokenProvider,
+                                Clock clock, MeterRegistry meterRegistry) {
+        this.redisTemplate = redisTemplate;
+        this.jwtTokenProvider = jwtTokenProvider;
+        this.clock = clock;
+        this.redisUnavailable = meterRegistry.counter("security.at.blacklist.redis.fail_open");
+    }
 
     public void register(String accessToken) {
         Claims claims;
@@ -47,10 +59,26 @@ public class AccessTokenBlacklist {
     public boolean contains(String accessToken) {
         try {
             return Boolean.TRUE.equals(redisTemplate.hasKey(key(accessToken)));
-        } catch (DataAccessException e) {
-            log.warn("AT 블랙리스트 조회에 실패해 토큰을 차단합니다.", e);
-            return true;
+        } catch (DataAccessResourceFailureException | QueryTimeoutException e) {
+            redisUnavailable.increment();
+            Throwable rootCause = rootCause(e);
+            String requestId = MDC.get("requestId");
+            if (requestId == null) {
+                requestId = MDC.get("traceId");
+            }
+            log.warn("event=AT_BLACKLIST_REDIS_UNAVAILABLE exceptionType={} rootCauseType={} "
+                            + "failOpen=true requestId={}",
+                    e.getClass().getSimpleName(), rootCause.getClass().getSimpleName(), requestId);
+            return false;
         }
+    }
+
+    private Throwable rootCause(Throwable throwable) {
+        Throwable cause = throwable;
+        while (cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
+        }
+        return cause;
     }
 
     private String key(String accessToken) {

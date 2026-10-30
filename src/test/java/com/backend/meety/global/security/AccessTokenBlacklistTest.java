@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.global.config.JwtProperties;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -20,11 +21,18 @@ import java.time.ZoneOffset;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.MDC;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
+@ExtendWith(OutputCaptureExtension.class)
 class AccessTokenBlacklistTest {
 
     private static final JwtProperties PROPERTIES = new JwtProperties(
@@ -35,7 +43,9 @@ class AccessTokenBlacklistTest {
     private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
     @SuppressWarnings("unchecked")
     private final ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
-    private final AccessTokenBlacklist blacklist = new AccessTokenBlacklist(redisTemplate, jwtTokenProvider, CLOCK);
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+    private final AccessTokenBlacklist blacklist =
+            new AccessTokenBlacklist(redisTemplate, jwtTokenProvider, CLOCK, meterRegistry);
 
     @BeforeEach
     void setUp() {
@@ -47,7 +57,8 @@ class AccessTokenBlacklistTest {
     void registerWithHashedKeyAndRemainingTtl() {
         String token = jwtTokenProvider.createAccessToken(1L);
         Clock tenMinutesLater = Clock.offset(CLOCK, Duration.ofMinutes(10));
-        AccessTokenBlacklist laterBlacklist = new AccessTokenBlacklist(redisTemplate, jwtTokenProvider, tenMinutesLater);
+        AccessTokenBlacklist laterBlacklist =
+                new AccessTokenBlacklist(redisTemplate, jwtTokenProvider, tenMinutesLater, meterRegistry);
 
         laterBlacklist.register(token);
 
@@ -121,10 +132,51 @@ class AccessTokenBlacklistTest {
     }
 
     @Test
-    @DisplayName("Redis 조회에 실패하면 AT를 차단한다")
-    void failClosedWhenRedisUnavailable() {
+    @DisplayName("Redis 연결 장애면 Fail-Open하고 장애 로그와 지표를 남긴다")
+    void failOpenWhenRedisConnectionUnavailable(CapturedOutput output) {
+        String token = jwtTokenProvider.createAccessToken(1L);
+        MDC.put("requestId", "request-123");
         when(redisTemplate.hasKey(anyString())).thenThrow(new RedisConnectionFailureException("down"));
 
-        assertThat(blacklist.contains(jwtTokenProvider.createAccessToken(1L))).isTrue();
+        try {
+            assertThat(blacklist.contains(token)).isFalse();
+            assertThat(output).contains("event=AT_BLACKLIST_REDIS_UNAVAILABLE")
+                    .contains("failOpen=true")
+                    .contains("requestId=request-123")
+                    .doesNotContain(token);
+            assertThat(meterRegistry.counter("security.at.blacklist.redis.fail_open").count()).isEqualTo(1.0);
+        } finally {
+            MDC.clear();
+        }
+    }
+
+    @Test
+    @DisplayName("Redis 복구 후 블랙리스트에 등록된 AT를 다시 차단한다")
+    void blocksTokenAfterRedisRecovers() {
+        String token = jwtTokenProvider.createAccessToken(1L);
+        when(redisTemplate.hasKey(anyString()))
+                .thenThrow(new RedisConnectionFailureException("down"))
+                .thenReturn(true);
+
+        assertThat(blacklist.contains(token)).isFalse();
+        assertThat(blacklist.contains(token)).isTrue();
+    }
+
+    @Test
+    @DisplayName("Redis 명령 타임아웃이면 Fail-Open한다")
+    void failOpenWhenRedisCommandTimesOut() {
+        when(redisTemplate.hasKey(anyString())).thenThrow(new QueryTimeoutException("timeout"));
+
+        assertThat(blacklist.contains(jwtTokenProvider.createAccessToken(1L))).isFalse();
+    }
+
+    @Test
+    @DisplayName("Redis 데이터 접근 오류는 가용성 장애로 간주해 무시하지 않는다")
+    void propagatesUnexpectedRedisDataAccessFailure() {
+        when(redisTemplate.hasKey(anyString())).thenThrow(new DataAccessException("wrong Redis data type") { });
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> blacklist.contains(jwtTokenProvider.createAccessToken(1L)))
+                .isInstanceOf(DataAccessException.class);
     }
 }
