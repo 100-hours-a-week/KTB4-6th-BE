@@ -38,6 +38,7 @@ public class AiAudioAckService {
     private final Counter checkpointFailures;
     private final Counter saturated;
     private final Counter timeouts;
+    private final io.micrometer.core.instrument.Timer checkpointTimer;
     private final Map<AiLiveMeetingConnection.AckResult, Counter> outcomes =
             new EnumMap<>(AiLiveMeetingConnection.AckResult.class);
 
@@ -55,6 +56,7 @@ public class AiAudioAckService {
         checkpointFailures = metrics.counter("ai.audio.ack.checkpoint.failures");
         saturated = metrics.counter("ai.audio.ack.pending.rejected");
         timeouts = metrics.counter("ai.audio.ack.timeouts");
+        checkpointTimer = metrics.timer("ai.audio.ack.checkpoint.duration");
         for (var result : AiLiveMeetingConnection.AckResult.values()) {
             outcomes.put(result, metrics.counter("ai.audio.ack.outcomes", "result", result.name().toLowerCase(Locale.ROOT)));
         }
@@ -103,7 +105,15 @@ public class AiAudioAckService {
             }
             try {
                 var result = connection.acknowledge(sequence.longValue(), clock.instant(), (feSequence, count) -> {
-                    if (!sequenceRepository.saveIfOwner(connection.recordingSessionId(), connection.owner(), feSequence)) {
+                    long checkpointStartedAt = System.nanoTime();
+                    boolean saved;
+                    try {
+                        saved = sequenceRepository.saveIfOwner(connection.recordingSessionId(), connection.owner(), feSequence);
+                    } finally {
+                        checkpointTimer.record(System.nanoTime() - checkpointStartedAt,
+                                java.util.concurrent.TimeUnit.NANOSECONDS);
+                    }
+                    if (!saved) {
                         checkpointFailures.increment();
                         log.warn("AI ACK checkpoint가 거절되어 FE ACK를 보내지 않습니다. recordingSessionId={}, sequence={}",
                                 connection.recordingSessionId(), feSequence);

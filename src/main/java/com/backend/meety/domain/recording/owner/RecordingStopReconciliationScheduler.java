@@ -18,6 +18,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -35,6 +38,8 @@ public class RecordingStopReconciliationScheduler {
     private final AudioWebSocketCloser audio;
     private final MeterRegistry metrics;
     private final ConcurrentHashMap<AiLiveMeetingConnection, Long> mismatchStartedAt = new ConcurrentHashMap<>();
+    private final io.micrometer.core.instrument.Timer dbLookupTimer;
+    private final io.micrometer.core.instrument.Timer ownerLookupTimer;
 
     public RecordingStopReconciliationScheduler(RecordingStopReconciliationProperties properties,
             AiLiveMeetingConnectionRegistry connections, RecordingStatusPrimaryReader statuses,
@@ -47,6 +52,8 @@ public class RecordingStopReconciliationScheduler {
         this.ai = ai;
         this.audio = audio;
         this.metrics = metrics;
+        this.dbLookupTimer = metrics.timer("recording.stop.reconciliation.db.lookup");
+        this.ownerLookupTimer = metrics.timer("recording.stop.reconciliation.owner.lookup");
     }
 
     @Scheduled(fixedDelayString = "${recording.stop-reconciliation.interval}",
@@ -85,6 +92,7 @@ public class RecordingStopReconciliationScheduler {
     }
 
     private Map<Long, RecordingStatusSnapshot> readStatuses(List<AiLiveMeetingConnection> batch) {
+        long startedAt = System.nanoTime();
         try {
             Map<Long, RecordingStatusSnapshot> byId = new HashMap<>();
             metrics.counter("recording.stop.reconciliation.db.queries").increment();
@@ -92,8 +100,10 @@ public class RecordingStopReconciliationScheduler {
                     batch.stream().map(AiLiveMeetingConnection::recordingSessionId).toList())) {
                 byId.put(status.id(), status);
             }
+            dbLookupTimer.record(System.nanoTime() - startedAt, TimeUnit.NANOSECONDS);
             return byId;
         } catch (RuntimeException e) {
+            dbLookupTimer.record(System.nanoTime() - startedAt, TimeUnit.NANOSECONDS);
             metrics.counter("recording.stop.reconciliation.db.failures").increment();
             log.warn("녹음 제어 보정용 Primary 상태 조회에 실패했습니다. candidateCount={}", batch.size(), e);
             return null;
@@ -146,14 +156,17 @@ public class RecordingStopReconciliationScheduler {
         }
         String localOwner = connection.owner();
         Optional<String> currentOwner;
+        long ownerLookupStartedAt = System.nanoTime();
         try {
             currentOwner = owners.find(connection.recordingSessionId());
         } catch (DataAccessException e) {
+            ownerLookupTimer.record(System.nanoTime() - ownerLookupStartedAt, TimeUnit.NANOSECONDS);
             metrics.counter("recording.control.reconciliation.owner.unavailable").increment();
             log.warn("Redis Owner 확인 불가로 PAUSE/RESUME 보정을 보류합니다. recordingSessionId={}, dbStatus={}, aiStatus={}",
                     connection.recordingSessionId(), status.status(), state, e);
             return;
         }
+        ownerLookupTimer.record(System.nanoTime() - ownerLookupStartedAt, TimeUnit.NANOSECONDS);
         if (currentOwner.isEmpty() || !currentOwner.get().equals(localOwner)) {
             metrics.counter("recording.control.reconciliation.owner.mismatch").increment();
             log.warn("현재 Owner가 아니어서 PAUSE/RESUME 보정을 보류합니다. recordingSessionId={}, dbStatus={}, aiStatus={}, localOwner={}, redisOwner={}",
@@ -188,33 +201,129 @@ public class RecordingStopReconciliationScheduler {
     }
 
     private void reconcileStop(AiLiveMeetingConnection connection) {
-        if (!eligible(connection)) {
+        if (connection.isRecoveryFenced()) {
+            metrics.counter("recording.stop.reconciliation.recovery_fenced").increment();
+            log.info("Recovery가 fencing한 연결이라 STOP 보정을 보류합니다. recordingSessionId={}",
+                    connection.recordingSessionId());
+            return;
+        }
+        if (connection.isStopRequested() || connection.state() == AiLiveMeetingConnectionState.STOP_SENT) {
+            metrics.counter("recording.stop.reconciliation.already_requested").increment();
+            return;
+        }
+        if (connection.owner() == null || connection.isClosed()
+                || !eligible(connection) || !ai.isCurrent(connection)) {
+            metrics.counter("recording.stop.reconciliation.connection_ineligible").increment();
+            return;
+        }
+        String localOwner = connection.owner();
+        if (connections.find(connection.recordingSessionId()).orElse(null) != connection) {
+            metrics.counter("recording.stop.reconciliation.connection_replaced").increment();
             return;
         }
         metrics.counter("recording.stop.reconciliation.detected").increment();
-        String localOwner = connection.owner();
         Optional<String> currentOwner;
         try {
             currentOwner = owners.find(connection.recordingSessionId());
         } catch (DataAccessException e) {
-            metrics.counter("recording.stop.reconciliation.owner.unavailable").increment();
-            log.warn("Redis Owner 확인 불가로 STOP 보정을 보류합니다. recordingSessionId={}",
-                    connection.recordingSessionId(), e);
+            if (isRedisUnavailable(e)) {
+                reconcileWithLocalOwner(connection, localOwner, e);
+            } else {
+                metrics.counter("recording.stop.reconciliation.redis_lookup_failed").increment();
+                log.warn("Redis Owner 오류가 연결 장애로 확인되지 않아 STOP 보정을 보류합니다. recordingSessionId={}, ownerCheck=unavailable",
+                        connection.recordingSessionId(), e);
+            }
             return;
         }
-        if (currentOwner.isEmpty() || !currentOwner.get().equals(localOwner)) {
+        if (currentOwner.isEmpty()) {
+            metrics.counter("recording.stop.reconciliation.owner_missing.deferred").increment();
+            log.warn("Owner Key가 없어 STOP 보정을 보류합니다. recordingSessionId={}, ownerCheck=redis_missing",
+                    connection.recordingSessionId());
+            return;
+        }
+        if (!currentOwner.get().equals(localOwner)) {
             metrics.counter("recording.stop.reconciliation.owner.mismatch").increment();
-            log.warn("현재 Owner가 아니어서 STOP 보정을 보류합니다. recordingSessionId={}, localOwner={}, redisOwner={}",
-                    connection.recordingSessionId(), localOwner, currentOwner.orElse(null));
+            log.warn("현재 Owner가 아니어서 STOP 보정을 보류합니다. recordingSessionId={}, ownerCheck=redis_mismatch",
+                    connection.recordingSessionId());
             return;
         }
-        if (!ai.stopCurrent(connection, localOwner)) {
+        dispatchStop(connection, localOwner, "redis_verified");
+    }
+
+    private void reconcileWithLocalOwner(AiLiveMeetingConnection connection, String localOwner,
+            DataAccessException failure) {
+        metrics.counter("recording.stop.reconciliation.owner.unavailable").increment();
+        if (localOwner == null || !localOwner.equals(connection.owner())) {
+            metrics.counter("recording.stop.reconciliation.connection_ineligible").increment();
+            log.warn("Redis Owner 조회 장애 중 로컬 Owner 검증에 실패해 STOP fallback을 보류합니다. recordingSessionId={}, ownerCheck=local_invalid",
+                    connection.recordingSessionId(), failure);
             return;
         }
-        audio.close(connection.recordingSessionId());
-        metrics.counter("recording.stop.reconciliation.started").increment();
-        log.warn("DB COMPLETED를 확인해 누락된 AI STOP을 보정했습니다. recordingSessionId={}, owner=verified",
+        if (connection.isRecoveryFenced()) {
+            metrics.counter("recording.stop.reconciliation.recovery_fenced").increment();
+            log.info("Redis Owner 조회 장애 중 Recovery fenced 연결이라 STOP fallback을 보류합니다. recordingSessionId={}",
+                    connection.recordingSessionId());
+            return;
+        }
+        if (connection.isStopRequested() || connection.state() == AiLiveMeetingConnectionState.STOP_SENT) {
+            metrics.counter("recording.stop.reconciliation.already_requested").increment();
+            return;
+        }
+        if (connection.isClosed() || !eligible(connection) || !ai.isCurrent(connection)
+                || connections.find(connection.recordingSessionId()).orElse(null) != connection) {
+            metrics.counter("recording.stop.reconciliation.connection_replaced").increment();
+            log.info("Redis Owner 조회 장애 중 현재 연결이 아니어서 STOP fallback을 보류합니다. recordingSessionId={}, ownerCheck=local_stale",
+                    connection.recordingSessionId());
+            return;
+        }
+        metrics.counter("recording.stop.reconciliation.local_fallback.attempted").increment();
+        log.warn("Redis Owner 조회 장애로 제한적 로컬 STOP fallback을 시도합니다. recordingSessionId={}, ownerCheck=local_only",
                 connection.recordingSessionId());
+        dispatchStop(connection, localOwner, "local_fallback");
+    }
+
+    private void dispatchStop(AiLiveMeetingConnection connection, String localOwner, String path) {
+        AiLiveMeetingConnectionService.ReconciliationStopResult result =
+                ai.stopCurrentForReconciliation(connection, localOwner);
+        switch (result) {
+            case SENT -> {
+                audio.close(connection.recordingSessionId());
+                metrics.counter("recording.stop.reconciliation.started").increment();
+                metrics.counter("recording.stop.reconciliation." + path + ".sent").increment();
+                log.warn("DB COMPLETED를 근거로 AI STOP을 전송했습니다. recordingSessionId={}, ownerCheck={}",
+                        connection.recordingSessionId(), path);
+            }
+            case SEND_FAILED -> {
+                metrics.counter("recording.stop.reconciliation.send_failed").increment();
+                log.error("AI STOP 송신에 실패해 기존 최종화·정리 경로를 수행했습니다. recordingSessionId={}, ownerCheck={}",
+                        connection.recordingSessionId(), path);
+                // Stop send failure performs AI cleanup/finalization in the existing service path.
+                // Close only when the exact AI connection was removed; never close a replacement.
+                if (connections.find(connection.recordingSessionId()).isEmpty()) {
+                    audio.close(connection.recordingSessionId());
+                }
+            }
+            case NOT_CURRENT -> metrics.counter("recording.stop.reconciliation.connection_replaced").increment();
+            case OWNER_CHANGED -> metrics.counter("recording.stop.reconciliation.owner.mismatch").increment();
+            case RECOVERY_FENCED -> metrics.counter("recording.stop.reconciliation.recovery_fenced").increment();
+            case ALREADY_REQUESTED -> metrics.counter("recording.stop.reconciliation.already_requested").increment();
+            case CONNECTION_INELIGIBLE -> metrics.counter("recording.stop.reconciliation.connection_ineligible").increment();
+        }
+    }
+
+    private boolean isRedisUnavailable(DataAccessException exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof DataAccessResourceFailureException
+                    || cause instanceof QueryTimeoutException
+                    || cause instanceof RedisConnectionFailureException) {
+                return true;
+            }
+            String type = cause.getClass().getSimpleName();
+            if (type.equals("RedisConnectionException") || type.equals("RedisCommandTimeoutException")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean eligible(AiLiveMeetingConnection connection) {
