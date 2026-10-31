@@ -41,6 +41,8 @@ public class AiLiveMeetingConnection {
     private volatile String sessionPauseRequestId;
     private volatile String sessionResumeRequestId;
     private volatile String sessionStopRequestId;
+    private long controlTransitionStartedAtNanos;
+    private boolean controlAckTimeoutReported;
     private volatile ScheduledFuture<?> stopTimeoutFuture;
     private volatile String owner;
     private final AtomicBoolean transcriptFinalizationStarted = new AtomicBoolean();
@@ -378,6 +380,8 @@ public class AiLiveMeetingConnection {
             }
             this.sessionPauseRequestId = requestId;
             this.state = AiLiveMeetingConnectionState.PAUSE_SENT;
+            this.controlTransitionStartedAtNanos = System.nanoTime();
+            this.controlAckTimeoutReported = false;
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiSessionPauseMessage.of(this))));
             return true;
         }
@@ -394,6 +398,8 @@ public class AiLiveMeetingConnection {
             }
             this.sessionResumeRequestId = requestId;
             this.state = AiLiveMeetingConnectionState.RESUME_SENT;
+            this.controlTransitionStartedAtNanos = System.nanoTime();
+            this.controlAckTimeoutReported = false;
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiSessionResumeMessage.of(this))));
             return true;
         }
@@ -420,6 +426,7 @@ public class AiLiveMeetingConnection {
             }
             this.sessionStopRequestId = requestId;
             this.state = AiLiveMeetingConnectionState.STOP_SENT;
+            clearControlTransition();
             clearHeartbeatState();
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiSessionStopMessage.of(this))));
             clearAudioAckState();
@@ -442,17 +449,47 @@ public class AiLiveMeetingConnection {
         notifyAll();
     }
 
-    public synchronized void markPaused() {
-        if (state == AiLiveMeetingConnectionState.PAUSE_SENT) {
-            this.state = AiLiveMeetingConnectionState.PAUSED;
+    public void markPaused() {
+        synchronized (sendLock) {
+            synchronized (this) {
+                if (state == AiLiveMeetingConnectionState.PAUSE_SENT) {
+                    this.state = AiLiveMeetingConnectionState.PAUSED;
+                    clearControlTransition();
+                }
+            }
         }
     }
 
-    public synchronized void markResumed() {
-        if (state == AiLiveMeetingConnectionState.RESUME_SENT) {
-            this.state = AiLiveMeetingConnectionState.READY;
-            notifyAll();
+    public void markResumed() {
+        synchronized (sendLock) {
+            synchronized (this) {
+                if (state == AiLiveMeetingConnectionState.RESUME_SENT) {
+                    this.state = AiLiveMeetingConnectionState.READY;
+                    clearControlTransition();
+                    notifyAll();
+                }
+            }
         }
+    }
+
+    /** Claims a single recovery notification when a control command has not received its AI ACK in time. */
+    public boolean claimControlAckTimeout(Duration timeout) {
+        synchronized (sendLock) {
+            AiLiveMeetingConnectionState current = state();
+            if ((current != AiLiveMeetingConnectionState.PAUSE_SENT
+                    && current != AiLiveMeetingConnectionState.RESUME_SENT)
+                    || controlTransitionStartedAtNanos == 0 || controlAckTimeoutReported
+                    || System.nanoTime() - controlTransitionStartedAtNanos < timeout.toNanos()) {
+                return false;
+            }
+            controlAckTimeoutReported = true;
+            return true;
+        }
+    }
+
+    private void clearControlTransition() {
+        controlTransitionStartedAtNanos = 0;
+        controlAckTimeoutReported = false;
     }
 
     public synchronized boolean awaitState(AiLiveMeetingConnectionState expected, Duration timeout)
@@ -481,6 +518,7 @@ public class AiLiveMeetingConnection {
                 }
                 this.sessionStopRequestId = requestId;
                 this.state = AiLiveMeetingConnectionState.STOP_SENT;
+                clearControlTransition();
                 clearHeartbeatState();
                 return true;
             }

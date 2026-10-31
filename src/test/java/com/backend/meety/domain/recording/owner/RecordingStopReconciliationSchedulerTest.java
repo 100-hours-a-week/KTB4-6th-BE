@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.RedisConnectionFailureException;
 
@@ -36,7 +37,13 @@ class RecordingStopReconciliationSchedulerTest {
 
     private RecordingStopReconciliationScheduler scheduler(boolean enabled) {
         return new RecordingStopReconciliationScheduler(
-                new RecordingStopReconciliationProperties(enabled, Duration.ofSeconds(3)),
+                new RecordingStopReconciliationProperties(enabled, Duration.ofSeconds(3), false, Duration.ofSeconds(10)),
+                connections, statuses, owners, ai, audio, metrics);
+    }
+
+    private RecordingStopReconciliationScheduler controlScheduler(boolean enabled) {
+        return new RecordingStopReconciliationScheduler(
+                new RecordingStopReconciliationProperties(false, Duration.ofSeconds(3), enabled, Duration.ofSeconds(10)),
                 connections, statuses, owners, ai, audio, metrics);
     }
 
@@ -146,6 +153,162 @@ class RecordingStopReconciliationSchedulerTest {
         scheduler(true).scan();
 
         verifyNoInteractions(owners, audio);
+    }
+
+    @Test
+    void databasePausedAndAiReadySendsPauseOnlyToVerifiedOwner() {
+        AiLiveMeetingConnection connection = candidate(88L, AiLiveMeetingConnectionState.READY);
+        when(connections.findAll()).thenReturn(List.of(connection));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.PAUSED)));
+        when(ai.isCurrent(connection)).thenReturn(true);
+        when(owners.find(88L)).thenReturn(Optional.of("server-a:1"));
+        when(ai.reconcilePause(connection, "server-a:1")).thenReturn(true);
+
+        controlScheduler(true).scan();
+
+        verify(ai).reconcilePause(connection, "server-a:1");
+        verify(ai, never()).reconcileResume(connection, "server-a:1");
+        assertThat(metrics.counter("recording.control.reconciliation.pause.sent").count()).isEqualTo(1);
+    }
+
+    @Test
+    void databaseRecordingAndAiPausedSendsResume() {
+        AiLiveMeetingConnection connection = candidate(88L, AiLiveMeetingConnectionState.PAUSED);
+        when(connections.findAll()).thenReturn(List.of(connection));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.RECORDING)));
+        when(ai.isCurrent(connection)).thenReturn(true);
+        when(owners.find(88L)).thenReturn(Optional.of("server-a:1"));
+        when(ai.reconcileResume(connection, "server-a:1")).thenReturn(true);
+
+        controlScheduler(true).scan();
+
+        verify(ai).reconcileResume(connection, "server-a:1");
+        verify(ai, never()).reconcilePause(connection, "server-a:1");
+    }
+
+    @Test
+    void alignedStateAndTransitionInFlightDoNotSendDuplicateCommands() {
+        AiLiveMeetingConnection aligned = candidate(88L, AiLiveMeetingConnectionState.PAUSED);
+        AiLiveMeetingConnection pending = candidate(89L, AiLiveMeetingConnectionState.PAUSE_SENT);
+        when(connections.findAll()).thenReturn(List.of(aligned, pending));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.PAUSED),
+                new RecordingStatusSnapshot(89L, 42L, RecordingSessionStatus.PAUSED)));
+        when(ai.isCurrent(aligned)).thenReturn(true);
+        when(ai.isCurrent(pending)).thenReturn(true);
+        when(owners.find(89L)).thenReturn(Optional.of("server-a:1"));
+
+        controlScheduler(true).scan();
+
+        verifyNoInteractions(audio);
+        verify(ai, never()).reconcilePause(aligned, "server-a:1");
+        verify(ai, never()).reconcileResume(aligned, "server-a:1");
+        verify(ai, never()).reconcilePause(pending, "server-a:1");
+        verify(ai, never()).reconcileResume(pending, "server-a:1");
+    }
+
+    @Test
+    void controlReconciliationDisabledDoesNotReadState() {
+        controlScheduler(false).scan();
+        verifyNoInteractions(connections, statuses, owners, ai, audio);
+    }
+
+    @Test
+    void completedStateRemainsStopPriorityAndDoesNotPauseOrResume() {
+        AiLiveMeetingConnection connection = candidate(88L, AiLiveMeetingConnectionState.READY);
+        when(connections.findAll()).thenReturn(List.of(connection));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.COMPLETED)));
+        when(ai.isCurrent(connection)).thenReturn(true);
+
+        controlScheduler(true).scan();
+
+        verify(owners, never()).find(88L);
+        verify(ai, never()).reconcilePause(connection, "server-a:1");
+        verify(ai, never()).reconcileResume(connection, "server-a:1");
+    }
+
+    @Test
+    void pauseAckAfterConcurrentResumeIsReconciledTowardLatestDatabaseState() {
+        AiLiveMeetingConnection connection = mock(AiLiveMeetingConnection.class);
+        AtomicReference<AiLiveMeetingConnectionState> state = new AtomicReference<>(AiLiveMeetingConnectionState.READY);
+        when(connection.recordingSessionId()).thenReturn(88L);
+        when(connection.meetingId()).thenReturn(42L);
+        when(connection.owner()).thenReturn("server-a:1");
+        when(connection.state()).thenAnswer(ignored -> state.get());
+        when(connection.isStopRequested()).thenReturn(false);
+        when(connection.isRecoveryFenced()).thenReturn(false);
+        when(connection.isClosed()).thenReturn(false);
+        when(connection.claimControlAckTimeout(Duration.ofSeconds(10))).thenReturn(false);
+        when(connections.findAll()).thenReturn(List.of(connection));
+        when(ai.isCurrent(connection)).thenReturn(true);
+        when(owners.find(88L)).thenReturn(Optional.of("server-a:1"));
+        when(ai.reconcilePause(connection, "server-a:1")).thenAnswer(call -> {
+            state.set(AiLiveMeetingConnectionState.PAUSE_SENT);
+            return true;
+        });
+        when(ai.reconcileResume(connection, "server-a:1")).thenAnswer(call -> {
+            state.set(AiLiveMeetingConnectionState.RESUME_SENT);
+            return true;
+        });
+        RecordingStopReconciliationScheduler scheduler = controlScheduler(true);
+
+        // Scanner observed PAUSED and sent PAUSE, then the user changed the desired state to RECORDING.
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.PAUSED)));
+        scheduler.scan();
+        state.set(AiLiveMeetingConnectionState.PAUSED); // AI acknowledged the in-flight PAUSE.
+
+        // Fresh primary read after ACK sees the user's newer RESUME state and sends RESUME.
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.RECORDING)));
+        scheduler.scan();
+        state.set(AiLiveMeetingConnectionState.READY); // AI acknowledged RESUME.
+        scheduler.scan();
+
+        verify(ai).reconcilePause(connection, "server-a:1");
+        verify(ai).reconcileResume(connection, "server-a:1");
+        assertThat(state.get()).isEqualTo(AiLiveMeetingConnectionState.READY);
+    }
+
+    @Test
+    void pauseAckTimeoutRequestsRecoveryOnlyOnce() {
+        AiLiveMeetingConnection connection = candidate(88L, AiLiveMeetingConnectionState.PAUSE_SENT);
+        when(connection.claimControlAckTimeout(Duration.ofSeconds(10))).thenReturn(true, false);
+        when(connections.findAll()).thenReturn(List.of(connection));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.PAUSED)));
+        when(ai.isCurrent(connection)).thenReturn(true);
+        when(owners.find(88L)).thenReturn(Optional.of("server-a:1"));
+
+        RecordingStopReconciliationScheduler scheduler = controlScheduler(true);
+        scheduler.scan();
+        scheduler.scan();
+
+        verify(ai).controlAckTimedOut(connection);
+    }
+
+    @Test
+    void ownerMismatchOrRedisFailureDefersPauseResumeCorrection() {
+        AiLiveMeetingConnection mismatch = candidate(88L, AiLiveMeetingConnectionState.READY);
+        AiLiveMeetingConnection unavailable = candidate(89L, AiLiveMeetingConnectionState.READY);
+        when(connections.findAll()).thenReturn(List.of(mismatch, unavailable));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.PAUSED),
+                new RecordingStatusSnapshot(89L, 42L, RecordingSessionStatus.PAUSED)));
+        when(ai.isCurrent(mismatch)).thenReturn(true);
+        when(ai.isCurrent(unavailable)).thenReturn(true);
+        when(owners.find(88L)).thenReturn(Optional.of("server-b:2"));
+        when(owners.find(89L)).thenThrow(new RedisConnectionFailureException("down"));
+
+        controlScheduler(true).scan();
+
+        verify(ai, never()).reconcilePause(mismatch, "server-a:1");
+        verify(ai, never()).reconcilePause(unavailable, "server-a:1");
+        assertThat(metrics.counter("recording.control.reconciliation.owner.mismatch").count()).isEqualTo(1);
+        assertThat(metrics.counter("recording.control.reconciliation.owner.unavailable").count()).isEqualTo(1);
     }
 
     private AiLiveMeetingConnection candidate(Long id, AiLiveMeetingConnectionState state) {
