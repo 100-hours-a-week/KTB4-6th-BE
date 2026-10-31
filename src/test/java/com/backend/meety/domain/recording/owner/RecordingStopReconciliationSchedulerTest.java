@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.QueryTimeoutException;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.RedisConnectionFailureException;
 
@@ -63,7 +65,7 @@ class RecordingStopReconciliationSchedulerTest {
         scheduler(true).scan();
 
         verifyNoInteractions(owners, audio);
-        verify(ai, never()).stopCurrent(connection, "server-a:1");
+        verify(ai, never()).stopCurrentForReconciliation(connection, "server-a:1");
     }
 
     @Test
@@ -78,8 +80,10 @@ class RecordingStopReconciliationSchedulerTest {
         when(owners.find(89L)).thenReturn(Optional.of("server-a:1"));
         when(ai.isCurrent(ready)).thenReturn(true);
         when(ai.isCurrent(paused)).thenReturn(true);
-        when(ai.stopCurrent(ready, "server-a:1")).thenReturn(true);
-        when(ai.stopCurrent(paused, "server-a:1")).thenReturn(true);
+        when(ai.stopCurrentForReconciliation(ready, "server-a:1"))
+                .thenReturn(AiLiveMeetingConnectionService.ReconciliationStopResult.SENT);
+        when(ai.stopCurrentForReconciliation(paused, "server-a:1"))
+                .thenReturn(AiLiveMeetingConnectionService.ReconciliationStopResult.SENT);
 
         scheduler(true).scan();
 
@@ -102,23 +106,125 @@ class RecordingStopReconciliationSchedulerTest {
     }
 
     @Test
-    void ownerMismatchAndRedisOutageNeverStopOldConnection() {
-        AiLiveMeetingConnection old = candidate(88L, AiLiveMeetingConnectionState.READY);
+    void ownerMismatchDefersButRedisConnectivityFailureUsesLimitedLocalFallback() {
+        AiLiveMeetingConnection mismatch = candidate(88L, AiLiveMeetingConnectionState.READY);
         AiLiveMeetingConnection unavailable = candidate(89L, AiLiveMeetingConnectionState.READY);
-        when(connections.findAll()).thenReturn(List.of(old, unavailable));
+        when(connections.findAll()).thenReturn(List.of(mismatch, unavailable));
         when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
                 new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.COMPLETED),
                 new RecordingStatusSnapshot(89L, 42L, RecordingSessionStatus.COMPLETED)));
-        when(ai.isCurrent(old)).thenReturn(true);
+        when(ai.isCurrent(mismatch)).thenReturn(true);
         when(ai.isCurrent(unavailable)).thenReturn(true);
         when(owners.find(88L)).thenReturn(Optional.of("server-b:2"));
         when(owners.find(89L)).thenThrow(new RedisConnectionFailureException("down"));
+        when(ai.stopCurrentForReconciliation(unavailable, "server-a:1"))
+                .thenReturn(AiLiveMeetingConnectionService.ReconciliationStopResult.SENT);
 
         scheduler(true).scan();
 
-        verify(ai, never()).stopCurrent(old, "server-a:1");
-        verify(ai, never()).stopCurrent(unavailable, "server-a:1");
-        verifyNoInteractions(audio);
+        verify(ai, never()).stopCurrentForReconciliation(mismatch, "server-a:1");
+        verify(ai).stopCurrentForReconciliation(unavailable, "server-a:1");
+        verify(audio).close(89L);
+        assertThat(metrics.counter("recording.stop.reconciliation.local_fallback.attempted").count()).isEqualTo(1);
+        assertThat(metrics.counter("recording.stop.reconciliation.local_fallback.sent").count()).isEqualTo(1);
+    }
+
+    @Test
+    void ownerMissingDoesNotFallBack() {
+        AiLiveMeetingConnection connection = candidate(88L, AiLiveMeetingConnectionState.READY);
+        when(connections.findAll()).thenReturn(List.of(connection));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.COMPLETED)));
+        when(ai.isCurrent(connection)).thenReturn(true);
+        when(owners.find(88L)).thenReturn(Optional.empty());
+
+        scheduler(true).scan();
+
+        verify(ai, never()).stopCurrentForReconciliation(connection, "server-a:1");
+        assertThat(metrics.counter("recording.stop.reconciliation.owner_missing.deferred").count()).isEqualTo(1);
+    }
+
+    @Test
+    void queryTimeoutIsClassifiedAsRedisUnavailableAndAllowsSameGuardedFallback() {
+        AiLiveMeetingConnection connection = candidate(88L, AiLiveMeetingConnectionState.READY);
+        when(connections.findAll()).thenReturn(List.of(connection));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.COMPLETED)));
+        when(ai.isCurrent(connection)).thenReturn(true);
+        when(owners.find(88L)).thenThrow(new QueryTimeoutException("redis read timed out"));
+        when(ai.stopCurrentForReconciliation(connection, "server-a:1"))
+                .thenReturn(AiLiveMeetingConnectionService.ReconciliationStopResult.SENT);
+
+        scheduler(true).scan();
+
+        verify(ai).stopCurrentForReconciliation(connection, "server-a:1");
+        verify(audio).close(88L);
+        assertThat(metrics.counter("recording.stop.reconciliation.local_fallback.sent").count()).isEqualTo(1);
+    }
+
+    @Test
+    void pausedOrFailedPrimaryStateNeverUsesStopFallback() {
+        AiLiveMeetingConnection paused = candidate(88L, AiLiveMeetingConnectionState.READY);
+        AiLiveMeetingConnection failed = candidate(89L, AiLiveMeetingConnectionState.READY);
+        when(connections.findAll()).thenReturn(List.of(paused, failed));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.PAUSED),
+                new RecordingStatusSnapshot(89L, 42L, RecordingSessionStatus.FAILED)));
+        when(ai.isCurrent(paused)).thenReturn(true);
+        when(ai.isCurrent(failed)).thenReturn(true);
+
+        scheduler(true).scan();
+
+        verifyNoInteractions(owners, audio);
+        verify(ai, never()).stopCurrentForReconciliation(paused, "server-a:1");
+        verify(ai, never()).stopCurrentForReconciliation(failed, "server-a:1");
+    }
+
+    @Test
+    void failedStopSendIsMeasuredAndAudioClosesOnlyAfterExactConnectionWasRemoved() {
+        AiLiveMeetingConnection connection = candidate(88L, AiLiveMeetingConnectionState.READY);
+        when(connections.findAll()).thenReturn(List.of(connection));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.COMPLETED)));
+        when(ai.isCurrent(connection)).thenReturn(true);
+        when(owners.find(88L)).thenThrow(new RedisConnectionFailureException("down"));
+        when(ai.stopCurrentForReconciliation(connection, "server-a:1"))
+                .thenReturn(AiLiveMeetingConnectionService.ReconciliationStopResult.SEND_FAILED);
+        when(connections.find(88L)).thenReturn(Optional.of(connection), Optional.of(connection), Optional.empty());
+
+        scheduler(true).scan();
+
+        verify(audio).close(88L);
+        assertThat(metrics.counter("recording.stop.reconciliation.send_failed").count()).isEqualTo(1);
+        assertThat(metrics.counter("recording.stop.reconciliation.local_fallback.sent").count()).isZero();
+    }
+
+    @Test
+    void unknownDataAccessFailureDoesNotFallBack() {
+        AiLiveMeetingConnection connection = candidate(88L, AiLiveMeetingConnectionState.READY);
+        when(connections.findAll()).thenReturn(List.of(connection));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.COMPLETED)));
+        when(ai.isCurrent(connection)).thenReturn(true);
+        when(owners.find(88L)).thenThrow(new DataAccessException("unexpected data access failure") { });
+
+        scheduler(true).scan();
+
+        verify(ai, never()).stopCurrentForReconciliation(connection, "server-a:1");
+        assertThat(metrics.counter("recording.stop.reconciliation.redis_lookup_failed").count()).isEqualTo(1);
+    }
+
+    @Test
+    void redisFailureWithNonCompletedPrimaryStateDoesNotStop() {
+        AiLiveMeetingConnection connection = candidate(88L, AiLiveMeetingConnectionState.READY);
+        when(connections.findAll()).thenReturn(List.of(connection));
+        when(statuses.findStatuses(anyCollection())).thenReturn(List.of(
+                new RecordingStatusSnapshot(88L, 42L, RecordingSessionStatus.RECORDING)));
+
+        scheduler(true).scan();
+
+        verifyNoInteractions(owners, audio);
+        verify(ai, never()).stopCurrentForReconciliation(connection, "server-a:1");
     }
 
     @Test
@@ -134,7 +240,8 @@ class RecordingStopReconciliationSchedulerTest {
                 .thenReturn(List.of(new RecordingStatusSnapshot(101L, 42L, RecordingSessionStatus.COMPLETED)));
         when(ai.isCurrent(last)).thenReturn(true);
         when(owners.find(101L)).thenReturn(Optional.of("server-a:1"));
-        when(ai.stopCurrent(last, "server-a:1")).thenReturn(true);
+        when(ai.stopCurrentForReconciliation(last, "server-a:1"))
+                .thenReturn(AiLiveMeetingConnectionService.ReconciliationStopResult.SENT);
 
         scheduler(true).scan();
 
@@ -319,6 +426,7 @@ class RecordingStopReconciliationSchedulerTest {
         when(connection.owner()).thenReturn("server-a:1");
         when(connection.state()).thenReturn(state);
         when(connection.isStopRequested()).thenAnswer(ignored -> stopped.get());
+        when(connections.find(id)).thenReturn(Optional.of(connection));
         return connection;
     }
 }

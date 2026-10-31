@@ -24,6 +24,10 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class AiLiveMeetingConnectionService {
 
+    public enum ReconciliationStopResult {
+        SENT, NOT_CURRENT, OWNER_CHANGED, RECOVERY_FENCED, ALREADY_REQUESTED, CONNECTION_INELIGIBLE, SEND_FAILED
+    }
+
     private final AiLiveMeetingConnectionRegistry registry;
     private final AiLiveMeetingWebSocketClient webSocketClient;
     private final AiLiveMeetingProperties properties;
@@ -239,20 +243,35 @@ public class AiLiveMeetingConnectionService {
 
     /** Stop exactly the connection that was checked against the DB and Redis Owner. */
     public boolean stopCurrent(AiLiveMeetingConnection expected, String owner) {
-        if (!isCurrent(expected) || !owner.equals(expected.owner()) || expected.isStopRequested()) {
-            return false;
+        return stopCurrentForReconciliation(expected, owner) == ReconciliationStopResult.SENT;
+    }
+
+    /** Checks the exact local connection again and reports whether a STOP was actually sent. */
+    public ReconciliationStopResult stopCurrentForReconciliation(AiLiveMeetingConnection expected, String owner) {
+        if (expected.isRecoveryFenced()) { return ReconciliationStopResult.RECOVERY_FENCED; }
+        if (expected.isStopRequested() || expected.state() == AiLiveMeetingConnectionState.STOP_SENT) {
+            return ReconciliationStopResult.ALREADY_REQUESTED;
         }
+        if (!isCurrent(expected)) { return ReconciliationStopResult.NOT_CURRENT; }
+        if (owner == null || !owner.equals(expected.owner())) { return ReconciliationStopResult.OWNER_CHANGED; }
         AiLiveMeetingConnectionState state = expected.state();
         if (state != AiLiveMeetingConnectionState.READY && state != AiLiveMeetingConnectionState.PAUSED
                 && state != AiLiveMeetingConnectionState.PAUSE_SENT
                 && state != AiLiveMeetingConnectionState.RESUME_SENT) {
-            return false;
+            return ReconciliationStopResult.CONNECTION_INELIGIBLE;
         }
         if (!stop(expected, owner)) {
-            return false;
+            if (expected.isClosed()) { return ReconciliationStopResult.SEND_FAILED; }
+            if (expected.isRecoveryFenced()) { return ReconciliationStopResult.RECOVERY_FENCED; }
+            if (expected.isStopRequested() || expected.state() == AiLiveMeetingConnectionState.STOP_SENT) {
+                return ReconciliationStopResult.ALREADY_REQUESTED;
+            }
+            if (!isCurrent(expected)) { return ReconciliationStopResult.NOT_CURRENT; }
+            if (!owner.equals(expected.owner())) { return ReconciliationStopResult.OWNER_CHANGED; }
+            return ReconciliationStopResult.CONNECTION_INELIGIBLE;
         }
         recoveries.cancel(expected.recordingSessionId());
-        return true;
+        return ReconciliationStopResult.SENT;
     }
 
     private URI aiWebSocketUri() {
@@ -368,7 +387,7 @@ public class AiLiveMeetingConnectionService {
                     connection.recordingSessionId(), e);
             notifyTranscriptFinalized(connection);
             cleanup(connection);
-            return true;
+            return false;
         }
     }
 

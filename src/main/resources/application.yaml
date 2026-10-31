@@ -1,6 +1,10 @@
 spring:
   application:
     name: meety
+  data:
+    redis:
+      # Bound synchronous Redis calls during outages; override after observing deployment latency.
+      timeout: ${REDIS_COMMAND_TIMEOUT:3s}
   jpa:
     open-in-view: false
   task:

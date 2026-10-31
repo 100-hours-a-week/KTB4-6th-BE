@@ -25,6 +25,7 @@ import com.backend.meety.domain.transcript.realtime.TranscriptSaveDispatcher;
 import com.backend.meety.domain.transcript.realtime.TranscriptSaveProperties;
 import com.backend.meety.domain.transcript.service.TranscriptService;
 import java.net.URI;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -373,6 +374,40 @@ class AiLiveMeetingConnectionServiceTest {
     }
 
     @Test
+    @DisplayName("ACK checkpoint가 sendLock에서 진행 중이면 STOP은 checkpoint 종료까지 대기한다")
+    void stopWaitsForInFlightAckCheckpoint() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+        assertThat(service.forwardAudio(88L, 1L, new byte[]{1})).isTrue();
+
+        CountDownLatch checkpointEntered = new CountDownLatch(1);
+        CountDownLatch releaseCheckpoint = new CountDownLatch(1);
+        Thread ack = Thread.ofVirtual().start(() -> connection.acknowledge(0L, java.time.Instant.now(), (fe, count) -> {
+            checkpointEntered.countDown();
+            try {
+                releaseCheckpoint.await();
+                return true;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }));
+        assertThat(checkpointEntered.await(1, TimeUnit.SECONDS)).isTrue();
+
+        AtomicReference<Boolean> stopResult = new AtomicReference<>();
+        Thread stop = Thread.ofVirtual().start(() -> stopResult.set(service.stopCurrent(connection, "server-a:1")));
+        Thread.sleep(50);
+        assertThat(stopResult.get()).isNull();
+
+        releaseCheckpoint.countDown();
+        ack.join(1_000);
+        stop.join(1_000);
+        assertThat(stopResult.get()).isTrue();
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.STOP_SENT);
+        assertThat(client.session.sentFrameTypes).containsExactly("session.start", "audio.meta", "binary", "session.stop");
+    }
+
+    @Test
     @DisplayName("검증 당시 Owner와 현재 연결 Owner가 다르면 보정 STOP을 보내지 않는다")
     void reconciledStopRejectsChangedOwnerAndFencedConnection() throws Exception {
         AiLiveMeetingConnection connection = readyConnection();
@@ -386,6 +421,20 @@ class AiLiveMeetingConnectionServiceTest {
         connection.fenceForRecovery();
         assertThat(service.stopCurrent(connection, "server-a:1")).isFalse();
         assertThat(client.session.sentMessages).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("session.stop 송신 실패는 성공으로 보고하지 않고 기존 전사 확정 및 연결 정리를 수행한다")
+    void stopSendFailureIsNotReportedAsSentAndStillFinalizes() throws Exception {
+        AiLiveMeetingConnection connection = readyConnection();
+        connection.assignOwner("server-a:1");
+        client.session.sendFailure = new IOException("synthetic send failure");
+
+        assertThat(service.stopCurrent(connection, "server-a:1")).isFalse();
+
+        assertThat(connection.state()).isEqualTo(AiLiveMeetingConnectionState.CLOSED);
+        assertThat(registry.find(88L)).isEmpty();
+        assertThat(readyEvents.stream().filter(MeetingTranscriptFinalizedEvent.class::isInstance)).hasSize(1);
     }
 
     @Test
@@ -1343,6 +1392,7 @@ class AiLiveMeetingConnectionServiceTest {
         private final List<byte[]> sentBinaries = new ArrayList<>();
         private final List<CloseStatus> closeStatuses = new ArrayList<>();
         private Runnable onAudioMeta;
+        private IOException sendFailure;
         private boolean open = true;
 
         private TestWebSocketSession() {
@@ -1350,7 +1400,7 @@ class AiLiveMeetingConnectionServiceTest {
         }
 
         @Override
-        public void sendMessage(WebSocketMessage<?> message) {
+        public void sendMessage(WebSocketMessage<?> message) throws IOException {
             if (message instanceof BinaryMessage binaryMessage) {
                 ByteBuffer payload = binaryMessage.getPayload();
                 byte[] audio = new byte[payload.remaining()];
@@ -1360,6 +1410,9 @@ class AiLiveMeetingConnectionServiceTest {
                 return;
             }
             String payload = (String) message.getPayload();
+            if (sendFailure != null && "session.stop".equals(extractType(payload))) {
+                throw sendFailure;
+            }
             sentMessages.add(payload);
             String type = extractType(payload);
             sentFrameTypes.add(type);

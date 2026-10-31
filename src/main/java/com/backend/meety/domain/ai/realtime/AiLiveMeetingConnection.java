@@ -14,11 +14,13 @@ import java.util.function.Supplier;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import tools.jackson.databind.ObjectMapper;
 
+@Slf4j
 public class AiLiveMeetingConnection {
 
     private final Object sendLock = new Object();
@@ -231,7 +233,9 @@ public class AiLiveMeetingConnection {
 
     /** Caller also holds the FE stream-state lock: stream state -> sendLock is the global lock order. */
     public AckResult acknowledge(long sequence, Instant now, BiPredicate<Long, Integer> checkpoint) {
+        long lockRequestedAt = System.nanoTime();
         synchronized (sendLock) {
+            long lockAcquiredAt = System.nanoTime();
             if (recoveryFenced || state() == AiLiveMeetingConnectionState.CLOSED || state() == AiLiveMeetingConnectionState.STOP_SENT
                     || state() == AiLiveMeetingConnectionState.ENDED) {
                 return AckResult.CLOSED;
@@ -255,8 +259,14 @@ public class AiLiveMeetingConnection {
             }
             if (feSequence != null) {
                 NavigableMap<Long, Long> confirmed = pendingAudio.headMap(sequence, true);
+                long checkpointStartedAt = System.nanoTime();
                 if (checkpoint.test(feSequence, confirmed.size())) {
                     confirmed.clear();
+                }
+                long checkpointElapsed = System.nanoTime() - checkpointStartedAt;
+                if (checkpointElapsed >= TimeUnit.MILLISECONDS.toNanos(100)) {
+                    log.warn("AI ACK checkpoint가 sendLock을 점유했습니다. recordingSessionId={}, sequence={}, lockWaitNanos={}, checkpointNanos={}",
+                            recordingSessionId, sequence, lockAcquiredAt - lockRequestedAt, checkpointElapsed);
                 }
             }
             return duplicate ? AckResult.DUPLICATE : AckResult.ADVANCED;
@@ -410,7 +420,9 @@ public class AiLiveMeetingConnection {
     }
 
     public boolean sendStop(ObjectMapper objectMapper, String requestId, String expectedOwner) throws IOException {
+        long lockRequestedAt = System.nanoTime();
         synchronized (sendLock) {
+            long lockAcquiredAt = System.nanoTime();
             if (expectedOwner != null && (recoveryFenced || !expectedOwner.equals(owner))) {
                 return false;
             }
@@ -428,7 +440,11 @@ public class AiLiveMeetingConnection {
             this.state = AiLiveMeetingConnectionState.STOP_SENT;
             clearControlTransition();
             clearHeartbeatState();
+            long writeStartedAt = System.nanoTime();
             session.sendMessage(new TextMessage(objectMapper.writeValueAsString(AiSessionStopMessage.of(this))));
+            long writeElapsed = System.nanoTime() - writeStartedAt;
+            log.debug("AI session.stop write 완료. recordingSessionId={}, requestId={}, sendLockWaitNanos={}, writeNanos={}",
+                    recordingSessionId, requestId, lockAcquiredAt - lockRequestedAt, writeElapsed);
             clearAudioAckState();
             return true;
         }
