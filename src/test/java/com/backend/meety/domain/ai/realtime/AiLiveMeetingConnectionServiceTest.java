@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.event.AiLiveMeetingReadyEvent;
+import com.backend.meety.domain.ai.event.AiRecoverableFailureEvent;
 import com.backend.meety.domain.ai.event.MeetingTranscriptFinalizedEvent;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.entity.MeetingParticipant;
@@ -1190,6 +1191,24 @@ class AiLiveMeetingConnectionServiceTest {
     @DisplayName("AI 연결이 없으면 스트림을 받을 수 없다")
     void awaitStreamableFailsWithoutConnection() {
         assertThat(service.awaitStreamable(88L)).isFalse();
+    }
+
+    @Test
+    void controlAckTimeoutIsClaimedOnceAndRoutesThroughExistingRecovery() throws Exception {
+        AiLiveMeetingConnection connection = new AiLiveMeetingConnection(99L, 42L, "start-99");
+        connection.assignOwner("server-a:99");
+        WebSocketSession session = mock(WebSocketSession.class);
+        when(session.isOpen()).thenReturn(true);
+        connection.attach(session);
+        connection.markReady();
+        registry.reserve(connection);
+        assertThat(connection.sendPause(objectMapper, "pause-99")).isTrue();
+
+        assertThat(connection.claimControlAckTimeout(Duration.ZERO)).isTrue();
+        assertThat(connection.claimControlAckTimeout(Duration.ZERO)).isFalse();
+        service.controlAckTimedOut(connection);
+
+        assertThat(readyEvents).contains(new AiRecoverableFailureEvent(99L, "start-99", "CONTROL_ACK_TIMEOUT"));
     }
 
     private long feSequence;

@@ -55,6 +55,8 @@ recording:
   stop-reconciliation:
     enabled: ${RECORDING_STOP_RECONCILIATION_ENABLED:false}
     interval: ${RECORDING_STOP_RECONCILIATION_INTERVAL:3s}
+    pause-resume-enabled: ${RECORDING_PAUSE_RESUME_RECONCILIATION_ENABLED:false}
+    control-ack-timeout: ${RECORDING_CONTROL_ACK_TIMEOUT:10s}
   sequence:
     ttl: ${RECORDING_SEQUENCE_TTL:90m}
 

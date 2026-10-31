@@ -288,6 +288,21 @@ public class AiLiveMeetingConnectionService {
         }
     }
 
+    /** Sends a reconciliation command only to the exact local connection currently registered as Owner. */
+    public boolean reconcilePause(AiLiveMeetingConnection connection, String expectedOwner) {
+        if (!ownsCurrentConnection(connection, expectedOwner)
+                || connection.state() != AiLiveMeetingConnectionState.READY) {
+            return false;
+        }
+        try {
+            return connection.sendPause(objectMapper, requestIdGenerator.sessionPauseRequestId());
+        } catch (Exception e) {
+            log.warn("AI WebSocket 보정 session.pause 전송에 실패했습니다. recordingSessionId={}",
+                    connection.recordingSessionId(), e);
+            return false;
+        }
+    }
+
     private void resume(AiLiveMeetingConnection connection) {
         String requestId = requestIdGenerator.sessionResumeRequestId();
         try {
@@ -299,6 +314,30 @@ public class AiLiveMeetingConnectionService {
             log.warn("AI WebSocket session.resume 전송에 실패했습니다. recordingSessionId={}",
                     connection.recordingSessionId(), e);
         }
+    }
+
+    /** Sends a reconciliation command only to the exact local connection currently registered as Owner. */
+    public boolean reconcileResume(AiLiveMeetingConnection connection, String expectedOwner) {
+        if (!ownsCurrentConnection(connection, expectedOwner)
+                || connection.state() != AiLiveMeetingConnectionState.PAUSED) {
+            return false;
+        }
+        try {
+            return connection.sendResume(objectMapper, requestIdGenerator.sessionResumeRequestId());
+        } catch (Exception e) {
+            log.warn("AI WebSocket 보정 session.resume 전송에 실패했습니다. recordingSessionId={}",
+                    connection.recordingSessionId(), e);
+            return false;
+        }
+    }
+
+    public void controlAckTimedOut(AiLiveMeetingConnection connection) {
+        recoverableFailure(connection, "CONTROL_ACK_TIMEOUT");
+    }
+
+    private boolean ownsCurrentConnection(AiLiveMeetingConnection connection, String expectedOwner) {
+        return expectedOwner != null && expectedOwner.equals(connection.owner())
+                && isCurrent(connection) && !connection.isStopRequested();
     }
 
     private boolean stop(AiLiveMeetingConnection connection) {
