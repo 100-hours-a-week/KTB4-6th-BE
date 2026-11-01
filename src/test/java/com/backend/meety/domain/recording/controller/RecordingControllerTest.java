@@ -17,6 +17,7 @@ import com.backend.meety.domain.meeting.controller.MeetingController;
 import com.backend.meety.domain.meeting.realtime.MeetingSseService;
 import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
+import com.backend.meety.domain.meeting.service.AssistantMeetingCreationService;
 import com.backend.meety.domain.recording.dto.RecordingSessionResponse;
 import com.backend.meety.domain.recording.entity.RecordingSessionStatus;
 import com.backend.meety.domain.recording.exception.RecordingErrorCode;
@@ -48,6 +49,7 @@ class RecordingControllerTest {
         mvc = MockMvcBuilders.standaloneSetup(new RecordingController(service),
                         new MeetingController(
                                 mock(MeetingService.class),
+                                mock(AssistantMeetingCreationService.class),
                                 mock(MeetingParticipantService.class),
                                 mock(MeetingSseService.class)))
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())

@@ -7,6 +7,9 @@ import com.backend.meety.domain.credit.event.CreditEarnedEvent;
 import com.backend.meety.domain.credit.event.CreditEarnedReason;
 import com.backend.meety.domain.credit.repository.CreditLedgerRepository;
 import com.backend.meety.domain.credit.repository.TeamCreditRepository;
+import com.backend.meety.domain.ai.repository.AssistantChatConversationRepository;
+import com.backend.meety.domain.ai.repository.AssistantChatTurnRepository;
+import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.team.dto.InvitationCodeResponse;
 import com.backend.meety.domain.team.dto.MyTeamResponse;
 import com.backend.meety.domain.team.dto.TeamCreateRequest;
@@ -51,6 +54,9 @@ public class TeamService {
     private final UserRepository userRepository;
     private final TeamCreditRepository teamCreditRepository;
     private final CreditLedgerRepository creditLedgerRepository;
+    private final AssistantChatConversationRepository assistantChatConversationRepository;
+    private final AssistantChatTurnRepository assistantChatTurnRepository;
+    private final AiRequestRepository aiRequestRepository;
     private final Clock clock;
     private final CreditPolicy creditPolicy;
     private final ApplicationEventPublisher eventPublisher;
@@ -135,6 +141,9 @@ public class TeamService {
             teamRepository.flush();
             teamMemberRepository.markAllActiveAsTeamDeleted(teamId, now);
             teamInvitationCodeRepository.revokeAllByTeamId(teamId, now);
+            aiRequestRepository.failActiveGlobalChatByTeamId(teamId);
+            assistantChatTurnRepository.deleteAllByTeamId(teamId);
+            assistantChatConversationRepository.deleteAllByTeamId(teamId);
         } catch (DataAccessException e) {
             throw new TeamException(TeamErrorCode.TEAM_DELETE_FAILED);
         }

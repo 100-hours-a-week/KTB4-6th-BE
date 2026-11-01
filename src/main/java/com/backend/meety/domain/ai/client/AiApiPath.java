@@ -9,6 +9,7 @@ public final class AiApiPath {
     public static final String SUMMARY = "/v1/summary";
     public static final String DIARIZATION = "/v1/diarization";
     public static final String CHAT = "/v1/chat";
+    public static final String ASSISTANT_CHAT = "/v1/assistant/chat";
     public static final String METRIC = "/v1/metric";
     public static final String SPEAKER_EMBEDDING = "/v1/speaker-embedding";
     public static final String STT_PREWARM = "/internal/stt/prewarm";

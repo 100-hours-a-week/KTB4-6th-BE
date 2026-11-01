@@ -1,6 +1,7 @@
 package com.backend.meety.domain.ai.controller;
 
 import com.backend.meety.domain.ai.dto.InternalSummaryResponse;
+import com.backend.meety.domain.ai.dto.InternalMeetingMetricsResponse;
 import com.backend.meety.domain.ai.service.AiInternalQueryService;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
 import com.backend.meety.domain.transcript.dto.TranscriptSegmentListResponse;
@@ -58,5 +59,13 @@ public class AiInternalQnaController {
     ) {
         return ResponseEntity.ok(ApiResponse.success(
                 aiInternalQueryService.getLatestSummary(aiRequestId, recordingSessionId, meetingId)));
+    }
+
+    @GetMapping("/meetings/{meetingId}/metrics")
+    public ResponseEntity<ApiResponse<InternalMeetingMetricsResponse>> getMeetingMetrics(
+            @RequestHeader(name = InternalApiHeader.AI_REQUEST_ID, required = false) Long aiRequestId,
+            @PathVariable Long meetingId
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(aiInternalQueryService.getMeetingMetrics(aiRequestId, meetingId)));
     }
 }

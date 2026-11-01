@@ -11,6 +11,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 
 import com.backend.meety.domain.credit.TestCreditPolicy;
+import com.backend.meety.domain.ai.repository.AssistantChatConversationRepository;
+import com.backend.meety.domain.ai.repository.AssistantChatTurnRepository;
+import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.credit.entity.CreditLedger;
 import com.backend.meety.domain.credit.entity.TeamCredit;
 import com.backend.meety.domain.credit.event.CreditEarnedEvent;
@@ -81,6 +84,15 @@ class TeamServiceTest {
     private CreditLedgerRepository creditLedgerRepository;
 
     @Mock
+    private AssistantChatConversationRepository assistantChatConversationRepository;
+
+    @Mock
+    private AssistantChatTurnRepository assistantChatTurnRepository;
+
+    @Mock
+    private AiRequestRepository aiRequestRepository;
+
+    @Mock
     private ApplicationEventPublisher eventPublisher;
 
     private TeamService teamService;
@@ -89,7 +101,8 @@ class TeamServiceTest {
     void setUp() {
         teamService = new TeamService(teamRepository, teamMemberRepository,
                 teamInvitationCodeRepository, userRepository, teamCreditRepository,
-                creditLedgerRepository, FIXED_CLOCK, TestCreditPolicy.DEFAULT, eventPublisher);
+                creditLedgerRepository, assistantChatConversationRepository, assistantChatTurnRepository,
+                aiRequestRepository, FIXED_CLOCK, TestCreditPolicy.DEFAULT, eventPublisher);
     }
 
     /**
@@ -426,6 +439,9 @@ class TeamServiceTest {
         assertThat(team.isDeleted()).isTrue();
         then(teamMemberRepository).should().markAllActiveAsTeamDeleted(eq(7L), any(LocalDateTime.class));
         then(teamInvitationCodeRepository).should().revokeAllByTeamId(eq(7L), any(LocalDateTime.class));
+        then(aiRequestRepository).should().failActiveGlobalChatByTeamId(7L);
+        then(assistantChatTurnRepository).should().deleteAllByTeamId(7L);
+        then(assistantChatConversationRepository).should().deleteAllByTeamId(7L);
     }
 
     @Test

@@ -94,6 +94,15 @@ chat:
     queue-capacity: ${CHAT_EXECUTOR_QUEUE_CAPACITY:1000}
 
 ai:
+  global-chat:
+    execution-timeout: ${AI_GLOBAL_CHAT_EXECUTION_TIMEOUT:180s}
+    stream-timeout: ${AI_GLOBAL_CHAT_STREAM_TIMEOUT:200s}
+    read-timeout: ${AI_GLOBAL_CHAT_READ_TIMEOUT:30s}
+    history-message-limit: ${AI_GLOBAL_CHAT_HISTORY_MESSAGE_LIMIT:20}
+    page-size: ${AI_GLOBAL_CHAT_PAGE_SIZE:20}
+    max-page-size: ${AI_GLOBAL_CHAT_MAX_PAGE_SIZE:50}
+    dispatch-delay: ${AI_GLOBAL_CHAT_DISPATCH_DELAY:1s}
+    stale-check-delay: ${AI_GLOBAL_CHAT_STALE_CHECK_DELAY:10s}
   stt:
     prewarm:
       http-url: ${AI_STT_PREWARM_HTTP_URL:${ai.http-url}}
