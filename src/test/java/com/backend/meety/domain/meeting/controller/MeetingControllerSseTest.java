@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.backend.meety.domain.meeting.realtime.MeetingSseService;
 import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
+import com.backend.meety.domain.meeting.service.AssistantMeetingCreationService;
 import com.backend.meety.global.exception.GlobalExceptionHandler;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -37,6 +38,7 @@ class MeetingControllerSseTest {
         sseService = mock(MeetingSseService.class);
         mvc = MockMvcBuilders.standaloneSetup(new MeetingController(
                         mock(MeetingService.class),
+                        mock(AssistantMeetingCreationService.class),
                         mock(MeetingParticipantService.class),
                         sseService))
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())

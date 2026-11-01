@@ -10,6 +10,15 @@ import org.springframework.data.repository.query.Param;
 
 public interface MeetingMetricRepository extends JpaRepository<MeetingMetric, Long> {
 
+    @Query("""
+            select mm from MeetingMetric mm join fetch mm.aiRequest request
+            where mm.meeting.id = :meetingId and mm.deletedAt is null
+              and request.status = com.backend.meety.domain.ai.entity.AiRequestStatus.COMPLETED
+            order by mm.id desc
+            """)
+    List<MeetingMetric> findLatestCompletedForMeeting(@Param("meetingId") Long meetingId,
+                                                       org.springframework.data.domain.Limit limit);
+
     boolean existsByAiRequestId(Long aiRequestId);
 
     @Query("""

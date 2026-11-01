@@ -16,12 +16,15 @@ import com.backend.meety.domain.ai.dto.InternalSummaryResponse;
 import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestType;
+import com.backend.meety.domain.ai.assistant.AssistantChatErrorCode;
+import com.backend.meety.domain.ai.assistant.AssistantChatException;
 import com.backend.meety.domain.ai.exception.AiChatErrorCode;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.meeting.dto.MeetingListResponse;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.exception.MeetingErrorCode;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
+import com.backend.meety.domain.meeting.repository.MeetingMetricRepository;
 import com.backend.meety.domain.meeting.service.MeetingService;
 import com.backend.meety.domain.meeting.service.MeetingSummaryService;
 import com.backend.meety.domain.recording.entity.RecordingSession;
@@ -29,6 +32,9 @@ import com.backend.meety.domain.recording.entity.RecordingSessionStatus;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
+import com.backend.meety.domain.team.entity.MembershipStatus;
+import com.backend.meety.domain.team.repository.TeamMemberRepository;
+import tools.jackson.databind.ObjectMapper;
 import com.backend.meety.domain.team.exception.TeamErrorCode;
 import com.backend.meety.domain.transcript.dto.TranscriptSegmentListResponse;
 import com.backend.meety.domain.transcript.service.TranscriptService;
@@ -49,8 +55,11 @@ class AiInternalQueryServiceTest {
     private final TranscriptService transcriptService = mock(TranscriptService.class);
     private final MeetingSummaryService summaryService = mock(MeetingSummaryService.class);
     private final RecordingSessionRepository recordingSessions = mock(RecordingSessionRepository.class);
+    private final TeamMemberRepository teamMembers = mock(TeamMemberRepository.class);
+    private final MeetingMetricRepository metrics = mock(MeetingMetricRepository.class);
     private final AiInternalQueryService service = new AiInternalQueryService(
-            aiRequests, meetings, meetingService, transcriptService, summaryService, recordingSessions);
+            aiRequests, meetings, meetingService, transcriptService, summaryService, recordingSessions,
+            teamMembers, metrics, new ObjectMapper());
 
     private Team team;
     private TeamMember member;
@@ -116,6 +125,26 @@ class AiInternalQueryServiceTest {
         assertCode(() -> service.getMeetings(901L, null, 2L, null, null, null, null), AiChatErrorCode.AI_REQUEST_ACCESS_DENIED);
 
         assertCode(() -> service.getMeetings(999L, null, 2L, null, null, null, null), AiChatErrorCode.AI_REQUEST_ACCESS_DENIED);
+    }
+
+    @Test
+    @DisplayName("처리 중 전역 채팅 요청은 현재 활성 팀원일 때만 내부 회의 목록을 조회한다")
+    void allowsGlobalChatOnlyForCurrentActiveMember() {
+        AiRequest globalRequest = withId(AiRequest.create(team, member, "global", AiRequestType.GLOBAL_CHAT), 902L);
+        globalRequest.markProcessing();
+        when(aiRequests.findById(902L)).thenReturn(Optional.of(globalRequest));
+        MeetingListResponse expected = new MeetingListResponse(List.of(), null, false);
+        when(meetingService.findMeetings(2L, null, null, null, null)).thenReturn(expected);
+        when(teamMembers.existsByTeamIdAndUserIdAndMembershipStatusAndDeletedAtIsNull(
+                2L, member.getUser().getId(), MembershipStatus.ACTIVE)).thenReturn(true);
+
+        assertThat(service.getMeetings(902L, null, 999L, null, null, null, null)).isSameAs(expected);
+
+        when(teamMembers.existsByTeamIdAndUserIdAndMembershipStatusAndDeletedAtIsNull(
+                2L, member.getUser().getId(), MembershipStatus.ACTIVE)).thenReturn(false);
+        assertThatThrownBy(() -> service.getMeetings(902L, null, 2L, null, null, null, null))
+                .isInstanceOf(AssistantChatException.class)
+                .extracting("errorCode").isEqualTo(AssistantChatErrorCode.CHAT_ACCESS_DENIED);
     }
 
     @Test

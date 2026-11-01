@@ -15,6 +15,7 @@ import com.backend.meety.domain.meeting.realtime.MeetingSseService;
 import com.backend.meety.domain.meeting.realtime.SseHeaders;
 import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
+import com.backend.meety.domain.meeting.service.AssistantMeetingCreationService;
 import com.backend.meety.global.response.ApiResponse;
 import com.zaxxer.hikari.HikariDataSource;
 import com.zaxxer.hikari.HikariPoolMXBean;
@@ -41,6 +42,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -56,6 +58,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 public class MeetingController {
 
     private final MeetingService meetingService;
+    private final AssistantMeetingCreationService assistantMeetingCreationService;
     private final MeetingParticipantService meetingParticipantService;
     private final MeetingSseService meetingSseService;
     private DataSource dataSource;
@@ -69,9 +72,12 @@ public class MeetingController {
     public ResponseEntity<ApiResponse<MeetingCreateResponse>> createMeeting(
             @AuthenticationPrincipal Long userId,
             @PathVariable Long teamId,
+            @RequestHeader(name = "X-Ai-Request-Id", required = false) Long aiRequestId,
             @Valid @RequestBody MeetingCreateRequest request
     ) {
-        MeetingCreateResponse response = meetingService.createMeeting(userId, teamId, request);
+        MeetingCreateResponse response = aiRequestId == null
+                ? meetingService.createMeeting(userId, teamId, request)
+                : assistantMeetingCreationService.createAfterConfirmation(userId, teamId, aiRequestId, request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(response));
     }

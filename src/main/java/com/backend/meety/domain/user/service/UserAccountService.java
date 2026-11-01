@@ -1,6 +1,9 @@
 package com.backend.meety.domain.user.service;
 
 import com.backend.meety.domain.auth.service.RefreshTokenService;
+import com.backend.meety.domain.ai.repository.AssistantChatConversationRepository;
+import com.backend.meety.domain.ai.repository.AssistantChatTurnRepository;
+import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.exception.TeamErrorCode;
 import com.backend.meety.domain.team.exception.TeamException;
@@ -26,6 +29,9 @@ public class UserAccountService {
     private final UserAuthAccountRepository userAuthAccountRepository;
     private final RefreshTokenService refreshTokenService;
     private final TeamMemberRepository teamMemberRepository;
+    private final AssistantChatConversationRepository assistantChatConversationRepository;
+    private final AssistantChatTurnRepository assistantChatTurnRepository;
+    private final AiRequestRepository aiRequestRepository;
     private final Clock clock;
 
     @Transactional
@@ -55,6 +61,9 @@ public class UserAccountService {
         }
         LocalDateTime now = LocalDateTime.now(clock);
         endActiveMembership(userId, now);
+        aiRequestRepository.failActiveGlobalChatByUserId(userId);
+        assistantChatTurnRepository.deleteAllByUserId(userId);
+        assistantChatConversationRepository.deleteAllByUserId(userId);
         user.withdraw(now);
         userAuthAccountRepository.findAllByUserId(userId)
                 .forEach(account -> account.withdraw(now));

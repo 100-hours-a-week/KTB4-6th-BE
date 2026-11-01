@@ -10,8 +10,20 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
 
 public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select tm from TeamMember tm
+            where tm.team.id = :teamId and tm.user.id = :userId
+              and tm.membershipStatus = com.backend.meety.domain.team.entity.MembershipStatus.ACTIVE
+              and tm.deletedAt is null
+            """)
+    Optional<TeamMember> findActiveByTeamAndUserForUpdate(@Param("teamId") Long teamId,
+                                                           @Param("userId") Long userId);
 
     Optional<TeamMember> findByTeamIdAndUserIdAndMembershipStatus(
             Long teamId,
@@ -24,6 +36,9 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
             Long userId,
             MembershipStatus membershipStatus
     );
+
+    boolean existsByTeamIdAndUserIdAndMembershipStatusAndDeletedAtIsNull(
+            Long teamId, Long userId, MembershipStatus membershipStatus);
 
     Optional<TeamMember> findByUserIdAndMembershipStatus(Long userId, MembershipStatus membershipStatus);
 

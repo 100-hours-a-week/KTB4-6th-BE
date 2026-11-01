@@ -16,6 +16,7 @@ import com.backend.meety.domain.meeting.entity.MeetingStatus;
 import com.backend.meety.domain.meeting.realtime.MeetingSseService;
 import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
+import com.backend.meety.domain.meeting.service.AssistantMeetingCreationService;
 import com.backend.meety.domain.team.exception.TeamErrorCode;
 import com.backend.meety.domain.team.exception.TeamException;
 import com.backend.meety.global.exception.GlobalExceptionHandler;
@@ -44,6 +45,7 @@ class MeetingControllerTest {
         meetingService = mock(MeetingService.class);
         mvc = MockMvcBuilders.standaloneSetup(new MeetingController(
                         meetingService,
+                        mock(AssistantMeetingCreationService.class),
                         mock(MeetingParticipantService.class),
                         mock(MeetingSseService.class)))
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())

@@ -7,6 +7,9 @@ import static org.mockito.BDDMockito.then;
 import static org.mockito.Mockito.never;
 
 import com.backend.meety.domain.auth.service.RefreshTokenService;
+import com.backend.meety.domain.ai.repository.AssistantChatConversationRepository;
+import com.backend.meety.domain.ai.repository.AssistantChatTurnRepository;
+import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
@@ -49,12 +52,22 @@ class UserAccountServiceTest {
     @Mock
     private TeamMemberRepository teamMemberRepository;
 
+    @Mock
+    private AssistantChatConversationRepository assistantChatConversationRepository;
+
+    @Mock
+    private AssistantChatTurnRepository assistantChatTurnRepository;
+
+    @Mock
+    private AiRequestRepository aiRequestRepository;
+
     private UserAccountService userAccountService;
 
     @BeforeEach
     void setUp() {
         userAccountService = new UserAccountService(userRepository, userAuthAccountRepository,
-                refreshTokenService, teamMemberRepository, CLOCK);
+                refreshTokenService, teamMemberRepository, assistantChatConversationRepository,
+                assistantChatTurnRepository, aiRequestRepository, CLOCK);
     }
 
     @Test
@@ -113,6 +126,9 @@ class UserAccountServiceTest {
         userAccountService.withdraw(1L);
 
         assertThat(user.isWithdrawn()).isTrue();
+        then(aiRequestRepository).should().failActiveGlobalChatByUserId(1L);
+        then(assistantChatTurnRepository).should().deleteAllByUserId(1L);
+        then(assistantChatConversationRepository).should().deleteAllByUserId(1L);
         assertThat(account.isWithdrawn()).isTrue();
         then(refreshTokenService).should().revokeAll(1L);
     }
@@ -163,6 +179,8 @@ class UserAccountServiceTest {
         assertThat(teamMember.getMembershipStatus()).isEqualTo(MembershipStatus.LEFT);
         assertThat(teamMember.getDeletedAt()).isEqualTo(LocalDateTime.now(CLOCK));
         assertThat(user.isWithdrawn()).isTrue();
+        then(assistantChatTurnRepository).should().deleteAllByUserId(1L);
+        then(assistantChatConversationRepository).should().deleteAllByUserId(1L);
     }
 
     @Test

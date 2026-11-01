@@ -130,7 +130,8 @@ class AiChatServiceTest {
     void replaysSameIdempotencyKey() {
         AiRequest existing = withId(AiRequest.create(team, member, IDEMPOTENCY_KEY, AiRequestType.CHAT), 900L);
         AiChatbotMessage message = withId(
-                AiChatbotMessage.create(existing, meeting, member, ChatInputType.TEXT, "질문"), 8801L);
+                AiChatbotMessage.create(existing, meeting, member, ChatInputType.TEXT,
+                        "지금까지 결정된 사항 정리해줘"), 8801L);
         when(aiRequests.findByIdempotencyKey(IDEMPOTENCY_KEY)).thenReturn(Optional.of(existing));
         when(messages.findByAiRequestId(900L)).thenReturn(Optional.of(message));
 
@@ -138,6 +139,32 @@ class AiChatServiceTest {
 
         assertThat(response.messageId()).isEqualTo(8801L);
         assertThat(response.creditBalance()).isEqualTo(10L);
+        verify(aiRequests, never()).save(any());
+        verify(ledgers, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("같은 Idempotency-Key를 다른 질문에 재사용하면 거절한다")
+    void rejectsDifferentQuestionWithSameIdempotencyKey() {
+        AiRequest existing = withId(AiRequest.create(team, member, IDEMPOTENCY_KEY, AiRequestType.CHAT), 900L);
+        AiChatbotMessage message = withId(
+                AiChatbotMessage.create(existing, meeting, member, ChatInputType.TEXT, "다른 질문"), 8801L);
+        when(aiRequests.findByIdempotencyKey(IDEMPOTENCY_KEY)).thenReturn(Optional.of(existing));
+        when(messages.findByAiRequestId(900L)).thenReturn(Optional.of(message));
+
+        assertCode(this::request, AiChatErrorCode.IDEMPOTENCY_KEY_REUSED);
+        verify(aiRequests, never()).save(any());
+        verify(ledgers, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("전역 채팅 요청 키를 회의별 QnA에서 재사용할 수 없다")
+    void rejectsGlobalChatRequestKeyInMeetingQna() {
+        AiRequest existing = withId(AiRequest.create(team, member, IDEMPOTENCY_KEY, AiRequestType.GLOBAL_CHAT), 900L);
+        when(aiRequests.findByIdempotencyKey(IDEMPOTENCY_KEY)).thenReturn(Optional.of(existing));
+
+        assertCode(this::request, AiChatErrorCode.IDEMPOTENCY_KEY_REUSED);
+        verify(messages, never()).findByAiRequestId(any());
         verify(aiRequests, never()).save(any());
         verify(ledgers, never()).save(any());
     }
@@ -169,6 +196,19 @@ class AiChatServiceTest {
                 100L, 10L, ParticipationStatus.JOINED)).thenReturn(false);
 
         assertCode(this::request, MeetingErrorCode.MEETING_ACCESS_DENIED);
+        verify(credits, never()).findByTeamIdForUpdate(any());
+    }
+
+    @Test
+    @DisplayName("활성 팀원이 아니면 크레딧 잠금 및 멱등키 조회 전에 거절한다")
+    void rejectsInactiveMemberBeforeCreditOrIdempotencyLookup() {
+        when(members.findByTeamIdAndUserIdAndMembershipStatus(2L, 1L, MembershipStatus.ACTIVE))
+                .thenReturn(Optional.empty());
+
+        assertCode(this::request, MeetingErrorCode.MEETING_ACCESS_DENIED);
+
+        verify(credits, never()).findByTeamIdForUpdate(any());
+        verify(aiRequests, never()).findByIdempotencyKey(any());
     }
 
     @Test

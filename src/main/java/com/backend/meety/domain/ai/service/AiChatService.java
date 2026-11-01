@@ -65,10 +65,32 @@ public class AiChatService {
                                           ChatInputType inputType, String question) {
         validateIdempotencyKey(idempotencyKey);
         Meeting meeting = findMeeting(meetingId);
+        TeamMember participant = findParticipant(userId, meeting);
+        validateInProgress(meeting);
         TeamCredit credit = lockCredit(meeting.getTeam().getId());
         return aiRequestRepository.findByIdempotencyKey(idempotencyKey)
-                .map(acceptedRequest -> ChatCreateResponse.of(findMessage(acceptedRequest), credit.getBalance()))
-                .orElseGet(() -> acceptQuestion(userId, meeting, credit, idempotencyKey, inputType, question));
+                .map(acceptedRequest -> replayIfSameRequest(acceptedRequest, userId, meeting, participant, inputType,
+                        question, credit.getBalance()))
+                .orElseGet(() -> acceptQuestion(meeting, participant, credit, idempotencyKey, inputType, question));
+    }
+
+    private ChatCreateResponse replayIfSameRequest(AiRequest request, Long userId, Meeting meeting,
+                                                   TeamMember participant,
+                                                   ChatInputType inputType, String question, Long creditBalance) {
+        if (request.getRequestType() != AiRequestType.CHAT
+                || !request.getTeam().getId().equals(meeting.getTeam().getId())
+                || request.getTeamMember() == null
+                || !request.getTeamMember().getUser().getId().equals(userId)) {
+            throw new AiChatException(AiChatErrorCode.IDEMPOTENCY_KEY_REUSED);
+        }
+        AiChatbotMessage message = findMessage(request);
+        if (!message.getMeeting().getId().equals(meeting.getId())
+                || !message.getTeamMember().getId().equals(participant.getId())
+                || message.getInputType() != inputType
+                || !message.getQuestion().equals(question)) {
+            throw new AiChatException(AiChatErrorCode.IDEMPOTENCY_KEY_REUSED);
+        }
+        return ChatCreateResponse.of(message, creditBalance);
     }
 
     @Transactional(readOnly = true)
@@ -85,10 +107,8 @@ public class AiChatService {
         return ChatListResponse.of(fetched, pageSize, hasAskedQuestion);
     }
 
-    private ChatCreateResponse acceptQuestion(Long userId, Meeting meeting, TeamCredit credit,
+    private ChatCreateResponse acceptQuestion(Meeting meeting, TeamMember asker, TeamCredit credit,
                                               String idempotencyKey, ChatInputType inputType, String question) {
-        TeamMember asker = findParticipant(userId, meeting);
-        validateInProgress(meeting);
         List<AiChatbotMessage> processingMessages = findProcessingMessages(meeting.getId());
         rejectIfProcessing(processingMessages);
         expireStaleMessages(processingMessages, credit);

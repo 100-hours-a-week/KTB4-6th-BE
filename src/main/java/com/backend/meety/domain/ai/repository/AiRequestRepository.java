@@ -14,10 +14,43 @@ import org.springframework.data.repository.query.Param;
 
 public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
 
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.FAILED,
+                a.failureReason = com.backend.meety.domain.ai.entity.AiFailureReason.REQUEST_CANCELLED,
+                a.processingToken = null,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.requestType = com.backend.meety.domain.ai.entity.AiRequestType.GLOBAL_CHAT
+              and a.status in (com.backend.meety.domain.ai.entity.AiRequestStatus.ACCEPTED,
+                               com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING)
+              and a.teamMember.user.id = :userId
+            """)
+    int failActiveGlobalChatByUserId(@Param("userId") Long userId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.FAILED,
+                a.failureReason = com.backend.meety.domain.ai.entity.AiFailureReason.REQUEST_CANCELLED,
+                a.processingToken = null,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.requestType = com.backend.meety.domain.ai.entity.AiRequestType.GLOBAL_CHAT
+              and a.status in (com.backend.meety.domain.ai.entity.AiRequestStatus.ACCEPTED,
+                               com.backend.meety.domain.ai.entity.AiRequestStatus.PROCESSING)
+              and a.team.id = :teamId
+            """)
+    int failActiveGlobalChatByTeamId(@Param("teamId") Long teamId);
+
     Optional<AiRequest> findByIdempotencyKey(String idempotencyKey);
 
     List<AiRequest> findByRequestTypeAndStatusOrderByIdAsc(
             AiRequestType requestType, AiRequestStatus status, Limit limit);
+
+    @Query("select a.id from AiRequest a where a.requestType = :type and a.status = :status "
+            + "and a.deletedAt is null order by a.id asc")
+    List<Long> findIdsByRequestTypeAndStatus(@Param("type") AiRequestType type,
+                                             @Param("status") AiRequestStatus status, Limit limit);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
