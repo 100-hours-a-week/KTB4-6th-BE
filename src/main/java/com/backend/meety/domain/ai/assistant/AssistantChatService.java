@@ -98,12 +98,15 @@ public class AssistantChatService {
         if (aiRequestRepository.claimAccepted(requestId, token) != 1) return null;
         AssistantChatTurn current = turnRepository.findWithContextByRequestId(requestId)
                 .orElseThrow(() -> new AssistantChatException(AssistantChatErrorCode.CHAT_NOT_FOUND));
+        if (current.getAiRequest().getTeamMember() == null) {
+            throw new IllegalStateException("GLOBAL_CHAT request has no requester team member");
+        }
         List<AssistantChatTurn> previousTurns = turnRepository.findRecentForContext(
                 current.getConversation().getId(), current.getId(), Limit.of(properties.historyMessageLimit()));
         List<ChatAiHistoryMessage> history = toRecentMessages(previousTurns,
                 properties.historyMessageLimit());
         return new AssistantChatWork(requestId, token, current.getConversation().getTeam().getId(),
-                current.getQuestion(), history);
+                current.getAiRequest().getTeamMember().getId(), current.getQuestion(), history);
     }
 
     @Transactional

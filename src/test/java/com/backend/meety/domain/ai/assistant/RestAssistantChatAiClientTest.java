@@ -22,13 +22,21 @@ import org.springframework.web.client.RestClient;
 class RestAssistantChatAiClientTest {
 
     @Test
+    void requesterTeamMemberIdIsRequiredInAiRequest() {
+        assertThatThrownBy(() -> new AssistantChatAiRequest(42L, 7L, null, "질문", List.of()))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("requesterTeamMemberId is required");
+    }
+
+    @Test
     void streamsProgressAndReturnsPersistableCompletion() {
         RestClient.Builder builder = RestClient.builder().baseUrl("http://ai.test");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo("http://ai.test/v1/assistant/chat"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(content().json("""
-                        {"aiRequestId":42,"teamId":7,"question":"분석해줘","recentMessages":[]}
+                        {"aiRequestId":42,"teamId":7,"requesterTeamMemberId":12,
+                         "question":"분석해줘","recentMessages":[]}
                         """))
                 .andRespond(withSuccess("""
                         event: status
@@ -47,7 +55,7 @@ class RestAssistantChatAiClientTest {
         List<String> names = new ArrayList<>();
 
         AssistantChatAiResult result = client.stream(
-                new AssistantChatAiRequest(42L, 7L, "분석해줘", List.of()),
+                new AssistantChatAiRequest(42L, 7L, 12L, "분석해줘", List.of()),
                 event -> names.add(event.name()));
 
         assertThat(names).containsExactly("status", "delta", "ping");
@@ -67,7 +75,7 @@ class RestAssistantChatAiClientTest {
         var client = new RestAssistantChatAiClient(builder.build(), new ObjectMapper(), properties());
 
         assertThatThrownBy(() -> client.stream(
-                new AssistantChatAiRequest(42L, 7L, "질문", List.of()), ignored -> {}))
+                new AssistantChatAiRequest(42L, 7L, 12L, "질문", List.of()), ignored -> {}))
                 .isInstanceOf(AssistantChatAiException.class)
                 .hasMessageContaining("without a terminal event");
         server.verify();
@@ -83,7 +91,7 @@ class RestAssistantChatAiClientTest {
         var client = new RestAssistantChatAiClient(builder.build(), new ObjectMapper(), properties());
 
         assertThatThrownBy(() -> client.stream(
-                new AssistantChatAiRequest(42L, 7L, "질문", List.of()), ignored -> {}))
+                new AssistantChatAiRequest(42L, 7L, 12L, "질문", List.of()), ignored -> {}))
                 .isInstanceOf(AssistantChatAiException.class)
                 .hasMessageContaining("request ID mismatch");
         server.verify();
@@ -99,7 +107,7 @@ class RestAssistantChatAiClientTest {
         var client = new RestAssistantChatAiClient(builder.build(), new ObjectMapper(), properties());
 
         assertThatThrownBy(() -> client.stream(
-                new AssistantChatAiRequest(42L, 7L, "질문", List.of()), ignored -> {}))
+                new AssistantChatAiRequest(42L, 7L, 12L, "질문", List.of()), ignored -> {}))
                 .isInstanceOf(AssistantChatAiException.class)
                 .hasMessageContaining("AI request failed");
         server.verify();
@@ -115,7 +123,7 @@ class RestAssistantChatAiClientTest {
             var client = new RestAssistantChatAiClient(builder.build(), new ObjectMapper(), properties());
 
             assertThatThrownBy(() -> client.stream(
-                    new AssistantChatAiRequest(42L, 7L, "질문", List.of()), ignored -> {}))
+                    new AssistantChatAiRequest(42L, 7L, 12L, "질문", List.of()), ignored -> {}))
                     .isInstanceOf(AssistantChatAiException.class)
                     .hasMessageContaining("HTTP " + status.value());
             server.verify();
@@ -133,7 +141,7 @@ class RestAssistantChatAiClientTest {
         var client = new RestAssistantChatAiClient(builder.build(), new ObjectMapper(), properties());
 
         AssistantChatAiResult result = client.stream(
-                new AssistantChatAiRequest(42L, 7L, "질문", List.of()), ignored -> {});
+                new AssistantChatAiRequest(42L, 7L, 12L, "질문", List.of()), ignored -> {});
 
         assertThat(result.answer()).isEqualTo("첫 결과");
         server.verify();

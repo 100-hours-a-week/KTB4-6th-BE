@@ -2,6 +2,7 @@ package com.backend.meety.domain.ai.assistant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -96,5 +97,56 @@ class AssistantChatServiceTest {
         verify(requests).saveAndFlush(org.mockito.ArgumentMatchers.argThat(
                 request -> request.getRequestType() == AiRequestType.GLOBAL_CHAT
                         && request.getStatus() == AiRequestStatus.ACCEPTED));
+    }
+
+    @Test
+    void claimUsesTeamMemberLinkedToAiRequestAsRequesterId() {
+        TeamMember requester = mock(TeamMember.class);
+        when(requester.getId()).thenReturn(12L);
+        TeamMember conversationMember = mock(TeamMember.class);
+        when(conversationMember.getId()).thenReturn(99L);
+        when(conversation.getTeamMember()).thenReturn(conversationMember);
+        AiRequest request = mock(AiRequest.class);
+        when(request.getTeamMember()).thenReturn(requester);
+        var turn = mock(com.backend.meety.domain.ai.entity.AssistantChatTurn.class);
+        when(turn.getAiRequest()).thenReturn(request);
+        when(turn.getConversation()).thenReturn(conversation);
+        when(conversation.getId()).thenReturn(33L);
+        when(conversation.getTeam()).thenReturn(team);
+        when(team.getId()).thenReturn(5L);
+        when(turn.getQuestion()).thenReturn("나랑 회의 잡아줘");
+        when(turn.getId()).thenReturn(44L);
+        when(requests.claimAccepted(org.mockito.ArgumentMatchers.eq(44L), anyString())).thenReturn(1);
+        when(turns.findWithContextByRequestId(44L)).thenReturn(Optional.of(turn));
+        when(turns.findRecentForContext(org.mockito.ArgumentMatchers.eq(33L),
+                org.mockito.ArgumentMatchers.eq(44L),
+                org.mockito.ArgumentMatchers.any(org.springframework.data.domain.Limit.class)))
+                .thenReturn(List.of());
+
+        AssistantChatWork work = service.claim(44L);
+
+        assertThat(work.requesterTeamMemberId()).isEqualTo(12L);
+        assertThat(work.teamId()).isEqualTo(5L);
+        assertThat(work.requestId()).isEqualTo(44L);
+        assertThat(work.question()).isEqualTo("나랑 회의 잡아줘");
+        assertThat(work.recentMessages()).isEmpty();
+    }
+
+    @Test
+    void claimDoesNotCreateAiWorkWhenRequesterTeamMemberIsMissing() {
+        AiRequest request = mock(AiRequest.class);
+        when(request.getTeamMember()).thenReturn(null);
+        var turn = mock(com.backend.meety.domain.ai.entity.AssistantChatTurn.class);
+        when(turn.getAiRequest()).thenReturn(request);
+        when(turn.getConversation()).thenReturn(conversation);
+        when(conversation.getId()).thenReturn(33L);
+        when(turn.getId()).thenReturn(44L);
+        when(requests.claimAccepted(org.mockito.ArgumentMatchers.eq(44L), anyString())).thenReturn(1);
+        when(turns.findWithContextByRequestId(44L)).thenReturn(Optional.of(turn));
+
+        assertThatThrownBy(() -> service.claim(44L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("no requester team member");
+        verify(turns, never()).findRecentForContext(any(), any(), any());
     }
 }

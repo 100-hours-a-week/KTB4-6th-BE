@@ -1,6 +1,6 @@
 # Meety 전역 AI 채팅 API 명세
 
-이 문서는 현재 `feat/global-assistant-chat` 브랜치의 Controller, DTO, Service 구현을 기준으로 작성했습니다. FE·AI 연동 시 서버에 배포된 브랜치와 계약이 다를 수 있으므로 E2E 전에 배포 버전을 확인하세요.
+이 문서는 현재 BE 구현의 Controller, DTO, Service 계약을 기준으로 작성했습니다. FE·AI 연동 시 서버에 배포된 브랜치와 계약이 다를 수 있으므로 E2E 전에 배포 버전을 확인하세요.
 
 ## 공통 사항
 
@@ -172,6 +172,7 @@ AI 호출은 설정된 기존 analysis 서버 주소(`ai.http-url`)를 사용합
 {
   "aiRequestId":123,
   "teamId":10,
+  "requesterTeamMemberId":5,
   "question":"이번 주 회의에서 결정한 내용은?",
   "recentMessages":[
     {"role":"user","content":"이전 질문"},
@@ -180,7 +181,15 @@ AI 호출은 설정된 기존 analysis 서버 주소(`ai.http-url`)를 사용합
 }
 ```
 
-`recentMessages`는 최대 20개이며 오래된 순으로 보냅니다. 현재 질문은 배열에 포함되지 않습니다. 사용자·팀 권한 판단과 내부 API 호출 상관관계에는 `aiRequestId`를 사용합니다.
+| 필드 | 타입 | 필수 | 의미 |
+| --- | --- | --- | --- |
+| `aiRequestId` | `Long` | 예 | 현재 전역 채팅 요청 ID |
+| `teamId` | `Long` | 예 | 요청이 속한 팀 ID |
+| `requesterTeamMemberId` | `Long` | 예 | 해당 `AiRequest`에 연결된 요청자의 `TeamMember.id`. `User.id`가 아니며 null로 보내지 않습니다. AI가 “나”, “내가”를 팀 회의 참석자로 해석할 때 사용합니다. |
+| `question` | `String` | 예 | 현재 질문 |
+| `recentMessages` | Array | 예 | 최근 대화 메시지, 최대 20개, 오래된 순 |
+
+`requesterTeamMemberId`는 BE가 인증된 요청으로 생성한 `AiRequest.teamMember.id`에서 가져옵니다. FE가 사용자 ID를 전달하지 않습니다. BE는 claim 조회에서 `AiRequest.teamMember`를 함께 로드하며, 관계가 없으면 AI 요청을 보내지 않습니다. 팀원 이름 조회는 기존 `GET /internal/v1/assistant/team-members`를 사용합니다. 현재 질문은 `recentMessages`에 포함되지 않습니다. 사용자·팀 권한 판단과 내부 API 호출 상관관계에는 `aiRequestId`를 사용합니다.
 
 성공은 `200 text/event-stream`입니다. 처리 이벤트는 `status`, `delta`, `completed`, `failed`; SSE 주석 ping은 주기적으로 수신됩니다. `completed` 필수 값은 일치하는 `aiRequestId`와 비어 있지 않은 `answer`이며 `referencedMeetingIds`는 선택 배열, `meetingDraft`는 선택 객체입니다. `failed`의 허용 코드는 `invalid_request`, `forbidden`, `timeout`, `retrieval_failed`, `generation_failed`, `execution_limit_exceeded`입니다. 실제 회의 생성 API는 제공하지 않습니다.
 

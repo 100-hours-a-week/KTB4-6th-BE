@@ -44,6 +44,7 @@ public interface AssistantChatTurnRepository extends JpaRepository<AssistantChat
 
     @Query("""
             select t from AssistantChatTurn t join fetch t.aiRequest r
+            join fetch r.teamMember requestMember
             join fetch t.conversation c join fetch c.team join fetch c.teamMember tm
             where r.id = :requestId and t.deletedAt is null
             """)
