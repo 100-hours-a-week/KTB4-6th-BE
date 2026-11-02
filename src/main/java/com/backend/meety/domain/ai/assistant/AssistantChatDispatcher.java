@@ -79,8 +79,8 @@ public class AssistantChatDispatcher {
         emitters.send(requestId, "status", Map.of("aiRequestId", requestId, "status", "PROCESSING"));
         try {
             AssistantChatAiResult result = aiClient.stream(
-                    new AssistantChatAiRequest(work.requestId(), work.teamId(), work.question(),
-                            work.recentMessages()),
+                    new AssistantChatAiRequest(work.requestId(), work.teamId(), work.requesterTeamMemberId(),
+                            work.question(), work.recentMessages()),
                     event -> forward(requestId, event));
             AssistantChatTurnResponse completed = service.complete(requestId, work.processingToken(),
                     result.answer(), result.meetingDraft(), result.referencedMeetingIds());
