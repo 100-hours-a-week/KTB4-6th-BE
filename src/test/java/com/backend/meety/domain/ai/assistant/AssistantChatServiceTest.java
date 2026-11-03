@@ -7,15 +7,20 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.entity.AssistantChatConversation;
+import com.backend.meety.domain.ai.entity.AssistantChatTurn;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.ai.repository.AssistantChatConversationRepository;
 import com.backend.meety.domain.ai.repository.AssistantChatTurnRepository;
+import com.backend.meety.domain.meeting.repository.AssistantMeetingCreationRepository;
+import com.backend.meety.domain.meeting.repository.AssistantMeetingCreationRepository.CreatedMeetingProjection;
+import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
@@ -37,11 +42,12 @@ class AssistantChatServiceTest {
     private final AssistantChatConversationRepository conversations = mock(AssistantChatConversationRepository.class);
     private final AssistantChatTurnRepository turns = mock(AssistantChatTurnRepository.class);
     private final AiRequestRepository requests = mock(AiRequestRepository.class);
+    private final AssistantMeetingCreationRepository creations = mock(AssistantMeetingCreationRepository.class);
     private final Team team = mock(Team.class);
     private final TeamMember member = mock(TeamMember.class);
     private final AssistantChatConversation conversation = mock(AssistantChatConversation.class);
     private final AssistantChatService service = new AssistantChatService(
-            members, conversations, turns, requests,
+            members, conversations, turns, requests, creations,
             new AssistantChatProperties(Duration.ofSeconds(180), Duration.ofSeconds(200),
                     Duration.ofSeconds(30), 20, 20, 50),
             new ObjectMapper(), mock(Validator.class),
@@ -148,5 +154,116 @@ class AssistantChatServiceTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("no requester team member");
         verify(turns, never()).findRecentForContext(any(), any(), any());
+    }
+
+    @Test
+    void requestStatusIncludesCreatedMeetingId() {
+        var turn = turn(100L, 44L);
+        var created = creation(44L, 789L);
+        when(turns.findOwnedRequest(44L, 9L)).thenReturn(Optional.of(turn));
+        when(creations.findCreatedMeetingIds(List.of(44L))).thenReturn(List.of(created));
+
+        var response = service.getRequest(9L, 44L);
+
+        assertThat(response.createdMeetingId()).isEqualTo(789L);
+        assertThat(response.aiRequestId()).isEqualTo(44L);
+    }
+
+    @Test
+    void requestStatusBeforeMeetingCreationSerializesExplicitNull() throws Exception {
+        var turn = turn(100L, 44L);
+        when(turns.findOwnedRequest(44L, 9L)).thenReturn(Optional.of(turn));
+
+        var response = service.getRequest(9L, 44L);
+        ObjectMapper mapper = new ObjectMapper();
+        var json = mapper.readTree(mapper.writeValueAsString(response));
+
+        assertThat(response.createdMeetingId()).isNull();
+        assertThat(json.has("createdMeetingId")).isTrue();
+        assertThat(json.get("createdMeetingId").isNull()).isTrue();
+    }
+
+    @Test
+    void unauthorizedRequestDoesNotLookUpCreatedMeeting() {
+        assertThatThrownBy(() -> service.getRequest(99L, 44L))
+                .isInstanceOf(AssistantChatException.class);
+
+        verifyNoInteractions(creations);
+    }
+
+    @Test
+    void messagePageLoadsMeetingIdsOnceAndExcludesPaginationSentinel() {
+        allowHistory();
+        var page = List.of(turn(103L, 44L), turn(102L, 45L), turn(101L, 46L));
+        var created = creation(45L, 789L);
+        when(turns.findPage(org.mockito.ArgumentMatchers.eq(33L),
+                org.mockito.ArgumentMatchers.eq(Long.MAX_VALUE), any()))
+                .thenReturn(page);
+        when(creations.findCreatedMeetingIds(List.of(44L, 45L)))
+                .thenReturn(List.of(created));
+
+        var response = service.getMessages(9L, 5L, null, 2);
+
+        assertThat(response.messages()).extracting(value -> value.createdMeetingId())
+                .containsExactly(null, 789L);
+        assertThat(response.messages()).extracting(value -> value.aiRequestId()).containsExactly(44L, 45L);
+        assertThat(response.hasNext()).isTrue();
+        assertThat(response.nextCursor()).isEqualTo(102L);
+        verify(creations).findCreatedMeetingIds(List.of(44L, 45L));
+        verify(creations, org.mockito.Mockito.times(1)).findCreatedMeetingIds(any());
+    }
+
+    @Test
+    void emptyHistoryDoesNotLookUpMeetingIds() {
+        allowHistory();
+
+        assertThat(service.getMessages(9L, 5L, null, 20).messages()).isEmpty();
+
+        verifyNoInteractions(creations);
+    }
+
+    @Test
+    void missingConversationDoesNotLookUpMeetingIds() {
+        when(members.findByTeamIdAndUserIdAndMembershipStatus(5L, 9L, MembershipStatus.ACTIVE))
+                .thenReturn(Optional.of(member));
+
+        assertThat(service.getMessages(9L, 5L, null, 20).messages()).isEmpty();
+
+        verifyNoInteractions(creations);
+    }
+
+    @Test
+    void unauthorizedHistoryDoesNotLookUpMeetingIds() {
+        assertThatThrownBy(() -> service.getMessages(99L, 5L, null, 20))
+                .isInstanceOf(AssistantChatException.class);
+
+        verifyNoInteractions(creations);
+    }
+
+    private void allowHistory() {
+        when(members.findByTeamIdAndUserIdAndMembershipStatus(5L, 9L, MembershipStatus.ACTIVE))
+                .thenReturn(Optional.of(member));
+        when(conversations.findByTeamIdAndTeamMemberIdAndDeletedAtIsNull(5L, 12L))
+                .thenReturn(Optional.of(conversation));
+        when(conversation.getId()).thenReturn(33L);
+    }
+
+    private AssistantChatTurn turn(Long id, Long requestId) {
+        AssistantChatTurn turn = mock(AssistantChatTurn.class);
+        AiRequest request = mock(AiRequest.class);
+        when(request.getId()).thenReturn(requestId);
+        when(request.getStatus()).thenReturn(AiRequestStatus.COMPLETED);
+        when(turn.getId()).thenReturn(id);
+        when(turn.getAiRequest()).thenReturn(request);
+        when(turn.getQuestion()).thenReturn("질문 " + requestId);
+        when(turn.getAnswer()).thenReturn("답변 " + requestId);
+        return turn;
+    }
+
+    private CreatedMeetingProjection creation(Long requestId, Long meetingId) {
+        CreatedMeetingProjection result = mock(CreatedMeetingProjection.class);
+        when(result.getAiRequestId()).thenReturn(requestId);
+        when(result.getMeetingId()).thenReturn(meetingId);
+        return result;
     }
 }

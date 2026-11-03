@@ -12,6 +12,7 @@ public record AssistantChatTurnResponse(
         AiRequestStatus status,
         String failureCode,
         JsonNode meetingDraft,
+        Long createdMeetingId,
         java.util.List<Long> referencedMeetingIds,
         LocalDateTime createdAt,
         LocalDateTime updatedAt

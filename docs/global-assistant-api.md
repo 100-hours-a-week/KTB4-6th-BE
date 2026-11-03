@@ -103,13 +103,27 @@ Response `200`:
     "messages":[{
       "aiRequestId":123,"messageId":456,"question":"질문",
       "answer":"답변 또는 null","status":"COMPLETED","failureCode":null,
-      "meetingDraft":null,"referencedMeetingIds":[10],
+      "meetingDraft":null,"createdMeetingId":null,"referencedMeetingIds":[10],
       "createdAt":"2026-11-01T10:00:00","updatedAt":"2026-11-01T10:00:05"
     }],
     "nextCursor":456,"hasNext":false
   },
   "error":null
 }
+```
+
+`messages[]`와 요청 상태 조회의 `data`에는 `createdMeetingId`(`Long`, nullable)가 항상 포함됩니다.
+
+- 해당 `aiRequestId`를 `X-Ai-Request-Id`로 보내 회의를 생성한 기록이 없으면 `null`입니다. `COMPLETED`는 AI 답변 완료 상태이므로 회의 생성 완료와는 별개입니다.
+- 회의 생성이 커밋되면 `assistant_meeting_creations`에 저장된 회의 ID를 반환합니다. 이후 조회/새로고침에서도 같은 ID를 확인할 수 있습니다.
+- 생성된 회의를 나중에 삭제해도 ID를 유지합니다. `null`을 미생성으로 해석해 확인 버튼을 다시 표시하는 것을 방지하기 위한 생성 이력입니다.
+- FE는 ID가 있으면 생성 완료로 표시하고 해당 회의로 이동할 수 있습니다. 이 ID가 현재 회의의 존재/접근 가능성을 보장하지는 않으며, 삭제된 회의의 상세 조회는 기존 `MEETING_NOT_FOUND` 처리를 따릅니다.
+- 이 필드는 두 JSON 조회 응답에 추가되며 기존 SSE `completed` 이벤트 payload는 변경하지 않습니다.
+
+생성 후 응답 항목 예시(나머지 필드는 동일):
+
+```json
+{"aiRequestId":123,"status":"COMPLETED","meetingDraft":{"title":"주간 회의"},"createdMeetingId":789}
 ```
 
 활성 팀 구성원만 조회할 수 있습니다. 접근 불가 시 `403 ASSISTANT_CHAT_ACCESS_DENIED`; 잘못된 페이지 값은 `400`입니다. 대화가 아직 없으면 빈 `messages`가 반환됩니다.
@@ -123,7 +137,7 @@ Headers: `Cookie: accessToken=<JWT>`
 Response `200`의 `data`는 채팅 이력의 항목과 같은 `AssistantChatTurnResponse`입니다.
 
 ```json
-{"success":true,"data":{"aiRequestId":123,"messageId":456,"question":"질문","answer":null,"status":"PROCESSING","failureCode":null,"meetingDraft":null,"referencedMeetingIds":[],"createdAt":"2026-11-01T10:00:00","updatedAt":"2026-11-01T10:00:01"},"error":null}
+{"success":true,"data":{"aiRequestId":123,"messageId":456,"question":"질문","answer":null,"status":"PROCESSING","failureCode":null,"meetingDraft":null,"createdMeetingId":null,"referencedMeetingIds":[],"createdAt":"2026-11-01T10:00:00","updatedAt":"2026-11-01T10:00:01"},"error":null}
 ```
 
 다른 사용자의 요청 ID는 접근 거부(`403 ASSISTANT_CHAT_ACCESS_DENIED`)됩니다. 현재 코드에서는 찾을 수 없는 요청도 같은 접근 거부 응답을 사용합니다.
