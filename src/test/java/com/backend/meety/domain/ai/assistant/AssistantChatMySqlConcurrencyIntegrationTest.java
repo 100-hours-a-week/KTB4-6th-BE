@@ -10,6 +10,9 @@ import com.backend.meety.domain.ai.entity.AssistantChatTurn;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.ai.repository.AssistantChatConversationRepository;
 import com.backend.meety.domain.ai.repository.AssistantChatTurnRepository;
+import com.backend.meety.domain.meeting.entity.AssistantMeetingCreation;
+import com.backend.meety.domain.meeting.entity.Meeting;
+import com.backend.meety.domain.meeting.repository.AssistantMeetingCreationRepository;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
@@ -53,7 +56,8 @@ class AssistantChatMySqlConcurrencyIntegrationTest {
     @EnableJpaAuditing
     @EnableJpaRepositories(basePackageClasses = {
             AiRequestRepository.class, AssistantChatConversationRepository.class,
-            AssistantChatTurnRepository.class, TeamMemberRepository.class
+            AssistantChatTurnRepository.class, TeamMemberRepository.class,
+            AssistantMeetingCreationRepository.class
     })
     static class DatabaseConfig {
         @Bean
@@ -84,8 +88,8 @@ class AssistantChatMySqlConcurrencyIntegrationTest {
         @Bean
         AssistantChatService assistantChatService(TeamMemberRepository members,
                 AssistantChatConversationRepository conversations, AssistantChatTurnRepository turns,
-                AiRequestRepository requests) {
-            return new AssistantChatService(members, conversations, turns, requests,
+                AiRequestRepository requests, AssistantMeetingCreationRepository creations) {
+            return new AssistantChatService(members, conversations, turns, requests, creations,
                     new AssistantChatProperties(null, null, null, 20, 20, 50), JsonMapper.builder().build(),
                     jakarta.validation.Validation.buildDefaultValidatorFactory().getValidator(),
                     java.time.Clock.systemUTC());
@@ -109,7 +113,8 @@ class AssistantChatMySqlConcurrencyIntegrationTest {
     void prepareDatabase() {
         transaction = new TransactionTemplate(transactionManager);
         jdbc = new JdbcTemplate(dataSource);
-        for (String table : List.of("assistant_chat_turns", "assistant_chat_conversations", "ai_requests",
+        for (String table : List.of("assistant_meeting_creations", "meetings",
+                "assistant_chat_turns", "assistant_chat_conversations", "ai_requests",
                 "team_members", "teams", "users")) {
             jdbc.update("delete from " + table);
         }
@@ -173,6 +178,43 @@ class AssistantChatMySqlConcurrencyIntegrationTest {
         assertThat(requests.findById(requestId).orElseThrow().getStatus()).isEqualTo(AiRequestStatus.FAILED);
         assertThat(turns.count()).isZero();
         assertThat(conversations.count()).isZero();
+    }
+
+    @Test
+    @DisplayName("생성 전 null에서 승인 기록 저장 후 두 조회 응답에 동일한 회의 ID를 반환한다")
+    void createdMeetingIdIsVisibleInBothReadApis() {
+        var submission = service.submit(userId, teamId, "created-meeting", "회의 생성");
+        assertThat(service.getRequest(userId, submission.requestId()).createdMeetingId()).isNull();
+
+        Long meetingId = persistMeetingCreation(submission.requestId(), false);
+
+        assertThat(service.getRequest(userId, submission.requestId()).createdMeetingId()).isEqualTo(meetingId);
+        assertThat(service.getMessages(userId, teamId, null, 20).messages())
+                .extracting(value -> value.createdMeetingId()).containsExactly(meetingId);
+    }
+
+    @Test
+    @DisplayName("생성된 회의를 소프트 삭제해도 생성 이력의 회의 ID는 유지한다")
+    void softDeletedMeetingKeepsOriginalCreatedMeetingId() {
+        var submission = service.submit(userId, teamId, "deleted-meeting", "회의 생성");
+        Long meetingId = persistMeetingCreation(submission.requestId(), true);
+
+        assertThat(service.getRequest(userId, submission.requestId()).createdMeetingId()).isEqualTo(meetingId);
+        assertThat(service.getMessages(userId, teamId, null, 20).messages())
+                .extracting(value -> value.createdMeetingId()).containsExactly(meetingId);
+    }
+
+    private Long persistMeetingCreation(Long requestId, boolean deleted) {
+        return transaction.execute(status -> {
+            AiRequest request = entityManager.find(AiRequest.class, requestId);
+            Meeting meeting = Meeting.create(request.getTeam(), request.getTeamMember(), "테스트 회의",
+                    "생성 연결 조회 검증", null, java.time.LocalDateTime.now().plusDays(1), 30);
+            entityManager.persist(meeting);
+            if (deleted) meeting.softDelete(java.time.LocalDateTime.now());
+            entityManager.persist(AssistantMeetingCreation.create(request, meeting, "test-request-hash"));
+            entityManager.flush();
+            return meeting.getId();
+        });
     }
 
     private List<AssistantChatSubmission> runTogether(String firstKey, String secondKey) throws Exception {

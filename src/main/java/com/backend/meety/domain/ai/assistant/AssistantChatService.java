@@ -13,6 +13,8 @@ import com.backend.meety.domain.ai.repository.AssistantChatConversationRepositor
 import com.backend.meety.domain.ai.repository.AssistantChatTurnRepository;
 import com.backend.meety.domain.meeting.MeetingAttendeePolicy;
 import com.backend.meety.domain.meeting.dto.MeetingCreateRequest;
+import com.backend.meety.domain.meeting.repository.AssistantMeetingCreationRepository;
+import com.backend.meety.domain.meeting.repository.AssistantMeetingCreationRepository.CreatedMeetingProjection;
 import com.backend.meety.domain.team.entity.MembershipStatus;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.team.repository.TeamMemberRepository;
@@ -28,7 +30,9 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Limit;
@@ -47,6 +51,7 @@ public class AssistantChatService {
     private final AssistantChatConversationRepository conversationRepository;
     private final AssistantChatTurnRepository turnRepository;
     private final AiRequestRepository aiRequestRepository;
+    private final AssistantMeetingCreationRepository creationRepository;
     private final AssistantChatProperties properties;
     private final ObjectMapper objectMapper;
     private final Validator validator;
@@ -121,7 +126,7 @@ public class AssistantChatService {
         } catch (Exception e) {
             turn.complete(answer, draft, "[]");
         }
-        return toResponse(turn);
+        return toResponse(turn, null);
     }
 
     @Transactional
@@ -149,9 +154,9 @@ public class AssistantChatService {
 
     @Transactional(readOnly = true)
     public AssistantChatTurnResponse getRequest(Long userId, Long requestId) {
-        return turnRepository.findOwnedRequest(requestId, userId)
-                .map(this::toResponse)
+        AssistantChatTurn turn = turnRepository.findOwnedRequest(requestId, userId)
                 .orElseThrow(() -> new AssistantChatException(AssistantChatErrorCode.CHAT_ACCESS_DENIED));
+        return toResponse(turn, findCreatedMeetingIds(List.of(turn)).get(requestId));
     }
 
     @Transactional(readOnly = true)
@@ -173,7 +178,10 @@ public class AssistantChatService {
         boolean hasNext = fetched.size() > size;
         List<AssistantChatTurn> page = fetched.stream().limit(size).toList();
         Long nextCursor = hasNext && !page.isEmpty() ? page.getLast().getId() : null;
-        return new AssistantChatPageResponse(page.stream().map(this::toResponse).toList(), nextCursor, hasNext);
+        Map<Long, Long> createdMeetingIds = findCreatedMeetingIds(page);
+        return new AssistantChatPageResponse(page.stream()
+                .map(turn -> toResponse(turn, createdMeetingIds.get(turn.getAiRequest().getId())))
+                .toList(), nextCursor, hasNext);
     }
 
 
@@ -209,7 +217,15 @@ public class AssistantChatService {
         return List.copyOf(chronological.subList(chronological.size() - maxMessages, chronological.size()));
     }
 
-    private AssistantChatTurnResponse toResponse(AssistantChatTurn turn) {
+    private Map<Long, Long> findCreatedMeetingIds(List<AssistantChatTurn> turns) {
+        if (turns.isEmpty()) return Map.of();
+        List<Long> requestIds = turns.stream().map(turn -> turn.getAiRequest().getId()).toList();
+        return creationRepository.findCreatedMeetingIds(requestIds).stream()
+                .collect(Collectors.toMap(CreatedMeetingProjection::getAiRequestId,
+                        CreatedMeetingProjection::getMeetingId));
+    }
+
+    private AssistantChatTurnResponse toResponse(AssistantChatTurn turn, Long createdMeetingId) {
         JsonNode draft = null;
         List<Long> referenced = List.of();
         try {
@@ -222,7 +238,7 @@ public class AssistantChatService {
                     turn.getAiRequest().getId(), e);
         }
         return new AssistantChatTurnResponse(turn.getAiRequest().getId(), turn.getId(), turn.getQuestion(),
-                turn.getAnswer(), turn.getAiRequest().getStatus(), turn.getFailureCode(), draft,
+                turn.getAnswer(), turn.getAiRequest().getStatus(), turn.getFailureCode(), draft, createdMeetingId,
                 referenced, turn.getCreatedAt(), turn.getUpdatedAt());
     }
 
