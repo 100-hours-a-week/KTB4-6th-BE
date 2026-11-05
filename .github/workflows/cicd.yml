@@ -53,6 +53,7 @@ jobs:
           java-version: "25"
           cache: gradle
       - name: Gradle 테스트 및 실행 JAR 생성
+        id: gradle
         run: |
           # 기존 Docker 빌드와 같은 SDK 버전으로 테스트와 패키징을 한 번에 수행한다.
           cat > "$RUNNER_TEMP/sentry-sdk-version.init.gradle" <<'GRADLE'
@@ -62,6 +63,9 @@ jobs:
               }
           }
           GRADLE
+          STARTED=$SECONDS
+          # 테스트 실패 시에도 시간과 테스트 보고서를 다음 단계에서 확인한다.
+          trap 'echo "seconds=$((SECONDS-STARTED))" >> "$GITHUB_OUTPUT"' EXIT
           ./gradlew --init-script "$RUNNER_TEMP/sentry-sdk-version.init.gradle" test bootJar --no-daemon
 
           # CI 전용 경로에 이번 실행에서 만든 JAR 하나만 전달한다.
@@ -71,6 +75,29 @@ jobs:
           }
           mkdir -p build/ci
           cp "${JARS[0]}" build/ci/app.jar
+          echo "실행 JAR 크기: $(stat -c %s build/ci/app.jar) bytes"
+
+      - name: 테스트 결과 요약
+        if: ${{ !cancelled() }}
+        env:
+          GRADLE_SECONDS: ${{ steps.gradle.outputs.seconds }}
+          GRADLE_RESULT: ${{ steps.gradle.outcome }}
+        run: |
+          # XML에 포함된 테스트 출력이나 예외 본문은 요약에 노출하지 않는다.
+          python3 - <<'PYTHON'
+          import glob, os, xml.etree.ElementTree as ET
+          totals = dict(tests=0, failures=0, errors=0, skipped=0)
+          reports = glob.glob('build/test-results/test/TEST-*.xml')
+          for report in reports:
+              root = ET.parse(report).getroot()
+              for key in totals:
+                  totals[key] += int(root.get(key, 0))
+          passed = totals['tests'] - totals['failures'] - totals['errors'] - totals['skipped']
+          result = f"Gradle: {os.environ['GRADLE_RESULT']}, test+bootJar={os.environ['GRADLE_SECONDS']}s, reports={len(reports)}, passed={passed}, {totals}"
+          print(result)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('### BE 테스트 및 패키징\n' + result + '\n')
+          PYTHON
 
       # 전체 커밋 SHA를 이미지 태그로 사용해 배포 버전을 정확히 식별한다.
       - name: 이미지 태그 생성
@@ -84,6 +111,8 @@ jobs:
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: 이미지 빌드 시간 기록
+        run: echo "IMAGE_BUILD_STARTED=$(date +%s)" >> "$GITHUB_ENV"
       - name: BE 이미지 빌드 및 게시
         id: build
         uses: docker/build-push-action@v6
@@ -98,6 +127,16 @@ jobs:
           tags: ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: 이미지 빌드 결과 요약
+        if: ${{ !cancelled() && env.IMAGE_BUILD_STARTED != '' }}
+        env:
+          BUILD_RESULT: ${{ steps.build.outcome }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          RESULT="image_build=$BUILD_RESULT seconds=$(($(date +%s)-IMAGE_BUILD_STARTED)) digest=$IMAGE_DIGEST sha=$GITHUB_SHA"
+          echo "$RESULT"
+          echo "$RESULT" >> "$GITHUB_STEP_SUMMARY"
 
   check-migration-label:
     name: 운영 DB 마이그레이션 라벨 확인
@@ -180,6 +219,9 @@ jobs:
       HEALTH_URL: https://api.meety.io.kr/actuator/health
 
     steps:
+      - name: 소스 코드 체크아웃
+        uses: actions/checkout@v4
+
       - name: 배포 설정 확인
         env:
           AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
@@ -236,54 +278,13 @@ jobs:
           echo "task_definition=$ARN" >> "$GITHUB_OUTPUT"
           echo "::notice::새 태스크 정의: ${ARN##*/}"
 
-      - name: 배포 대기 스크립트 준비
-        run: |
-          # 서비스 배포를 시작하고, 끝날 조건이 될 때까지 상태를 확인한다.
-          # 사용법: deploy.sh <서비스> <태스크 정의> <성공으로 볼 단계(공백 구분)>
-          cat > "$RUNNER_TEMP/deploy.sh" <<'EOF'
-          #!/bin/bash
-          set -euo pipefail
-          SERVICE=$1 TASK_DEFINITION=$2 DONE_STAGES=$3
-          STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
-            --task-definition "$TASK_DEFINITION" > /dev/null
-
-          # 이번 update-service로 생긴 배포를 찾는다.
-          DEPLOYMENT=""
-          for i in $(seq 1 30); do
-            DEPLOYMENT=$(aws ecs list-service-deployments --cluster "$CLUSTER" --service "$SERVICE" \
-              --created-at "after=$STARTED" --query 'serviceDeployments[0].serviceDeploymentArn' --output text)
-            [ "$DEPLOYMENT" != "None" ] && [ -n "$DEPLOYMENT" ] && break
-            sleep 5
-          done
-          [ "$DEPLOYMENT" != "None" ] && [ -n "$DEPLOYMENT" ] || { echo "::error::${SERVICE} 배포를 찾지 못함"; exit 1; }
-          echo "${SERVICE} 배포: ${DEPLOYMENT##*/}"
-
-          LAST=""
-          while :; do
-            read -r STATUS STAGE < <(aws ecs describe-service-deployments --service-deployment-arns "$DEPLOYMENT" \
-              --query 'serviceDeployments[0].[status, lifecycleStage]' --output text)
-            [ "$STATUS $STAGE" != "$LAST" ] && { echo "$(date +%T) ${SERVICE}: ${STATUS} ${STAGE}"; LAST="$STATUS $STAGE"; }
-            case "$STATUS" in
-              SUCCESSFUL) exit 0 ;;
-              FAILED|STOPPED|STOP_REQUESTED|ROLLBACK_*)
-                echo "::error::${SERVICE} 배포 실패 (${STATUS}). ECS가 이전 버전으로 되돌린다"; exit 1 ;;
-            esac
-            for done_stage in $DONE_STAGES; do
-              [ "$STAGE" = "$done_stage" ] && exit 0
-            done
-            sleep 10
-          done
-          EOF
-          chmod +x "$RUNNER_TEMP/deploy.sh"
-
       # 같은 job의 배포 잠금을 유지하면서 두 서비스를 동시에 배포한다.
       # prod realtime은 관찰과 정리까지, API는 롤링 배포 완료까지 기다린다.
       - name: prod realtime 및 API 병렬 배포
         run: |
-          "$RUNNER_TEMP/deploy.sh" "$REALTIME_SERVICE" "${{ steps.register.outputs.task_definition }}" "" &
+          bash .github/scripts/deploy.sh "$REALTIME_SERVICE" "${{ steps.register.outputs.task_definition }}" "" &
           REALTIME_PID=$!
-          "$RUNNER_TEMP/deploy.sh" "$API_SERVICE" "${{ steps.register.outputs.task_definition }}" "" &
+          bash .github/scripts/deploy.sh "$API_SERVICE" "${{ steps.register.outputs.task_definition }}" "" &
           API_PID=$!
 
           # 한쪽이 실패해도 다른 서비스의 배포 결과까지 확인한다.
@@ -302,17 +303,40 @@ jobs:
           exit "$RESULT"
 
       - name: 배포 결과 확인
-        # 한쪽이 실패했을 때도 두 서비스의 최종 상태를 로그에 남긴다.
-        if: ${{ !cancelled() && steps.register.outcome == 'success' }}
+        if: ${{ !cancelled() }}
+        env:
+          DEPLOY_FAILED: ${{ job.status == 'failure' }}
         run: |
+          # 진단 실패와 관계없이 원래 배포 결과를 보존한다.
+          PHASE=after
+          [ "$DEPLOY_FAILED" != true ] || PHASE=failure
           for svc in "$REALTIME_SERVICE" "$API_SERVICE"; do
-            echo "$svc: $(aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
-              --query 'services[0].[runningCount, desiredCount]' --output text)"
+            bash .github/scripts/deploy-diagnostics.sh "$svc" "$PHASE" || true
           done
-          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-            --connect-to "api.meety.io.kr:443:${ALB_DNS_NAME}:443" "$HEALTH_URL")
-          echo "be-api health: $CODE"
-          [ "$CODE" = "200" ] || { echo "::error::be-api health 실패 ($CODE)"; exit 1; }
+          {
+            echo "### BE 배포 결과"
+            echo "- 커밋: $GITHUB_SHA"
+            echo "- 이미지: $IMAGE"
+            echo "- 실행: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "- 진단 전 job 실패 여부: $DEPLOY_FAILED"
+            echo '| 서비스 | 결과 | 소요 시간 | 대상 태스크 정의 |'
+            echo '| --- | --- | --- | --- |'
+            for svc in "$REALTIME_SERVICE" "$API_SERVICE"; do
+              if [ -f "$RUNNER_TEMP/be-deploy-results/$svc.md" ]; then
+                cat "$RUNNER_TEMP/be-deploy-results/$svc.md"
+              else
+                echo "| $svc | 결과 없음 (배포 미시작 또는 중단) | - | - |"
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          # 네트워크 오류도 응답 코드와 구분해서 기록한다.
+          CURL_EXIT=0
+          METRICS=$(curl -sS -o /dev/null -w 'http=%{http_code} seconds=%{time_total}' --max-time 10 --connect-to "api.meety.io.kr:443:${ALB_DNS_NAME}:443" "$HEALTH_URL") || CURL_EXIT=$?
+          echo "$(date -u +%FT%TZ) be-api health $METRICS curl_exit=$CURL_EXIT"
+          echo "- API health: $METRICS, curl exit=$CURL_EXIT" >> "$GITHUB_STEP_SUMMARY"
+          [ "$CURL_EXIT" -eq 0 ] && [[ "$METRICS" == http=200\ * ]] || {
+            echo "::error::be-api health 실패 ($METRICS curl_exit=$CURL_EXIT)"; exit 1;
+          }
 
   deploy-v2-staging:
     name: BE V2 staging ECS 배포
@@ -345,6 +369,9 @@ jobs:
       HEALTH_URL: https://api-staging.meety.io.kr/actuator/health
 
     steps:
+      - name: 소스 코드 체크아웃
+        uses: actions/checkout@v4
+
       - name: 배포 설정 확인
         env:
           AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
@@ -388,54 +415,13 @@ jobs:
           echo "task_definition=$ARN" >> "$GITHUB_OUTPUT"
           echo "::notice::새 태스크 정의: ${ARN##*/}"
 
-      - name: 배포 대기 스크립트 준비
-        run: |
-          # 서비스 배포를 시작하고, 끝날 조건이 될 때까지 상태를 확인한다.
-          # 사용법: deploy.sh <서비스> <태스크 정의> <성공으로 볼 단계(공백 구분)>
-          cat > "$RUNNER_TEMP/deploy.sh" <<'EOF'
-          #!/bin/bash
-          set -euo pipefail
-          SERVICE=$1 TASK_DEFINITION=$2 DONE_STAGES=$3
-          STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
-            --task-definition "$TASK_DEFINITION" > /dev/null
-
-          # 이번 update-service로 생긴 배포를 찾는다.
-          DEPLOYMENT=""
-          for i in $(seq 1 30); do
-            DEPLOYMENT=$(aws ecs list-service-deployments --cluster "$CLUSTER" --service "$SERVICE" \
-              --created-at "after=$STARTED" --query 'serviceDeployments[0].serviceDeploymentArn' --output text)
-            [ "$DEPLOYMENT" != "None" ] && [ -n "$DEPLOYMENT" ] && break
-            sleep 5
-          done
-          [ "$DEPLOYMENT" != "None" ] && [ -n "$DEPLOYMENT" ] || { echo "::error::${SERVICE} 배포를 찾지 못함"; exit 1; }
-          echo "${SERVICE} 배포: ${DEPLOYMENT##*/}"
-
-          LAST=""
-          while :; do
-            read -r STATUS STAGE < <(aws ecs describe-service-deployments --service-deployment-arns "$DEPLOYMENT" \
-              --query 'serviceDeployments[0].[status, lifecycleStage]' --output text)
-            [ "$STATUS $STAGE" != "$LAST" ] && { echo "$(date +%T) ${SERVICE}: ${STATUS} ${STAGE}"; LAST="$STATUS $STAGE"; }
-            case "$STATUS" in
-              SUCCESSFUL) exit 0 ;;
-              FAILED|STOPPED|STOP_REQUESTED|ROLLBACK_*)
-                echo "::error::${SERVICE} 배포 실패 (${STATUS}). ECS가 이전 버전으로 되돌린다"; exit 1 ;;
-            esac
-            for done_stage in $DONE_STAGES; do
-              [ "$STAGE" = "$done_stage" ] && exit 0
-            done
-            sleep 10
-          done
-          EOF
-          chmod +x "$RUNNER_TEMP/deploy.sh"
-
       # 같은 job의 배포 잠금을 유지하면서 두 서비스를 동시에 배포한다.
       # realtime은 기존처럼 트래픽 전환까지, API는 롤링 배포 완료까지 기다린다.
       - name: staging realtime 및 API 병렬 배포
         run: |
-          "$RUNNER_TEMP/deploy.sh" "$REALTIME_SERVICE" "${{ steps.register.outputs.task_definition }}" "BAKE_TIME CLEAN_UP" &
+          bash .github/scripts/deploy.sh "$REALTIME_SERVICE" "${{ steps.register.outputs.task_definition }}" "BAKE_TIME CLEAN_UP" &
           REALTIME_PID=$!
-          "$RUNNER_TEMP/deploy.sh" "$API_SERVICE" "${{ steps.register.outputs.task_definition }}" "" &
+          bash .github/scripts/deploy.sh "$API_SERVICE" "${{ steps.register.outputs.task_definition }}" "" &
           API_PID=$!
 
           # 먼저 실패한 서비스가 있어도 나머지 배포 결과를 확인한다.
@@ -454,16 +440,40 @@ jobs:
           exit "$RESULT"
 
       - name: 배포 결과 확인
-        # 한쪽이 실패했을 때도 두 서비스의 최종 상태를 로그에 남긴다.
-        if: ${{ !cancelled() && steps.register.outcome == 'success' }}
+        if: ${{ !cancelled() }}
+        env:
+          DEPLOY_FAILED: ${{ job.status == 'failure' }}
         run: |
+          # 진단 실패와 관계없이 원래 배포 결과를 보존한다.
+          PHASE=after
+          [ "$DEPLOY_FAILED" != true ] || PHASE=failure
           for svc in "$REALTIME_SERVICE" "$API_SERVICE"; do
-            echo "$svc: $(aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
-              --query 'services[0].[runningCount, desiredCount]' --output text)"
+            bash .github/scripts/deploy-diagnostics.sh "$svc" "$PHASE" || true
           done
-          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL")
-          echo "be-api health: $CODE"
-          [ "$CODE" = "200" ] || { echo "::error::be-api health 실패 ($CODE)"; exit 1; }
+          {
+            echo "### BE 배포 결과"
+            echo "- 커밋: $GITHUB_SHA"
+            echo "- 이미지: $IMAGE"
+            echo "- 실행: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "- 진단 전 job 실패 여부: $DEPLOY_FAILED"
+            echo '| 서비스 | 결과 | 소요 시간 | 대상 태스크 정의 |'
+            echo '| --- | --- | --- | --- |'
+            for svc in "$REALTIME_SERVICE" "$API_SERVICE"; do
+              if [ -f "$RUNNER_TEMP/be-deploy-results/$svc.md" ]; then
+                cat "$RUNNER_TEMP/be-deploy-results/$svc.md"
+              else
+                echo "| $svc | 결과 없음 (배포 미시작 또는 중단) | - | - |"
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          # 네트워크 오류도 응답 코드와 구분해서 기록한다.
+          CURL_EXIT=0
+          METRICS=$(curl -sS -o /dev/null -w 'http=%{http_code} seconds=%{time_total}' --max-time 10 "$HEALTH_URL") || CURL_EXIT=$?
+          echo "$(date -u +%FT%TZ) be-api health $METRICS curl_exit=$CURL_EXIT"
+          echo "- API health: $METRICS, curl exit=$CURL_EXIT" >> "$GITHUB_STEP_SUMMARY"
+          [ "$CURL_EXIT" -eq 0 ] && [[ "$METRICS" == http=200\ * ]] || {
+            echo "::error::be-api health 실패 ($METRICS curl_exit=$CURL_EXIT)"; exit 1;
+          }
 
       - name: Discord 실패 알림
         if: failure()
