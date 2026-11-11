@@ -5,6 +5,9 @@ spring:
     redis:
       # Bound synchronous Redis calls during outages; override after observing deployment latency.
       timeout: ${REDIS_COMMAND_TIMEOUT:3s}
+  rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
   jpa:
     open-in-view: false
   task:
