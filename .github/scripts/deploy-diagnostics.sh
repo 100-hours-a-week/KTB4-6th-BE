@@ -37,8 +37,9 @@ for state in "${STATES[@]}"; do
     echo "::warning::${SERVICE} ${state} 태스크 목록 조회 실패 (ecs:ListTasks 권한 확인 필요)"
   fi
 done
-if GROUPS=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query 'services[0].loadBalancers[].targetGroupArn' --output text); then
-  for group in $GROUPS; do
+# GROUPS는 bash 예약 변수(현재 사용자의 그룹 ID)라 대입이 무시되므로 다른 이름을 쓴다.
+if TARGET_GROUPS=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" --query 'services[0].loadBalancers[].targetGroupArn' --output text); then
+  for group in $TARGET_GROUPS; do
     [ "$group" != None ] || continue
     query aws elbv2 describe-target-health --target-group-arn "$group" \
       --query 'TargetHealthDescriptions[].{target:Target,health:TargetHealth}' --output json
