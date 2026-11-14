@@ -187,4 +187,34 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
             @Param("staleBefore") LocalDateTime staleBefore,
             @Param("lastRetryCount") long lastRetryCount,
             @Param("maxRetryCount") long maxRetryCount);
+
+    @Query("""
+            select a.id from AiRequest a
+            where a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.UNPUBLISHED
+              and a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.ACCEPTED
+              and a.nextPublishAt <= :now
+              and a.messagePayload is not null
+              and a.publishRoutingKey is not null
+              and a.processingToken is not null
+              and a.deletedAt is null
+            order by a.id asc
+            """)
+    List<Long> findPublishableIds(@Param("now") LocalDateTime now, Limit limit);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.PUBLISHING,
+                a.publishStartedAt = :now,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.UNPUBLISHED
+              and a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.ACCEPTED
+              and a.nextPublishAt <= :now
+              and a.messagePayload is not null
+              and a.publishRoutingKey is not null
+              and a.processingToken is not null
+              and a.deletedAt is null
+            """)
+    int claimPublish(@Param("id") Long id, @Param("now") LocalDateTime now);
 }
