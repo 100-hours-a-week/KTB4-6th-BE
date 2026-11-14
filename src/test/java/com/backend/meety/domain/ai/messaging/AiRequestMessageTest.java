@@ -2,6 +2,7 @@ package com.backend.meety.domain.ai.messaging;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.backend.meety.domain.ai.client.AiRequestInput;
 import com.backend.meety.domain.ai.client.ChatAiHistoryMessage;
 import com.backend.meety.domain.ai.client.ChatAiRequest;
 import com.backend.meety.domain.ai.client.ChatAiTranscriptSegment;
@@ -13,6 +14,8 @@ import com.backend.meety.domain.ai.client.SummaryAiRequest;
 import com.backend.meety.domain.ai.client.SummaryAiSegment;
 import com.backend.meety.domain.ai.client.SummaryAiSpeaker;
 import com.backend.meety.domain.ai.entity.AiRequestType;
+import java.lang.reflect.RecordComponent;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
@@ -29,9 +32,9 @@ class AiRequestMessageTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("aiInputs")
-    @DisplayName("공통 envelope에 기존 HTTP 요청 본문을 input으로 그대로 담는다")
-    void wrapsHttpRequestBodyAsInput(AiRequestType requestType, Object input) {
-        AiRequestMessage message = AiRequestMessage.create(101L, "token-1", requestType, input);
+    @DisplayName("공통 envelope에 기존 HTTP 요청 본문을 input으로 그대로 담고 requestType은 input에서 정한다")
+    void wrapsHttpRequestBodyAsInput(AiRequestType requestType, AiRequestInput input) {
+        AiRequestMessage message = AiRequestMessage.create(101L, "token-1", input);
 
         JsonNode json = objectMapper.readTree(objectMapper.writeValueAsString(message));
 
@@ -42,6 +45,8 @@ class AiRequestMessageTest {
         assertThat(json.get("processingToken").asString()).isEqualTo("token-1");
         assertThat(json.get("requestType").asString()).isEqualTo(requestType.name());
         assertThat(json.get("input")).isEqualTo(objectMapper.readTree(objectMapper.writeValueAsString(input)));
+        assertThat(json.get("input").propertyNames()).containsExactlyInAnyOrderElementsOf(
+                Arrays.stream(input.getClass().getRecordComponents()).map(RecordComponent::getName).toList());
     }
 
     @Test
