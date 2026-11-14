@@ -1,5 +1,6 @@
 package com.backend.meety.domain.ai.client;
 
+import com.backend.meety.domain.ai.entity.AiRequestType;
 import java.util.List;
 
 public record SummaryAiRequest(
@@ -12,5 +13,10 @@ public record SummaryAiRequest(
         String meetingStartedAt,
         List<SummaryAiSpeaker> speakers,
         List<SummaryAiSegment> segments
-) {
+) implements AiRequestInput {
+
+    @Override
+    public AiRequestType requestType() {
+        return AiRequestType.SUMMARY;
+    }
 }
