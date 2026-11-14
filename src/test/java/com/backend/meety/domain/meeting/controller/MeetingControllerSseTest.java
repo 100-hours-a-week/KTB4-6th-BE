@@ -3,6 +3,7 @@ package com.backend.meety.domain.meeting.controller;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -14,6 +15,8 @@ import com.backend.meety.domain.meeting.service.MeetingParticipantService;
 import com.backend.meety.domain.meeting.service.MeetingService;
 import com.backend.meety.domain.meeting.service.AssistantMeetingCreationService;
 import com.backend.meety.global.exception.GlobalExceptionHandler;
+import jakarta.servlet.AsyncEvent;
+import jakarta.servlet.AsyncListener;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,10 +24,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockAsyncContext;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -75,5 +80,23 @@ class MeetingControllerSseTest {
                 .andExpect(header().string("X-Accel-Buffering", "no"))
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-cache"))
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM));
+    }
+
+    @Test
+    @DisplayName("SSE 타임아웃은 예외 응답을 쓰지 않고 종료한다")
+    void timeoutDoesNotWriteErrorResponse() throws Exception {
+        when(sseService.connect(1L, 100L)).thenReturn(new SseEmitter());
+        MvcResult result = mvc.perform(get("/api/v1/meetings/100/events").accept(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        MockAsyncContext asyncContext = (MockAsyncContext) result.getRequest().getAsyncContext();
+        for (AsyncListener listener : asyncContext.getListeners()) {
+            listener.onTimeout(new AsyncEvent(asyncContext));
+        }
+
+        mvc.perform(asyncDispatch(result))
+                .andExpect(status().isOk())
+                .andExpect(content().string(""));
     }
 }
