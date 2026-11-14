@@ -15,6 +15,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -60,6 +61,25 @@ public class AiRequest extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "failure_reason", length = 30)
     private AiFailureReason failureReason;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "publish_status", length = 30)
+    private PublishStatus publishStatus;
+
+    @Column(name = "message_payload", columnDefinition = "JSON")
+    private String messagePayload;
+
+    @Column(name = "publish_routing_key", length = 50)
+    private String publishRoutingKey;
+
+    @Column(name = "next_publish_at")
+    private LocalDateTime nextPublishAt;
+
+    @Column(name = "publish_started_at")
+    private LocalDateTime publishStartedAt;
+
+    @Column(name = "published_at")
+    private LocalDateTime publishedAt;
 
     private AiRequest(Team team, TeamMember teamMember, String idempotencyKey, AiRequestType requestType) {
         this.team = team;
