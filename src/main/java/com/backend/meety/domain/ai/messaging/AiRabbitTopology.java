@@ -1,5 +1,7 @@
 package com.backend.meety.domain.ai.messaging;
 
+import com.backend.meety.domain.ai.entity.AiRequestType;
+import java.util.Optional;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
@@ -25,4 +27,14 @@ public final class AiRabbitTopology {
     public static final String SPEAKER_EMBEDDING_REQUEST_QUEUE = "meety.ai.speaker-embedding.request";
     public static final String RESPONSE_QUEUE = "meety.ai.response.events";
     public static final String RESPONSE_DLQ = "meety.ai.response.dlq";
+
+    public static Optional<String> requestRoutingKey(AiRequestType requestType) {
+        return switch (requestType) {
+            case SUMMARY -> Optional.of(SUMMARY_ROUTING_KEY);
+            case DIARIZATION -> Optional.of(DIARIZATION_ROUTING_KEY);
+            case METRIC -> Optional.of(METRIC_ROUTING_KEY);
+            case CHAT -> Optional.of(CHAT_ROUTING_KEY);
+            case GLOBAL_CHAT, REPORT -> Optional.empty();
+        };
+    }
 }
