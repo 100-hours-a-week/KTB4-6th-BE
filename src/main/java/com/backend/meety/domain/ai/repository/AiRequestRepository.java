@@ -217,4 +217,30 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
               and a.deletedAt is null
             """)
     int claimPublish(@Param("id") Long id, @Param("now") LocalDateTime now);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.PUBLISHED,
+                a.publishedAt = :publishedAt,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.processingToken = :processingToken
+              and a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.PUBLISHING
+            """)
+    int markPublished(
+            @Param("id") Long id,
+            @Param("processingToken") String processingToken,
+            @Param("publishedAt") LocalDateTime publishedAt);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.UNPUBLISHED,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.processingToken = :processingToken
+              and a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.PUBLISHING
+            """)
+    int revertToUnpublished(@Param("id") Long id, @Param("processingToken") String processingToken);
 }

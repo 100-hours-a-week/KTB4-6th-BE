@@ -28,4 +28,14 @@ public class AiRequestPublishService {
         }
         return aiRequestRepository.findById(aiRequestId).map(AiRequestOutboxRecord::create);
     }
+
+    @Transactional
+    public boolean markPublished(Long aiRequestId, String processingToken) {
+        return aiRequestRepository.markPublished(aiRequestId, processingToken, LocalDateTime.now(clock)) == 1;
+    }
+
+    @Transactional
+    public boolean revertToUnpublished(Long aiRequestId, String processingToken) {
+        return aiRequestRepository.revertToUnpublished(aiRequestId, processingToken) == 1;
+    }
 }

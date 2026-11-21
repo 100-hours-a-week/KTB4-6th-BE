@@ -8,6 +8,8 @@ spring:
   rabbitmq:
     publisher-confirm-type: correlated
     publisher-returns: true
+    template:
+      mandatory: true
   jpa:
     open-in-view: false
   task:
@@ -131,6 +133,10 @@ ai:
       processing-timeout: ${AI_REQUEST_PROCESSING_TIMEOUT:70m}
       poll-delay: ${AI_REQUEST_RECOVERY_POLL_DELAY:1m}
       batch-size: ${AI_REQUEST_RECOVERY_BATCH_SIZE:100}
+    publish:
+      poll-delay: ${AI_REQUEST_PUBLISH_POLL_DELAY:1s}
+      batch-size: ${AI_REQUEST_PUBLISH_BATCH_SIZE:20}
+      confirm-timeout: ${AI_REQUEST_PUBLISH_CONFIRM_TIMEOUT:5s}
 
 sentry:
   dsn: ${SENTRY_DSN:}
