@@ -190,8 +190,8 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
 
     @Query("""
             select a.id from AiRequest a
-            where a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.UNPUBLISHED
-              and a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.ACCEPTED
+            where a.publishStatus = UNPUBLISHED
+              and a.status = ACCEPTED
               and a.nextPublishAt <= :now
               and a.messagePayload is not null
               and a.publishRoutingKey is not null
@@ -204,12 +204,12 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update AiRequest a
-            set a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.PUBLISHING,
+            set a.publishStatus = PUBLISHING,
                 a.publishStartedAt = :now,
                 a.updatedAt = CURRENT_TIMESTAMP
             where a.id = :id
-              and a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.UNPUBLISHED
-              and a.status = com.backend.meety.domain.ai.entity.AiRequestStatus.ACCEPTED
+              and a.publishStatus = UNPUBLISHED
+              and a.status = ACCEPTED
               and a.nextPublishAt <= :now
               and a.messagePayload is not null
               and a.publishRoutingKey is not null
@@ -221,12 +221,12 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update AiRequest a
-            set a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.PUBLISHED,
+            set a.publishStatus = PUBLISHED,
                 a.publishedAt = :publishedAt,
                 a.updatedAt = CURRENT_TIMESTAMP
             where a.id = :id
               and a.processingToken = :processingToken
-              and a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.PUBLISHING
+              and a.publishStatus = PUBLISHING
             """)
     int markPublished(
             @Param("id") Long id,
@@ -236,11 +236,36 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update AiRequest a
-            set a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.UNPUBLISHED,
+            set a.publishStatus = UNPUBLISHED,
                 a.updatedAt = CURRENT_TIMESTAMP
             where a.id = :id
               and a.processingToken = :processingToken
-              and a.publishStatus = com.backend.meety.domain.ai.entity.PublishStatus.PUBLISHING
+              and a.publishStatus = PUBLISHING
             """)
     int revertToUnpublished(@Param("id") Long id, @Param("processingToken") String processingToken);
+
+    @Query("""
+            select a from AiRequest a
+            where a.publishStatus = PUBLISHING
+              and a.publishStartedAt <= :staleBefore
+            order by a.id asc
+            """)
+    List<AiRequest> findStalePublishing(@Param("staleBefore") LocalDateTime staleBefore, Limit limit);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.publishStatus = UNPUBLISHED,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.processingToken = :processingToken
+              and a.publishStatus = PUBLISHING
+              and a.publishStartedAt = :publishStartedAt
+              and a.publishStartedAt <= :staleBefore
+            """)
+    int reclaimStalePublishing(
+            @Param("id") Long id,
+            @Param("processingToken") String processingToken,
+            @Param("publishStartedAt") LocalDateTime publishStartedAt,
+            @Param("staleBefore") LocalDateTime staleBefore);
 }

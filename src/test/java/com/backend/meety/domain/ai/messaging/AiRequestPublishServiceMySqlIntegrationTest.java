@@ -7,6 +7,7 @@ import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.entity.PublishStatus;
 import com.backend.meety.domain.ai.repository.AiRequestMySqlTestSupport;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -30,6 +31,7 @@ import org.springframework.test.context.ContextConfiguration;
 class AiRequestPublishServiceMySqlIntegrationTest extends AiRequestMySqlTestSupport {
 
     static final LocalDateTime NOW = LocalDateTime.of(2026, 11, 14, 12, 0);
+    static final Duration CLAIM_TIMEOUT = Duration.ofMinutes(1);
 
     @Configuration(proxyBeanMethods = false)
     @Import(AiRequestPublishService.class)
@@ -190,6 +192,76 @@ class AiRequestPublishServiceMySqlIntegrationTest extends AiRequestMySqlTestSupp
             executor.shutdownNow();
         }
         assertThat(findRequest(requestId).getPublishStatus()).isEqualTo(PublishStatus.PUBLISHING);
+    }
+
+    @Test
+    @DisplayName("선점 후 만료 시간이 지난 PUBLISHING은 발행 정보를 유지한 채 UNPUBLISHED로 회수한다")
+    void reclaimsStalePublishing() {
+        long requestId = createPublishing(NOW.minus(CLAIM_TIMEOUT).minusSeconds(1));
+        jdbc.update("update ai_requests set retry_count = 1 where id = ?", requestId);
+
+        int reclaimed = publishService.reclaimStalePublishing(CLAIM_TIMEOUT, 10);
+
+        assertThat(reclaimed).isOne();
+        AiRequest request = findRequest(requestId);
+        assertThat(request.getPublishStatus()).isEqualTo(PublishStatus.UNPUBLISHED);
+        assertThat(request.getProcessingToken()).isEqualTo("token-1");
+        assertThat(request.getMessagePayload()).isEqualTo("{\"schemaVersion\": 1}");
+        assertThat(request.getNextPublishAt()).isEqualTo(NOW.minusMinutes(5));
+        assertThat(request.getRetryCount()).isEqualTo(1L);
+        assertThat(publishService.findPublishableIds(10)).contains(requestId);
+    }
+
+    @Test
+    @DisplayName("만료 시간에 정확히 도달한 PUBLISHING도 회수한다")
+    void reclaimsPublishingAtTimeoutBoundary() {
+        long requestId = createPublishing(NOW.minus(CLAIM_TIMEOUT));
+
+        assertThat(publishService.reclaimStalePublishing(CLAIM_TIMEOUT, 10)).isOne();
+        assertThat(findRequest(requestId).getPublishStatus()).isEqualTo(PublishStatus.UNPUBLISHED);
+    }
+
+    @Test
+    @DisplayName("만료 시간이 지나지 않은 PUBLISHING은 회수하지 않는다")
+    void keepsRecentPublishing() {
+        long requestId = createPublishing(NOW.minus(CLAIM_TIMEOUT).plusSeconds(1));
+
+        assertThat(publishService.reclaimStalePublishing(CLAIM_TIMEOUT, 10)).isZero();
+        assertThat(findRequest(requestId).getPublishStatus()).isEqualTo(PublishStatus.PUBLISHING);
+    }
+
+    @Test
+    @DisplayName("PUBLISHED·UNPUBLISHED 요청은 회수 대상이 아니다")
+    void ignoresNonPublishingRequests() {
+        long published = createPublishing(NOW.minusHours(1));
+        long unpublished = createPublishing(NOW.minusHours(1));
+        jdbc.update("update ai_requests set publish_status = 'PUBLISHED' where id = ?", published);
+        jdbc.update("update ai_requests set publish_status = 'UNPUBLISHED' where id = ?", unpublished);
+
+        assertThat(publishService.reclaimStalePublishing(CLAIM_TIMEOUT, 10)).isZero();
+        assertThat(findRequest(published).getPublishStatus()).isEqualTo(PublishStatus.PUBLISHED);
+        assertThat(findRequest(unpublished).getPublishStatus()).isEqualTo(PublishStatus.UNPUBLISHED);
+    }
+
+    @Test
+    @DisplayName("조회 이후 다른 서버가 다시 선점해 선점 시각이 바뀌면 회수하지 않는다")
+    void skipsReclaimWhenClaimChanged() {
+        LocalDateTime observedStartedAt = NOW.minusHours(1);
+        long requestId = createPublishing(observedStartedAt);
+        jdbc.update("update ai_requests set publish_started_at = ? where id = ?", NOW, requestId);
+
+        int reclaimed = transaction.execute(status -> aiRequests.reclaimStalePublishing(
+                requestId, "token-1", observedStartedAt, NOW.minus(CLAIM_TIMEOUT)));
+
+        assertThat(reclaimed).isZero();
+        assertThat(findRequest(requestId).getPublishStatus()).isEqualTo(PublishStatus.PUBLISHING);
+    }
+
+    private long createPublishing(LocalDateTime publishStartedAt) {
+        long requestId = createPublishable(NOW.minusMinutes(5));
+        jdbc.update("update ai_requests set publish_status = 'PUBLISHING', publish_started_at = ? where id = ?",
+                publishStartedAt, requestId);
+        return requestId;
     }
 
     private long createPublishable(LocalDateTime nextPublishAt) {

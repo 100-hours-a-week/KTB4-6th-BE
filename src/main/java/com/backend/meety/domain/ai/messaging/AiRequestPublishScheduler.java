@@ -16,12 +16,24 @@ public class AiRequestPublishScheduler {
 
     @Scheduled(fixedDelayString = "${ai.request.publish.poll-delay}")
     public void publishPending() {
+        reclaimStalePublishing();
         for (Long aiRequestId : publishService.findPublishableIds(properties.batchSize())) {
             try {
                 publishService.claim(aiRequestId).ifPresent(this::publish);
             } catch (RuntimeException e) {
                 log.error("AI 요청 발행 처리 중 오류가 발생했습니다. aiRequestId={}", aiRequestId, e);
             }
+        }
+    }
+
+    private void reclaimStalePublishing() {
+        try {
+            int reclaimed = publishService.reclaimStalePublishing(properties.claimTimeout(), properties.batchSize());
+            if (reclaimed > 0) {
+                log.warn("발행 확인 없이 오래 남은 PUBLISHING 요청을 회수했습니다. reclaimed={}", reclaimed);
+            }
+        } catch (RuntimeException e) {
+            log.error("오래된 PUBLISHING 요청 회수 중 오류가 발생했습니다.", e);
         }
     }
 

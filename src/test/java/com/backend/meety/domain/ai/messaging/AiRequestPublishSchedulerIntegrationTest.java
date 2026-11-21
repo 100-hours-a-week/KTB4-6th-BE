@@ -51,6 +51,7 @@ class AiRequestPublishSchedulerIntegrationTest extends AiRequestMySqlTestSupport
         registry.add("spring.rabbitmq.template.mandatory", () -> "true");
         registry.add("ai.request.publish.batch-size", () -> "20");
         registry.add("ai.request.publish.confirm-timeout", () -> "5s");
+        registry.add("ai.request.publish.claim-timeout", () -> "1m");
     }
 
     @Configuration(proxyBeanMethods = false)
@@ -154,6 +155,23 @@ class AiRequestPublishSchedulerIntegrationTest extends AiRequestMySqlTestSupport
         assertThat(publishService.markPublished(requestId, "token-" + requestId)).isFalse();
 
         assertThat(findRequest(requestId).getPublishStatus()).isEqualTo(PublishStatus.UNPUBLISHED);
+    }
+
+    @Test
+    @DisplayName("만료된 PUBLISHING은 회수 후 같은 주기에 같은 메시지로 다시 발행한다")
+    void reclaimsAndRepublishesStalePublishing() {
+        long requestId = createPublishable("summary");
+        jdbc.update("update ai_requests set publish_status = 'PUBLISHING', publish_started_at = ? where id = ?",
+                NOW.minusMinutes(2), requestId);
+
+        scheduler.publishPending();
+
+        AiRequest request = findRequest(requestId);
+        assertThat(request.getPublishStatus()).isEqualTo(PublishStatus.PUBLISHED);
+        assertThat(request.getProcessingToken()).isEqualTo("token-" + requestId);
+        Message message = rabbitTemplate.receive(AiRabbitTopology.SUMMARY_REQUEST_QUEUE, 5_000);
+        assertThat(message).isNotNull();
+        assertThat(new String(message.getBody(), StandardCharsets.UTF_8)).isEqualTo(request.getMessagePayload());
     }
 
     private long createPublishable(String routingKey) {

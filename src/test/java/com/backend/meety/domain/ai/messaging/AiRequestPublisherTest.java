@@ -21,7 +21,7 @@ class AiRequestPublisherTest {
 
     private final RabbitTemplate rabbitTemplate = mock(RabbitTemplate.class);
     private final AiRequestPublisher publisher = new AiRequestPublisher(
-            rabbitTemplate, new AiRequestPublishProperties(20, Duration.ofMillis(100)));
+            rabbitTemplate, new AiRequestPublishProperties(20, Duration.ofMillis(100), Duration.ofMinutes(1)));
     private final AiRequestOutboxRecord outboxRecord =
             new AiRequestOutboxRecord(101L, "token-1", "summary", "{\"schemaVersion\":1}");
 

@@ -137,6 +137,7 @@ ai:
       poll-delay: ${AI_REQUEST_PUBLISH_POLL_DELAY:1s}
       batch-size: ${AI_REQUEST_PUBLISH_BATCH_SIZE:20}
       confirm-timeout: ${AI_REQUEST_PUBLISH_CONFIRM_TIMEOUT:5s}
+      claim-timeout: ${AI_REQUEST_PUBLISH_CLAIM_TIMEOUT:1m}
 
 sentry:
   dsn: ${SENTRY_DSN:}
