@@ -6,7 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "ai.request.publish")
 public record AiRequestPublishProperties(
         int batchSize,
-        Duration confirmTimeout
+        Duration confirmTimeout,
+        Duration claimTimeout
 ) {
 
     public AiRequestPublishProperties {
@@ -15,6 +16,9 @@ public record AiRequestPublishProperties(
         }
         if (confirmTimeout == null || confirmTimeout.isZero() || confirmTimeout.isNegative()) {
             throw new IllegalArgumentException("ai.request.publish.confirm-timeout must be positive");
+        }
+        if (claimTimeout == null || claimTimeout.compareTo(confirmTimeout) <= 0) {
+            throw new IllegalArgumentException("ai.request.publish.claim-timeout must be longer than confirm-timeout");
         }
     }
 }

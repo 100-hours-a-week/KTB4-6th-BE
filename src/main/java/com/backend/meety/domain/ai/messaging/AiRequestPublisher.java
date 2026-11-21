@@ -37,10 +37,10 @@ public class AiRequestPublisher {
             log.warn("AI 요청 메시지 발행에 실패했습니다. aiRequestId={}", outboxRecord.aiRequestId(), e);
             return AiRequestPublishResult.FAILED;
         }
-        return awaitConfirm(correlation);
+        return awaitPublishConfirm(correlation);
     }
 
-    private AiRequestPublishResult awaitConfirm(CorrelationData correlation) {
+    private AiRequestPublishResult awaitPublishConfirm(CorrelationData correlation) {
         Confirm confirm;
         try {
             confirm = correlation.getFuture().get(properties.confirmTimeout().toMillis(), TimeUnit.MILLISECONDS);

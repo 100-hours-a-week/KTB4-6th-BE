@@ -1,7 +1,9 @@
 package com.backend.meety.domain.ai.messaging;
 
+import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -37,5 +39,16 @@ public class AiRequestPublishService {
     @Transactional
     public boolean revertToUnpublished(Long aiRequestId, String processingToken) {
         return aiRequestRepository.revertToUnpublished(aiRequestId, processingToken) == 1;
+    }
+
+    @Transactional
+    public int reclaimStalePublishing(Duration claimTimeout, int batchSize) {
+        LocalDateTime staleBefore = LocalDateTime.now(clock).minus(claimTimeout);
+        int reclaimed = 0;
+        for (AiRequest aiRequest : aiRequestRepository.findStalePublishing(staleBefore, Limit.of(batchSize))) {
+            reclaimed += aiRequestRepository.reclaimStalePublishing(
+                    aiRequest.getId(), aiRequest.getProcessingToken(), aiRequest.getPublishStartedAt(), staleBefore);
+        }
+        return reclaimed;
     }
 }
