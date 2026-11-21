@@ -268,4 +268,62 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
             @Param("processingToken") String processingToken,
             @Param("publishStartedAt") LocalDateTime publishStartedAt,
             @Param("staleBefore") LocalDateTime staleBefore);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.status = COMPLETED,
+                a.processingToken = null,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.processingToken = :processingToken
+              and a.status = ACCEPTED
+            """)
+    int completeIfCurrent(@Param("id") Long id, @Param("processingToken") String processingToken);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.retryCount = a.retryCount + 1,
+                a.processingToken = :nextProcessingToken,
+                a.messagePayload = :nextMessagePayload,
+                a.publishStatus = UNPUBLISHED,
+                a.nextPublishAt = :nextPublishAt,
+                a.publishStartedAt = null,
+                a.publishedAt = null,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.processingToken = :processingToken
+              and a.status = ACCEPTED
+              and a.retryCount < :lastRetryCount
+            """)
+    int scheduleRetry(
+            @Param("id") Long id,
+            @Param("processingToken") String processingToken,
+            @Param("nextProcessingToken") String nextProcessingToken,
+            @Param("nextMessagePayload") String nextMessagePayload,
+            @Param("nextPublishAt") LocalDateTime nextPublishAt,
+            @Param("lastRetryCount") long lastRetryCount);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.status = FAILED,
+                a.retryCount = case
+                    when a.retryCount < :maxRetryCount then a.retryCount + 1
+                    else a.retryCount
+                end,
+                a.failureReason = AI_CALL_FAILED,
+                a.processingToken = null,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.processingToken = :processingToken
+              and a.status = ACCEPTED
+              and a.retryCount >= :lastRetryCount
+            """)
+    int failIfRetryExhausted(
+            @Param("id") Long id,
+            @Param("processingToken") String processingToken,
+            @Param("lastRetryCount") long lastRetryCount,
+            @Param("maxRetryCount") long maxRetryCount);
 }
