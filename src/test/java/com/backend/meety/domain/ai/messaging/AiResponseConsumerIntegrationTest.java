@@ -15,6 +15,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.amqp.autoconfigure.RabbitAutoConfiguration;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -40,12 +41,15 @@ class AiResponseConsumerIntegrationTest extends AiRequestMySqlTestSupport {
         registry.add("spring.rabbitmq.port", RABBIT::getAmqpPort);
         registry.add("spring.rabbitmq.username", RABBIT::getAdminUsername);
         registry.add("spring.rabbitmq.password", RABBIT::getAdminPassword);
+        registry.add("ai.response.save-max-attempts", () -> "3");
+        registry.add("ai.response.save-retry-interval", () -> "10ms");
     }
 
     @Configuration(proxyBeanMethods = false)
     @ImportAutoConfiguration(RabbitAutoConfiguration.class)
+    @EnableConfigurationProperties(AiResponseProperties.class)
     @Import({AiRabbitTopologyConfig.class, AiResponseConsumer.class, AiResponseService.class,
-            AiResponseMessageParser.class})
+            AiResponseMessageParser.class, AiResponseConsumerControl.class})
     static class ConsumerConfig {
 
         @Bean

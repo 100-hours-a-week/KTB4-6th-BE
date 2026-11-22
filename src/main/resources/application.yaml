@@ -138,6 +138,10 @@ ai:
       batch-size: ${AI_REQUEST_PUBLISH_BATCH_SIZE:20}
       confirm-timeout: ${AI_REQUEST_PUBLISH_CONFIRM_TIMEOUT:5s}
       claim-timeout: ${AI_REQUEST_PUBLISH_CLAIM_TIMEOUT:1m}
+  response:
+    save-max-attempts: ${AI_RESPONSE_SAVE_MAX_ATTEMPTS:3}
+    save-retry-interval: ${AI_RESPONSE_SAVE_RETRY_INTERVAL:1s}
+    resume-check-delay: ${AI_RESPONSE_RESUME_CHECK_DELAY:30s}
 
 sentry:
   dsn: ${SENTRY_DSN:}
