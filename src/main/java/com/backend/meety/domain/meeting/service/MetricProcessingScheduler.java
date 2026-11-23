@@ -29,7 +29,7 @@ public class MetricProcessingScheduler {
 
     @Scheduled(fixedDelay = MetricPolicy.SCHEDULER_POLL_DELAY_MILLIS)
     public void processAcceptedMetrics() {
-        List<AiRequest> targets = aiRequestRepository.findByRequestTypeAndStatusOrderByIdAsc(
+        List<AiRequest> targets = aiRequestRepository.findHttpProcessingTargets(
                 AiRequestType.METRIC, AiRequestStatus.ACCEPTED, Limit.of(MetricPolicy.SCHEDULER_BATCH_SIZE));
         for (AiRequest target : targets) {
             processOne(target.getId());

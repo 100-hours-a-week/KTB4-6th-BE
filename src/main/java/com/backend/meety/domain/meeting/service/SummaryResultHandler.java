@@ -18,8 +18,9 @@ public class SummaryResultHandler implements AiResultHandler {
     }
 
     @Override
-    public void handleSucceeded(Long aiRequestId, JsonNode result) {
+    public boolean handleSucceeded(Long aiRequestId, JsonNode result) {
         summaryProcessingService.completeSummary(aiRequestId, result.path("content").asString());
+        return true;
     }
 
     @Override

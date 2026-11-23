@@ -79,8 +79,23 @@ public class MetricProcessingService {
             log.info("현재 Attempt가 아닌 Metric 성공 응답을 무시합니다. aiRequestId={}", aiRequestId);
             return;
         }
-        aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
-        summary = findSummaryFor(aiRequest).orElseThrow();
+        saveMetric(aiRequestId, response);
+    }
+
+    @Transactional
+    public boolean completeMetric(Long aiRequestId, MetricAiResponse response) {
+        AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
+        MeetingSummary summary = findSummaryFor(aiRequest).orElse(null);
+        if (summary == null || !isValidResponse(aiRequest, summary, response)) {
+            return false;
+        }
+        saveMetric(aiRequestId, response);
+        return true;
+    }
+
+    private void saveMetric(Long aiRequestId, MetricAiResponse response) {
+        AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
+        MeetingSummary summary = findSummaryFor(aiRequest).orElseThrow();
         if (meetingMetricRepository.existsByAiRequestId(aiRequestId)) {
             log.info("이미 저장된 Metric 응답을 건너뜁니다. aiRequestId={}", aiRequestId);
             return;

@@ -51,7 +51,13 @@ public class AiResponseService {
             log.info("이미 처리했거나 현재 실행이 아닌 AI 성공 응답을 무시합니다. aiRequestId={}", message.aiRequestId());
             return;
         }
-        handler.handleSucceeded(message.aiRequestId(), message.result());
+        if (handler.handleSucceeded(message.aiRequestId(), message.result())) {
+            return;
+        }
+        aiRequestRepository.failInvalidResult(message.aiRequestId());
+        log.error("요청과 맞지 않는 AI 성공 결과라 최종 실패로 처리합니다. aiRequestId={}, requestType={}",
+                message.aiRequestId(), message.requestType());
+        handler.handleFinalFailure(message.aiRequestId());
     }
 
     private void handleFailed(AiResponseMessage message, AiResultHandler handler) {

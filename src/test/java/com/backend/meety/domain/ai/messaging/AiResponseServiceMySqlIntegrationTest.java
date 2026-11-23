@@ -63,6 +63,7 @@ class AiResponseServiceMySqlIntegrationTest extends AiRequestMySqlTestSupport {
         final List<Long> succeeded = new CopyOnWriteArrayList<>();
         final List<JsonNode> results = new CopyOnWriteArrayList<>();
         final List<Long> finalFailures = new CopyOnWriteArrayList<>();
+        volatile boolean acceptResult = true;
 
         @Override
         public AiRequestType requestType() {
@@ -70,9 +71,10 @@ class AiResponseServiceMySqlIntegrationTest extends AiRequestMySqlTestSupport {
         }
 
         @Override
-        public void handleSucceeded(Long aiRequestId, JsonNode result) {
+        public boolean handleSucceeded(Long aiRequestId, JsonNode result) {
             succeeded.add(aiRequestId);
             results.add(result);
+            return acceptResult;
         }
 
         @Override
@@ -91,6 +93,21 @@ class AiResponseServiceMySqlIntegrationTest extends AiRequestMySqlTestSupport {
         handler.succeeded.clear();
         handler.results.clear();
         handler.finalFailures.clear();
+        handler.acceptResult = true;
+    }
+
+    @Test
+    @DisplayName("처리기가 성공 결과를 받아들이지 않으면 최종 실패로 처리하고 실패 후속 처리를 호출한다")
+    void failsWhenHandlerRejectsResult() {
+        long requestId = createPublished("token-1", 0);
+        handler.acceptResult = false;
+
+        responseService.handle(succeeded(requestId, "token-1"));
+
+        AiRequest request = findRequest(requestId);
+        assertThat(request.getStatus()).isEqualTo(AiRequestStatus.FAILED);
+        assertThat(request.getFailureReason()).isEqualTo(AiFailureReason.AI_CALL_FAILED);
+        assertThat(handler.finalFailures).containsExactly(requestId);
     }
 
     @Test

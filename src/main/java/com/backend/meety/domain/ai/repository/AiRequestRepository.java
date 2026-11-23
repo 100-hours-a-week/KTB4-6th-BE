@@ -336,4 +336,15 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
             """)
     List<AiRequest> findHttpProcessingTargets(
             @Param("requestType") AiRequestType requestType, @Param("status") AiRequestStatus status, Limit limit);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update AiRequest a
+            set a.status = FAILED,
+                a.failureReason = AI_CALL_FAILED,
+                a.updatedAt = CURRENT_TIMESTAMP
+            where a.id = :id
+              and a.status = COMPLETED
+            """)
+    int failInvalidResult(@Param("id") Long id);
 }

@@ -55,7 +55,7 @@ class MetricProcessingSchedulerTest {
     void setUp() {
         team = team();
         member = member(team);
-        when(aiRequests.findByRequestTypeAndStatusOrderByIdAsc(
+        when(aiRequests.findHttpProcessingTargets(
                 AiRequestType.METRIC, AiRequestStatus.ACCEPTED, Limit.of(MetricPolicy.SCHEDULER_BATCH_SIZE)))
                 .thenReturn(List.of(request(900L)));
     }

@@ -354,6 +354,28 @@ class MetricProcessingServiceTest {
     }
 
     @Test
+    @DisplayName("MQ 성공 결과가 요청과 맞으면 MeetingMetric을 저장하고 수락한다")
+    void completeMetricSavesValidResult() {
+        MetricAiResponse response = new MetricAiResponse("900", 100L, new MetricAiOffTopic(1000L), List.of());
+
+        boolean accepted = service.completeMetric(900L, response);
+
+        assertThat(accepted).isTrue();
+        verify(metrics).save(any(MeetingMetric.class));
+    }
+
+    @Test
+    @DisplayName("MQ 성공 결과의 requestId·meetingId가 요청과 다르면 저장하지 않고 거절한다")
+    void completeMetricRejectsMismatchedResult() {
+        assertThat(service.completeMetric(900L,
+                new MetricAiResponse("901", 100L, new MetricAiOffTopic(1L), List.of()))).isFalse();
+        assertThat(service.completeMetric(900L,
+                new MetricAiResponse("900", 101L, new MetricAiOffTopic(1L), List.of()))).isFalse();
+
+        verify(metrics, never()).save(any(MeetingMetric.class));
+    }
+
+    @Test
     @DisplayName("재시도 한도 미만 실패면 ACCEPTED로 되돌린다")
     void retryableFailureRequeuesRequest() {
         // 테스트 목적:
