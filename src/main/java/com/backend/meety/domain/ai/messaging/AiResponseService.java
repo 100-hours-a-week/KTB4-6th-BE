@@ -67,27 +67,28 @@ public class AiResponseService {
             log.info("이미 처리했거나 현재 실행이 아닌 AI 실패 응답을 무시합니다. aiRequestId={}", message.aiRequestId());
             return;
         }
-        if (aiRequest.getRetryCount() < AiResponseRetryPolicy.LAST_RETRY_COUNT) {
-            scheduleRetry(aiRequest, message);
+        long maxRetryCount = handler.maxRetryCount();
+        long lastRetryCount = maxRetryCount - 1;
+        if (aiRequest.getRetryCount() < lastRetryCount) {
+            scheduleRetry(aiRequest, message, lastRetryCount);
             return;
         }
         if (aiRequestRepository.failIfRetryExhausted(aiRequest.getId(), message.processingToken(),
-                AiResponseRetryPolicy.LAST_RETRY_COUNT, AiResponseRetryPolicy.MAX_RETRY_COUNT) == 1) {
+                lastRetryCount, maxRetryCount) == 1) {
             log.error("AI 작업이 최종 실패했습니다. aiRequestId={}, requestType={}, errorCode={}",
                     aiRequest.getId(), message.requestType(), message.error().code());
             handler.handleFinalFailure(aiRequest.getId());
         }
     }
 
-    private void scheduleRetry(AiRequest aiRequest, AiResponseMessage message) {
+    private void scheduleRetry(AiRequest aiRequest, AiResponseMessage message, long lastRetryCount) {
         String nextProcessingToken = UUID.randomUUID().toString();
         ObjectNode nextPayload = (ObjectNode) objectMapper.readTree(aiRequest.getMessagePayload());
         nextPayload.put("processingToken", nextProcessingToken);
         LocalDateTime nextPublishAt = LocalDateTime.now(clock)
                 .plus(AiResponseRetryPolicy.backoff(aiRequest.getRetryCount()));
         if (aiRequestRepository.scheduleRetry(aiRequest.getId(), message.processingToken(), nextProcessingToken,
-                objectMapper.writeValueAsString(nextPayload), nextPublishAt,
-                AiResponseRetryPolicy.LAST_RETRY_COUNT) == 1) {
+                objectMapper.writeValueAsString(nextPayload), nextPublishAt, lastRetryCount) == 1) {
             log.warn("AI 작업 실패로 재시도를 예약했습니다. aiRequestId={}, errorCode={}, retryCount={}, nextPublishAt={}",
                     aiRequest.getId(), message.error().code(), aiRequest.getRetryCount() + 1, nextPublishAt);
         }

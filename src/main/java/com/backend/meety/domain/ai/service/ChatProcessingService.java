@@ -44,6 +44,7 @@ public class ChatProcessingService {
     public Optional<ChatAiRequest> startProcessing(Long aiRequestId) {
         return chatbotMessageRepository.findWithRequestByAiRequestId(aiRequestId)
                 .filter(message -> message.getAiRequest().isAccepted())
+                .filter(message -> message.getAiRequest().getPublishStatus() == null)
                 .map(this::markProcessing);
     }
 
@@ -59,6 +60,19 @@ public class ChatProcessingService {
         TeamCredit credit = lockCredit(teamId);
         findProcessingMessage(aiRequestId, ChatResultType.FAILURE)
                 .ifPresent(message -> failMessage(message, credit));
+    }
+
+    @Transactional
+    public void completeAnswer(Long aiRequestId, String answer, List<ChatAiCitation> citations) {
+        AiChatbotMessage message = chatbotMessageRepository.findWithRequestByAiRequestId(aiRequestId).orElseThrow();
+        lockCredit(message.getAiRequest().getTeam().getId());
+        completeMessage(message, answer, citations);
+    }
+
+    @Transactional
+    public void failAnswer(Long aiRequestId) {
+        AiChatbotMessage message = chatbotMessageRepository.findWithRequestByAiRequestId(aiRequestId).orElseThrow();
+        failMessage(message, lockCredit(message.getAiRequest().getTeam().getId()));
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)

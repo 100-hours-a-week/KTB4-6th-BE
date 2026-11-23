@@ -10,6 +10,7 @@ import static com.backend.meety.domain.recording.RecordingFixtures.withId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -17,6 +18,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.backend.meety.domain.ai.ChatPolicy;
+import com.backend.meety.domain.ai.client.ChatAiRequest;
 import com.backend.meety.domain.ai.dto.ChatCreateResponse;
 import com.backend.meety.domain.ai.dto.ChatListResponse;
 import com.backend.meety.domain.ai.dto.ChatMessageResponse;
@@ -26,9 +28,11 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.entity.ChatInputType;
+import com.backend.meety.domain.ai.entity.PublishStatus;
 import com.backend.meety.domain.ai.event.ChatFailedEvent;
 import com.backend.meety.domain.ai.event.ChatRequestedEvent;
 import com.backend.meety.domain.ai.exception.AiChatErrorCode;
+import com.backend.meety.domain.ai.messaging.AiRequestMessageWriter;
 import com.backend.meety.domain.ai.repository.AiChatbotMessageRepository;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.credit.TestCreditPolicy;
@@ -60,6 +64,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Limit;
 import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.databind.ObjectMapper;
 
 class AiChatServiceTest {
 
@@ -74,9 +79,11 @@ class AiChatServiceTest {
     private final TeamCreditRepository credits = mock(TeamCreditRepository.class);
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
     private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+    private final ChatAiRequestFactory chatAiRequestFactory = mock(ChatAiRequestFactory.class);
     private final AiChatService service = new AiChatService(
             meetings, members, participants, aiRequests, messages, credits, ledgers,
-            TestCreditPolicy.DEFAULT, new ChatFailureHandler(ledgers, TestCreditPolicy.DEFAULT), events, CLOCK);
+            TestCreditPolicy.DEFAULT, new ChatFailureHandler(ledgers, TestCreditPolicy.DEFAULT), chatAiRequestFactory,
+            new AiRequestMessageWriter(aiRequests, new ObjectMapper(), CLOCK), events, CLOCK);
 
     private Team team;
     private TeamMember member;
@@ -100,6 +107,22 @@ class AiChatServiceTest {
         when(messages.findByMeetingIdAndAiRequestStatusIn(100L, PROCESSING)).thenReturn(List.of());
         when(aiRequests.save(any(AiRequest.class))).thenAnswer(call -> withId(call.getArgument(0), 900L));
         when(messages.save(any(AiChatbotMessage.class))).thenAnswer(call -> withId(call.getArgument(0), 8801L));
+        when(chatAiRequestFactory.create(any(AiChatbotMessage.class)))
+                .thenReturn(new ChatAiRequest(900L, 100L, 2L, "질문", List.of(), List.of()));
+    }
+
+    @Test
+    @DisplayName("질문을 접수하면 같은 트랜잭션에서 챗봇 발행 메시지를 저장한다")
+    void writesChatMessageOnAccept() {
+        service.requestChat(1L, 100L, "chat-key", ChatInputType.TEXT, "결정 사항이 뭐였지?");
+
+        ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiRequests, atLeastOnce()).save(captor.capture());
+        AiRequest aiRequest = captor.getValue();
+        assertThat(aiRequest.getPublishStatus()).isEqualTo(PublishStatus.UNPUBLISHED);
+        assertThat(aiRequest.getPublishRoutingKey()).isEqualTo("chat");
+        assertThat(aiRequest.getMessagePayload()).contains("\"requestType\":\"CHAT\"")
+                .contains("\"question\":\"질문\"");
     }
 
     @Test
@@ -112,7 +135,7 @@ class AiChatServiceTest {
         assertThat(response.creditBalance()).isEqualTo(9L);
 
         ArgumentCaptor<AiRequest> request = ArgumentCaptor.forClass(AiRequest.class);
-        verify(aiRequests).save(request.capture());
+        verify(aiRequests, atLeastOnce()).save(request.capture());
         assertThat(request.getValue().getRequestType()).isEqualTo(AiRequestType.CHAT);
         assertThat(request.getValue().getIdempotencyKey()).isEqualTo(IDEMPOTENCY_KEY);
 

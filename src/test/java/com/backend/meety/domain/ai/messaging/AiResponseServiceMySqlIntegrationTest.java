@@ -64,6 +64,7 @@ class AiResponseServiceMySqlIntegrationTest extends AiRequestMySqlTestSupport {
         final List<JsonNode> results = new CopyOnWriteArrayList<>();
         final List<Long> finalFailures = new CopyOnWriteArrayList<>();
         volatile boolean acceptResult = true;
+        volatile long maxRetryCount = AiResponseRetryPolicy.MAX_RETRY_COUNT;
 
         @Override
         public AiRequestType requestType() {
@@ -81,6 +82,11 @@ class AiResponseServiceMySqlIntegrationTest extends AiRequestMySqlTestSupport {
         public void handleFinalFailure(Long aiRequestId) {
             finalFailures.add(aiRequestId);
         }
+
+        @Override
+        public long maxRetryCount() {
+            return maxRetryCount;
+        }
     }
 
     @Autowired
@@ -94,6 +100,7 @@ class AiResponseServiceMySqlIntegrationTest extends AiRequestMySqlTestSupport {
         handler.results.clear();
         handler.finalFailures.clear();
         handler.acceptResult = true;
+        handler.maxRetryCount = AiResponseRetryPolicy.MAX_RETRY_COUNT;
     }
 
     @Test
@@ -222,6 +229,20 @@ class AiResponseServiceMySqlIntegrationTest extends AiRequestMySqlTestSupport {
         assertThat(request.getFailureReason()).isEqualTo(AiFailureReason.AI_CALL_FAILED);
         assertThat(request.getRetryCount()).isEqualTo(3L);
         assertThat(request.getProcessingToken()).isNull();
+        assertThat(handler.finalFailures).containsExactly(requestId);
+    }
+
+    @Test
+    @DisplayName("처리기의 최대 재시도 횟수가 1이면 첫 실패를 재시도 없이 최종 실패로 처리한다")
+    void failsWithoutRetryWhenHandlerAllowsOneAttempt() {
+        handler.maxRetryCount = 1;
+        long requestId = createPublished("token-1", 0);
+
+        responseService.handle(failedResponse(requestId, "token-1"));
+
+        AiRequest request = findRequest(requestId);
+        assertThat(request.getStatus()).isEqualTo(AiRequestStatus.FAILED);
+        assertThat(request.getRetryCount()).isEqualTo(1L);
         assertThat(handler.finalFailures).containsExactly(requestId);
     }
 

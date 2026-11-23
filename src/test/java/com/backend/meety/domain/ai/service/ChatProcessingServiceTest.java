@@ -85,6 +85,41 @@ class ChatProcessingServiceTest {
     }
 
     @Test
+    @DisplayName("MQ로 보낼 질문은 HTTP로 처리하지 않는다")
+    void skipsMqQuestion() {
+        aiRequest.awaitPublishInput();
+
+        assertThat(service.startProcessing(900L)).isEmpty();
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
+        verify(factory, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("MQ 답변을 저장하고 완료 이벤트를 발행한다")
+    void completesMqAnswer() {
+        aiRequest.markCompleted();
+        when(citationResolver.resolve(2L, 900L, List.of())).thenReturn("[]");
+
+        service.completeAnswer(900L, "답변입니다", List.of());
+
+        assertThat(message.getAnswer()).isEqualTo("답변입니다");
+        assertThat(message.getAnsweredAt()).isEqualTo(NOW);
+        verify(credits).findByTeamIdForUpdate(2L);
+        verify(events).publishEvent(new ChatCompletedEvent(100L, 8801L));
+    }
+
+    @Test
+    @DisplayName("MQ 최종 실패면 크레딧을 돌려주고 실패 이벤트를 발행한다")
+    void failsMqAnswer() {
+        aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
+
+        service.failAnswer(900L);
+
+        assertThat(credit.getBalance()).isEqualTo(10L);
+        verify(events).publishEvent(new ChatFailedEvent(100L, 8801L, 10L));
+    }
+
+    @Test
     @DisplayName("이미 실패 처리된 질문은 AI를 호출하지 않는다")
     void skipsQuestionNoLongerAccepted() {
         aiRequest.markFailed(AiFailureReason.AI_CALL_FAILED);
