@@ -23,8 +23,9 @@ class SummaryResultHandlerTest {
     @Test
     @DisplayName("성공 결과의 content로 요약을 완료한다")
     void completesSummaryWithContent() {
-        handler.handleSucceeded(101L, new ObjectMapper().readTree("{\"content\":\"요약 내용\"}"));
+        boolean accepted = handler.handleSucceeded(101L, new ObjectMapper().readTree("{\"content\":\"요약 내용\"}"));
 
+        assertThat(accepted).isTrue();
         verify(summaryProcessingService).completeSummary(101L, "요약 내용");
     }
 

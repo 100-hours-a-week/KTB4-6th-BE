@@ -71,7 +71,8 @@ class AiResponseConsumerIntegrationTest extends AiRequestMySqlTestSupport {
                 }
 
                 @Override
-                public void handleSucceeded(Long aiRequestId, JsonNode result) {
+                public boolean handleSucceeded(Long aiRequestId, JsonNode result) {
+                    return true;
                 }
 
                 @Override

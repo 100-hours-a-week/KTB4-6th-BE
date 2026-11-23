@@ -7,7 +7,7 @@ public interface AiResultHandler {
 
     AiRequestType requestType();
 
-    void handleSucceeded(Long aiRequestId, JsonNode result);
+    boolean handleSucceeded(Long aiRequestId, JsonNode result);
 
     void handleFinalFailure(Long aiRequestId);
 }

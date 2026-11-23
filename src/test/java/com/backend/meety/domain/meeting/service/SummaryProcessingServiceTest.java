@@ -13,6 +13,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,6 +23,8 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
+import com.backend.meety.domain.ai.entity.PublishStatus;
+import com.backend.meety.domain.ai.messaging.AiRequestMessageWriter;
 import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
@@ -39,6 +42,7 @@ import com.backend.meety.domain.meeting.repository.MeetingSummaryRepository;
 import com.backend.meety.domain.team.entity.Team;
 import com.backend.meety.domain.team.entity.TeamMember;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -47,6 +51,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
+import tools.jackson.databind.ObjectMapper;
 
 class SummaryProcessingServiceTest {
 
@@ -58,7 +63,8 @@ class SummaryProcessingServiceTest {
     private final ApplicationEventPublisher eventPublisher = mock(ApplicationEventPublisher.class);
     private final SummaryProcessingService service = new SummaryProcessingService(
             aiRequests, summaries, credits, ledgers, TestCreditPolicy.DEFAULT,
-            new SummaryAiRequestFactory(transcripts), eventPublisher);
+            new SummaryAiRequestFactory(transcripts), new MetricAiRequestFactory(transcripts),
+            new AiRequestMessageWriter(aiRequests, new ObjectMapper(), Clock.systemDefaultZone()), eventPublisher);
 
     private Team team;
     private TeamMember member;
@@ -83,6 +89,10 @@ class SummaryProcessingServiceTest {
             return 1;
         });
         when(aiRequests.findById(900L)).thenReturn(Optional.of(aiRequest));
+        when(aiRequests.save(any(AiRequest.class))).thenAnswer(invocation -> {
+            AiRequest saved = invocation.getArgument(0);
+            return saved.getId() == null ? withId(saved, 950L) : saved;
+        });
         when(summaries.findByAiRequestId(900L)).thenReturn(Optional.of(summary));
         when(transcripts.findAllByMeetingIdOrderBySequence(100L)).thenReturn(List.of());
         when(aiRequests.completeProcessing(anyLong(), anyString())).thenAnswer(invocation -> {
@@ -228,10 +238,14 @@ class SummaryProcessingServiceTest {
 
         // then
         ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
-        verify(aiRequests).save(captor.capture());
+        verify(aiRequests, times(2)).save(captor.capture());
         AiRequest metricRequest = captor.getValue();
         assertThat(metricRequest.getRequestType()).isEqualTo(AiRequestType.METRIC);
         assertThat(metricRequest.getIdempotencyKey()).isEqualTo(MetricPolicy.idempotencyKey(503L));
+        assertThat(metricRequest.getPublishStatus()).isEqualTo(PublishStatus.UNPUBLISHED);
+        assertThat(metricRequest.getPublishRoutingKey()).isEqualTo("metric");
+        assertThat(metricRequest.getMessagePayload()).contains("\"requestType\":\"METRIC\"")
+                .contains("\"summary\":\"## 최초 요약\"");
         assertThat(metricRequest.getTeam()).isSameAs(team);
         assertThat(metricRequest.getTeamMember()).isSameAs(member);
     }
@@ -251,10 +265,11 @@ class SummaryProcessingServiceTest {
 
         // then
         ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
-        verify(aiRequests).save(captor.capture());
+        verify(aiRequests, times(2)).save(captor.capture());
         AiRequest metricRequest = captor.getValue();
         assertThat(metricRequest.getRequestType()).isEqualTo(AiRequestType.METRIC);
         assertThat(metricRequest.getIdempotencyKey()).isEqualTo(MetricPolicy.idempotencyKey(502L));
+        assertThat(metricRequest.getPublishStatus()).isEqualTo(PublishStatus.UNPUBLISHED);
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.backend.meety.domain.ai.client.SummaryAiRequest;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
+import com.backend.meety.domain.ai.messaging.AiRequestMessageWriter;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.credit.CreditPolicy;
@@ -38,6 +39,8 @@ public class SummaryProcessingService {
     private final CreditLedgerRepository creditLedgerRepository;
     private final CreditPolicy creditPolicy;
     private final SummaryAiRequestFactory summaryAiRequestFactory;
+    private final MetricAiRequestFactory metricAiRequestFactory;
+    private final AiRequestMessageWriter aiRequestMessageWriter;
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
@@ -132,8 +135,9 @@ public class SummaryProcessingService {
             return;
         }
         try {
-            aiRequestRepository.save(AiRequest.create(
+            AiRequest metricRequest = aiRequestRepository.save(AiRequest.create(
                     summary.getTeam(), summaryRequest.getTeamMember(), idempotencyKey, AiRequestType.METRIC));
+            aiRequestMessageWriter.write(metricRequest, metricAiRequestFactory.create(metricRequest, summary));
         } catch (DataIntegrityViolationException e) {
             log.warn("Metric 요청이 이미 등록되어 건너뜁니다. summaryId={}, idempotencyKey={}",
                     summary.getId(), idempotencyKey, e);
