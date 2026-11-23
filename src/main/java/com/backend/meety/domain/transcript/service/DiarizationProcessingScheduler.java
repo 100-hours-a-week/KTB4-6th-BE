@@ -29,7 +29,7 @@ public class DiarizationProcessingScheduler {
 
     @Scheduled(fixedDelay = DiarizationPolicy.SCHEDULER_POLL_DELAY_MILLIS)
     public void processAcceptedDiarizations() {
-        List<AiRequest> targets = aiRequestRepository.findByRequestTypeAndStatusOrderByIdAsc(
+        List<AiRequest> targets = aiRequestRepository.findHttpProcessingTargets(
                 AiRequestType.DIARIZATION, AiRequestStatus.ACCEPTED,
                 Limit.of(DiarizationPolicy.SCHEDULER_BATCH_SIZE));
         for (AiRequest target : targets) {

@@ -1,5 +1,6 @@
 package com.backend.meety.domain.ai.messaging;
 
+import com.backend.meety.global.config.SchedulingConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -14,7 +15,8 @@ public class AiRequestPublishScheduler {
     private final AiRequestPublisher publisher;
     private final AiRequestPublishProperties properties;
 
-    @Scheduled(fixedDelayString = "${ai.request.publish.poll-delay}")
+    @Scheduled(fixedDelayString = "${ai.request.publish.poll-delay}",
+            scheduler = SchedulingConfig.AI_MESSAGING_TASK_SCHEDULER_BEAN_NAME)
     public void publishPending() {
         reclaimStalePublishing();
         for (Long aiRequestId : publishService.findPublishableIds(properties.batchSize())) {

@@ -13,6 +13,9 @@ public class SchedulingConfig {
     public static final String DEFAULT_TASK_SCHEDULER_BEAN_NAME = "taskScheduler";
     public static final String CONNECTION_TASK_SCHEDULER_BEAN_NAME = "connectionTaskScheduler";
     public static final String RECORDING_STOP_RECONCILIATION_SCHEDULER_BEAN_NAME = "recordingStopTaskScheduler";
+    public static final String AI_MESSAGING_TASK_SCHEDULER_BEAN_NAME = "aiMessagingTaskScheduler";
+
+    private static final int AI_MESSAGING_POOL_SIZE = 3;
 
     @Bean(name = DEFAULT_TASK_SCHEDULER_BEAN_NAME)
     public ThreadPoolTaskScheduler taskScheduler(ThreadPoolTaskSchedulerBuilder builder) {
@@ -32,6 +35,14 @@ public class SchedulingConfig {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
         scheduler.setPoolSize(1);
         scheduler.setThreadNamePrefix("recording-stop-reconciliation-");
+        return scheduler;
+    }
+
+    @Bean(name = AI_MESSAGING_TASK_SCHEDULER_BEAN_NAME)
+    public ThreadPoolTaskScheduler aiMessagingTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(AI_MESSAGING_POOL_SIZE);
+        scheduler.setThreadNamePrefix("ai-messaging-");
         return scheduler;
     }
 }

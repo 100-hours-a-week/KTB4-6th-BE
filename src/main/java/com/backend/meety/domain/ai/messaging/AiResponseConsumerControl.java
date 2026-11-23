@@ -1,5 +1,6 @@
 package com.backend.meety.domain.ai.messaging;
 
+import com.backend.meety.global.config.SchedulingConfig;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.concurrent.CompletableFuture;
@@ -31,7 +32,8 @@ public class AiResponseConsumerControl {
         CompletableFuture.runAsync(listenerContainer()::stop);
     }
 
-    @Scheduled(fixedDelayString = "${ai.response.resume-check-delay}")
+    @Scheduled(fixedDelayString = "${ai.response.resume-check-delay}",
+            scheduler = SchedulingConfig.AI_MESSAGING_TASK_SCHEDULER_BEAN_NAME)
     public void resumeIfDatabaseAvailable() {
         if (!stoppedByDatabaseFailure.get() || !isDatabaseAvailable()) {
             return;

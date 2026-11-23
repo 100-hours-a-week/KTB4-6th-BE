@@ -25,11 +25,14 @@ import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
+import com.backend.meety.domain.ai.entity.PublishStatus;
+import com.backend.meety.domain.ai.messaging.AiRequestMessageWriter;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.meeting.entity.Meeting;
 import com.backend.meety.domain.meeting.repository.MeetingRepository;
 import com.backend.meety.domain.recording.entity.AudioFile;
+import com.backend.meety.domain.recording.entity.AudioFilePolicy;
 import com.backend.meety.domain.recording.entity.RecordingSession;
 import com.backend.meety.domain.recording.repository.AudioFileRepository;
 import com.backend.meety.domain.recording.repository.RecordingSessionRepository;
@@ -50,6 +53,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 class DiarizationServiceTest {
 
@@ -66,7 +71,8 @@ class DiarizationServiceTest {
     private final AudioFileRepository audioFiles = mock(AudioFileRepository.class);
     private final AudioFileStorage storage = mock(AudioFileStorage.class);
     private final DiarizationService service = new DiarizationService(
-            aiRequests, meetings, sessions, segments, speakers, audioFiles, storage, CLOCK);
+            aiRequests, meetings, sessions, segments, speakers, audioFiles, storage, CLOCK,
+            new AiRequestMessageWriter(aiRequests, new ObjectMapper(), CLOCK));
 
     private Team team;
     private TeamMember member;
@@ -93,6 +99,7 @@ class DiarizationServiceTest {
             return 1;
         });
         when(aiRequests.findById(AI_REQUEST_ID)).thenReturn(Optional.of(aiRequest));
+        when(aiRequests.findByIdForUpdate(AI_REQUEST_ID)).thenReturn(Optional.of(aiRequest));
         when(meetings.findByIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.of(meeting));
         when(sessions.findByIdAndDeletedAtIsNull(SESSION_ID)).thenReturn(Optional.of(session));
         when(segments.findAllByMeetingIdOrderBySequence(MEETING_ID)).thenReturn(List.of(first, second));
@@ -149,6 +156,106 @@ class DiarizationServiceTest {
         assertThat(captor.getValue().getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
         assertThat(captor.getValue().getIdempotencyKey()).isEqualTo(KEY);
         assertThat(captor.getValue().getTeamMember()).isSameAs(member);
+        assertThat(captor.getValue().getPublishStatus()).isEqualTo(PublishStatus.UNPUBLISHED);
+        assertThat(captor.getValue().getMessagePayload()).isNull();
+    }
+
+    @Test
+    @DisplayName("오디오가 준비되면 presigned URL과 전사 구간으로 화자 분리 발행 메시지를 저장한다")
+    void writesMessageWhenAudioAvailable() {
+        aiRequest.awaitPublishInput();
+        when(audioFiles.findByMeetingIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.of(availableAudio()));
+
+        service.writeMessageWhenInputReady(AI_REQUEST_ID);
+
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
+        assertThat(aiRequest.getPublishStatus()).isEqualTo(PublishStatus.UNPUBLISHED);
+        assertThat(aiRequest.getPublishRoutingKey()).isEqualTo("diarization");
+        JsonNode payload = new ObjectMapper().readTree(aiRequest.getMessagePayload());
+        assertThat(payload.get("requestType").asString()).isEqualTo("DIARIZATION");
+        assertThat(payload.get("processingToken").asString()).isEqualTo(aiRequest.getProcessingToken());
+        assertThat(payload.get("input").get("requestId").asString()).isEqualTo("900");
+        assertThat(payload.get("input").get("audioUrl").asString()).startsWith("https://");
+        assertThat(payload.get("input").get("segments")).hasSize(2);
+        verify(storage).createDownloadUrl("meetings/100.mp4", AudioFilePolicy.DOWNLOAD_URL_VALIDITY);
+        verify(aiRequests, never()).claimAccepted(anyLong(), anyString());
+    }
+
+    @Test
+    @DisplayName("오디오가 아직 없으면 발행 메시지를 저장하지 않고 기다린다")
+    void waitsForAudioBeforeWritingMessage() {
+        aiRequest.awaitPublishInput();
+        ReflectionTestUtils.setField(aiRequest, "createdAt", NOW.minusMinutes(1));
+        when(audioFiles.findByMeetingIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.empty());
+
+        service.writeMessageWhenInputReady(AI_REQUEST_ID);
+
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
+        assertThat(aiRequest.getMessagePayload()).isNull();
+        verify(storage, never()).createDownloadUrl(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("오디오 대기 한도를 넘기면 발행 메시지 없이 AUDIO_FILE_MISSING으로 실패 처리한다")
+    void failsWhenAudioWaitExceededBeforeWritingMessage() {
+        aiRequest.awaitPublishInput();
+        ReflectionTestUtils.setField(aiRequest, "createdAt", NOW.minusMinutes(11));
+        when(audioFiles.findByMeetingIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.empty());
+
+        service.writeMessageWhenInputReady(AI_REQUEST_ID);
+
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
+        assertThat(aiRequest.getFailureReason()).isEqualTo(AiFailureReason.AUDIO_FILE_MISSING);
+        assertThat(aiRequest.getMessagePayload()).isNull();
+    }
+
+    @Test
+    @DisplayName("전사가 없으면 발행 메시지 없이 TRANSCRIPT_EMPTY로 실패 처리한다")
+    void failsWithoutTranscriptBeforeWritingMessage() {
+        aiRequest.awaitPublishInput();
+        when(audioFiles.findByMeetingIdAndDeletedAtIsNull(MEETING_ID)).thenReturn(Optional.of(availableAudio()));
+        when(segments.findAllByMeetingIdOrderBySequence(MEETING_ID)).thenReturn(List.of());
+
+        service.writeMessageWhenInputReady(AI_REQUEST_ID);
+
+        assertThat(aiRequest.getStatus()).isEqualTo(AiRequestStatus.FAILED);
+        assertThat(aiRequest.getFailureReason()).isEqualTo(AiFailureReason.TRANSCRIPT_EMPTY);
+        assertThat(aiRequest.getMessagePayload()).isNull();
+    }
+
+    @Test
+    @DisplayName("이미 발행 메시지가 저장된 요청은 다시 준비하지 않는다")
+    void skipsWhenMessageAlreadyWritten() {
+        aiRequest.preparePublish("token-x", "{}", "diarization", NOW);
+
+        service.writeMessageWhenInputReady(AI_REQUEST_ID);
+
+        assertThat(aiRequest.getProcessingToken()).isEqualTo("token-x");
+        verify(audioFiles, never()).findByMeetingIdAndDeletedAtIsNull(anyLong());
+    }
+
+    @Test
+    @DisplayName("MQ 화자 분리 결과가 회의와 맞으면 화자를 연결하고 수락한다")
+    void completeDiarizationAssignsSpeakers() {
+        DiarizationAiResponse response = new DiarizationAiResponse(MEETING_ID, List.of(
+                new DiarizationAiResultSegment(101L, "첫 발화", 0L, 1000L, 1L)));
+
+        assertThat(service.completeDiarization(AI_REQUEST_ID, response)).isTrue();
+
+        assertThat(first.getTranscriptSpeaker()).isNotNull();
+        verify(speakers).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("MQ 화자 분리 결과의 meetingId가 다르면 화자를 연결하지 않고 거절한다")
+    void completeDiarizationRejectsMeetingMismatch() {
+        DiarizationAiResponse response = new DiarizationAiResponse(MEETING_ID + 1, List.of(
+                new DiarizationAiResultSegment(101L, "첫 발화", 0L, 1000L, 1L)));
+
+        assertThat(service.completeDiarization(AI_REQUEST_ID, response)).isFalse();
+
+        assertThat(first.getTranscriptSpeaker()).isNull();
+        verify(speakers, never()).saveAll(any());
     }
 
     @Test

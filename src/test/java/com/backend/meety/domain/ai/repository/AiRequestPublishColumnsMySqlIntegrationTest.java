@@ -84,6 +84,21 @@ class AiRequestPublishColumnsMySqlIntegrationTest extends AiRequestMySqlTestSupp
     }
 
     @Test
+    @DisplayName("입력 준비 대기 조회는 발행 메시지가 없는 UNPUBLISHED 요청만 반환한다")
+    void findsRequestsAwaitingPublishInput() {
+        long awaiting = createRequest(AiRequestType.DIARIZATION);
+        long written = createRequest(AiRequestType.DIARIZATION);
+        long legacy = createRequest(AiRequestType.DIARIZATION);
+        jdbc.update("update ai_requests set publish_status = 'UNPUBLISHED' where id in (?, ?)", awaiting, written);
+        jdbc.update("update ai_requests set message_payload = '{}' where id = ?", written);
+
+        List<Long> ids = transaction.execute(status ->
+                aiRequests.findIdsAwaitingPublishInput(AiRequestType.DIARIZATION, Limit.of(10)));
+
+        assertThat(ids).containsExactly(awaiting);
+    }
+
+    @Test
     @DisplayName("운영 반영 SQL을 적용하면 기존 행은 NULL로 남고 엔티티 스키마 검증을 통과한다")
     void migrationKeepsExistingRowsUnpublishable() {
         long legacyRequestId = createRequest(AiRequestType.SUMMARY);

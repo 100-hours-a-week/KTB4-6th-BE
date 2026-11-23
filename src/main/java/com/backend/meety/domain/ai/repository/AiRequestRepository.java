@@ -3,11 +3,13 @@ package com.backend.meety.domain.ai.repository;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -347,4 +349,18 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
               and a.status = COMPLETED
             """)
     int failInvalidResult(@Param("id") Long id);
+
+    @Query("""
+            select a.id from AiRequest a
+            where a.requestType = :requestType
+              and a.status = ACCEPTED
+              and a.publishStatus = UNPUBLISHED
+              and a.messagePayload is null
+            order by a.id asc
+            """)
+    List<Long> findIdsAwaitingPublishInput(@Param("requestType") AiRequestType requestType, Limit limit);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from AiRequest a where a.id = :id")
+    Optional<AiRequest> findByIdForUpdate(@Param("id") Long id);
 }

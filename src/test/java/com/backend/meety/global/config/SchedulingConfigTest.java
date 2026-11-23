@@ -2,6 +2,10 @@ package com.backend.meety.global.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.backend.meety.domain.ai.messaging.AiRequestPublishScheduler;
+import com.backend.meety.domain.ai.messaging.AiResponseConsumerControl;
+import com.backend.meety.domain.transcript.service.DiarizationInputScheduler;
+import java.lang.reflect.Method;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -16,6 +20,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 class SchedulingConfigTest {
 
@@ -54,6 +59,22 @@ class SchedulingConfigTest {
                 tasks.release.countDown();
             }
         });
+    }
+
+    @Test
+    @DisplayName("MQ 발행·입력 준비·Consumer 재개 작업은 AI 메시징 전용 스케줄러에서 실행된다")
+    void runsAiMessagingTasksOnDedicatedScheduler() throws NoSuchMethodException {
+        Method[] tasks = {
+                AiRequestPublishScheduler.class.getMethod("publishPending"),
+                DiarizationInputScheduler.class.getMethod("writeReadyMessages"),
+                AiResponseConsumerControl.class.getMethod("resumeIfDatabaseAvailable")
+        };
+
+        assertThat(tasks).allSatisfy(task -> assertThat(task.getAnnotation(Scheduled.class).scheduler())
+                .isEqualTo(SchedulingConfig.AI_MESSAGING_TASK_SCHEDULER_BEAN_NAME));
+        contextRunner.run(context -> assertThat(context.getBean(
+                SchedulingConfig.AI_MESSAGING_TASK_SCHEDULER_BEAN_NAME, ThreadPoolTaskScheduler.class)
+                .getThreadNamePrefix()).isEqualTo("ai-messaging-"));
     }
 
     @Configuration
