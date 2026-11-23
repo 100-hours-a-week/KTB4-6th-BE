@@ -11,13 +11,17 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.backend.meety.domain.ai.client.SummaryAiRequest;
 import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
+import com.backend.meety.domain.ai.entity.PublishStatus;
+import com.backend.meety.domain.ai.messaging.AiRequestMessageWriter;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
@@ -43,7 +47,10 @@ import com.backend.meety.domain.team.repository.TeamMemberRepository;
 import com.backend.meety.domain.transcript.repository.TranscriptSegmentRepository;
 import com.backend.meety.global.exception.BaseCode;
 import com.backend.meety.global.exception.BusinessException;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,10 +59,15 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 class MeetingSummaryServiceTest {
 
     private static final String IDEMPOTENCY_KEY = "11111111-2222-3333-4444-555555555555";
+    private static final Instant NOW = Instant.parse("2026-11-23T03:00:00Z");
+    private static final SummaryAiRequest SUMMARY_INPUT = new SummaryAiRequest(
+            "900", 100L, "회의", "", "", null, "2026-11-23T12:00:00+09:00", List.of(), List.of());
     private static final List<AiRequestStatus> PROCESSING = List.of(
             AiRequestStatus.ACCEPTED, AiRequestStatus.PROCESSING);
 
@@ -67,9 +79,11 @@ class MeetingSummaryServiceTest {
     private final TeamCreditRepository credits = mock(TeamCreditRepository.class);
     private final CreditLedgerRepository ledgers = mock(CreditLedgerRepository.class);
     private final RecordingSessionRepository recordings = mock(RecordingSessionRepository.class);
+    private final SummaryAiRequestFactory summaryAiRequestFactory = mock(SummaryAiRequestFactory.class);
     private final MeetingSummaryService service = new MeetingSummaryService(
             meetings, members, transcripts, summaries, aiRequests, credits, ledgers, recordings,
-            TestCreditPolicy.DEFAULT);
+            TestCreditPolicy.DEFAULT, summaryAiRequestFactory,
+            new AiRequestMessageWriter(aiRequests, new ObjectMapper(), Clock.fixed(NOW, ZoneId.systemDefault())));
 
     private Team team;
     private TeamMember member;
@@ -94,6 +108,17 @@ class MeetingSummaryServiceTest {
         when(summaries.countByMeetingId(100L)).thenReturn(1L);
         when(summaries.saveAndFlush(any(MeetingSummary.class)))
                 .thenAnswer(call -> withId(call.getArgument(0), 502L));
+        when(summaryAiRequestFactory.create(any(AiRequest.class), any(MeetingSummary.class))).thenReturn(SUMMARY_INPUT);
+    }
+
+    @Test
+    @DisplayName("재생성 요청은 같은 트랜잭션에서 요약 발행 메시지를 저장한다")
+    void writesMessageOnRegenerate() {
+        service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null);
+
+        ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
+        verify(aiRequests, times(2)).save(captor.capture());
+        assertPreparedForSummary(captor.getValue(), 900L);
     }
 
     @Test
@@ -127,7 +152,7 @@ class MeetingSummaryServiceTest {
         service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null);
 
         ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
-        verify(aiRequests).save(captor.capture());
+        verify(aiRequests, times(2)).save(captor.capture());
         AiRequest request = captor.getValue();
         assertThat(request.getRequestType()).isEqualTo(AiRequestType.SUMMARY);
         assertThat(request.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
@@ -310,12 +335,13 @@ class MeetingSummaryServiceTest {
             service.registerFirstSummary(100L, 700L);
 
             ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
-            verify(aiRequests).save(captor.capture());
+            verify(aiRequests, times(2)).save(captor.capture());
             assertThat(captor.getValue().getIdempotencyKey()).isEqualTo(AUTO_KEY);
             assertThat(captor.getValue().getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
             verify(summaries).saveAndFlush(any(MeetingSummary.class));
             verify(credits, never()).findByTeamIdForUpdate(anyLong());
             verify(ledgers, never()).save(any());
+            assertPreparedForSummary(captor.getValue(), 901L);
         }
 
         @Test
@@ -330,6 +356,8 @@ class MeetingSummaryServiceTest {
             assertThat(captor.getValue().getStatus()).isEqualTo(AiRequestStatus.FAILED);
             assertThat(captor.getValue().getFailureReason()).isEqualTo(AiFailureReason.TRANSCRIPT_EMPTY);
             verify(summaries).saveAndFlush(any(MeetingSummary.class));
+            assertThat(captor.getValue().getPublishStatus()).isNull();
+            assertThat(captor.getValue().getMessagePayload()).isNull();
         }
 
         @Test
@@ -362,6 +390,18 @@ class MeetingSummaryServiceTest {
 
             verify(aiRequests, never()).save(any());
         }
+    }
+
+    private void assertPreparedForSummary(AiRequest aiRequest, long aiRequestId) {
+        assertThat(aiRequest.getPublishStatus()).isEqualTo(PublishStatus.UNPUBLISHED);
+        assertThat(aiRequest.getPublishRoutingKey()).isEqualTo("summary");
+        assertThat(aiRequest.getNextPublishAt()).isEqualTo(LocalDateTime.ofInstant(NOW, ZoneId.systemDefault()));
+        assertThat(aiRequest.getProcessingToken()).isNotBlank();
+        JsonNode payload = new ObjectMapper().readTree(aiRequest.getMessagePayload());
+        assertThat(payload.get("aiRequestId").asLong()).isEqualTo(aiRequestId);
+        assertThat(payload.get("processingToken").asString()).isEqualTo(aiRequest.getProcessingToken());
+        assertThat(payload.get("requestType").asString()).isEqualTo("SUMMARY");
+        assertThat(payload.get("input").get("meetingId").asLong()).isEqualTo(100L);
     }
 
     private void assertCode(Runnable action, BaseCode expected) {

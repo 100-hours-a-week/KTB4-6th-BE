@@ -66,6 +66,11 @@ public class SummaryProcessingService {
             log.info("현재 Attempt가 아닌 요약 성공 응답을 무시합니다. aiRequestId={}", aiRequestId);
             return;
         }
+        completeSummary(aiRequestId, content);
+    }
+
+    @Transactional
+    public void completeSummary(Long aiRequestId, String content) {
         AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
         MeetingSummary summary = meetingSummaryRepository.findByAiRequestId(aiRequestId).orElseThrow();
         summary.complete(content);
@@ -111,7 +116,7 @@ public class SummaryProcessingService {
     }
 
     @Transactional
-    public void restoreCreditAfterStaleFailure(Long aiRequestId) {
+    public void restoreCreditIfFailed(Long aiRequestId) {
         AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElse(null);
         if (aiRequest == null
                 || aiRequest.getRequestType() != AiRequestType.SUMMARY

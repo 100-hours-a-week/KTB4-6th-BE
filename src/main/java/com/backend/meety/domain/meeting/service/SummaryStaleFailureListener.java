@@ -15,7 +15,7 @@ public class SummaryStaleFailureListener {
     @EventListener
     public void restoreCredit(StaleAiRequestFailedEvent event) {
         if (event.requestType() == AiRequestType.SUMMARY) {
-            summaryProcessingService.restoreCreditAfterStaleFailure(event.aiRequestId());
+            summaryProcessingService.restoreCreditIfFailed(event.aiRequestId());
         }
     }
 }
