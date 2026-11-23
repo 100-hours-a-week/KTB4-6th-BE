@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -20,7 +21,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.entity.PublishStatus;
-import com.backend.meety.domain.ai.messaging.AiRequestPublishPreparer;
+import com.backend.meety.domain.ai.messaging.AiRequestMessageWriter;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.credit.TestCreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
@@ -82,7 +83,7 @@ class MeetingSummaryServiceTest {
     private final MeetingSummaryService service = new MeetingSummaryService(
             meetings, members, transcripts, summaries, aiRequests, credits, ledgers, recordings,
             TestCreditPolicy.DEFAULT, summaryAiRequestFactory,
-            new AiRequestPublishPreparer(new ObjectMapper(), Clock.fixed(NOW, ZoneId.systemDefault())));
+            new AiRequestMessageWriter(aiRequests, new ObjectMapper(), Clock.fixed(NOW, ZoneId.systemDefault())));
 
     private Team team;
     private TeamMember member;
@@ -111,12 +112,12 @@ class MeetingSummaryServiceTest {
     }
 
     @Test
-    @DisplayName("재생성 요청은 같은 트랜잭션에서 요약 발행 메시지를 준비한다")
-    void preparesPublishOnRegenerate() {
+    @DisplayName("재생성 요청은 같은 트랜잭션에서 요약 발행 메시지를 저장한다")
+    void writesMessageOnRegenerate() {
         service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null);
 
         ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
-        verify(aiRequests).save(captor.capture());
+        verify(aiRequests, times(2)).save(captor.capture());
         assertPreparedForSummary(captor.getValue(), 900L);
     }
 
@@ -151,7 +152,7 @@ class MeetingSummaryServiceTest {
         service.requestSummary(1L, 100L, IDEMPOTENCY_KEY, null);
 
         ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
-        verify(aiRequests).save(captor.capture());
+        verify(aiRequests, times(2)).save(captor.capture());
         AiRequest request = captor.getValue();
         assertThat(request.getRequestType()).isEqualTo(AiRequestType.SUMMARY);
         assertThat(request.getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
@@ -334,7 +335,7 @@ class MeetingSummaryServiceTest {
             service.registerFirstSummary(100L, 700L);
 
             ArgumentCaptor<AiRequest> captor = ArgumentCaptor.forClass(AiRequest.class);
-            verify(aiRequests).save(captor.capture());
+            verify(aiRequests, times(2)).save(captor.capture());
             assertThat(captor.getValue().getIdempotencyKey()).isEqualTo(AUTO_KEY);
             assertThat(captor.getValue().getStatus()).isEqualTo(AiRequestStatus.ACCEPTED);
             verify(summaries).saveAndFlush(any(MeetingSummary.class));
