@@ -125,6 +125,10 @@ public class AiRequest extends BaseEntity {
         this.retryCount++;
     }
 
+    public void awaitPublishInput() {
+        this.publishStatus = PublishStatus.UNPUBLISHED;
+    }
+
     public void preparePublish(String processingToken, String messagePayload, String publishRoutingKey,
                                LocalDateTime nextPublishAt) {
         this.processingToken = processingToken;

@@ -55,7 +55,7 @@ class DiarizationProcessingSchedulerTest {
     void setUp() {
         team = team();
         member = member(team);
-        when(aiRequests.findByRequestTypeAndStatusOrderByIdAsc(
+        when(aiRequests.findHttpProcessingTargets(
                 AiRequestType.DIARIZATION, AiRequestStatus.ACCEPTED,
                 Limit.of(DiarizationPolicy.SCHEDULER_BATCH_SIZE)))
                 .thenReturn(List.of(request(900L)));

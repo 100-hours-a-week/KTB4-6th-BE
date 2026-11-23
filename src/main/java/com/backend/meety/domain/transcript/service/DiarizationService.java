@@ -7,6 +7,7 @@ import com.backend.meety.domain.ai.client.DiarizationAiSegment;
 import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestType;
+import com.backend.meety.domain.ai.messaging.AiRequestMessageWriter;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.ai.service.AiProcessingAttempt;
 import com.backend.meety.domain.meeting.entity.Meeting;
@@ -51,6 +52,7 @@ public class DiarizationService {
     private final AudioFileRepository audioFileRepository;
     private final AudioFileStorage audioFileStorage;
     private final Clock clock;
+    private final AiRequestMessageWriter aiRequestMessageWriter;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void register(Long meetingId, Long recordingSessionId) {
@@ -70,8 +72,51 @@ public class DiarizationService {
         if (!transcriptSegmentRepository.existsByMeetingId(meetingId)) {
             aiRequest.markFailed(AiFailureReason.TRANSCRIPT_EMPTY);
             log.warn("전사가 없어 화자 분리를 실패로 등록합니다. meetingId={}", meetingId);
+        } else {
+            aiRequest.awaitPublishInput();
         }
         aiRequestRepository.save(aiRequest);
+    }
+
+    @Transactional
+    public void writeMessageWhenInputReady(Long aiRequestId) {
+        AiRequest aiRequest = aiRequestRepository.findByIdForUpdate(aiRequestId).orElse(null);
+        if (aiRequest == null || !aiRequest.isAccepted() || aiRequest.getMessagePayload() != null) {
+            return;
+        }
+        Long meetingId = DiarizationPolicy.meetingIdOf(aiRequest.getIdempotencyKey());
+        AudioFile audioFile = audioFileRepository.findByMeetingIdAndDeletedAtIsNull(meetingId)
+                .filter(AudioFile::isAvailable)
+                .orElse(null);
+        if (audioFile == null) {
+            if (isAudioWaitExceeded(aiRequest)) {
+                aiRequest.markFailed(AiFailureReason.AUDIO_FILE_MISSING);
+                log.warn("오디오 파일이 올라오지 않아 화자 분리를 실패 처리합니다. aiRequestId={}, meetingId={}",
+                        aiRequestId, meetingId);
+            }
+            return;
+        }
+        List<DiarizationAiSegment> segments = transcriptSegmentRepository
+                .findAllByMeetingIdOrderBySequence(meetingId).stream()
+                .map(this::toSegment)
+                .toList();
+        if (segments.isEmpty()) {
+            aiRequest.markFailed(AiFailureReason.TRANSCRIPT_EMPTY);
+            log.warn("전사가 없어 화자 분리를 실패 처리합니다. aiRequestId={}, meetingId={}", aiRequestId, meetingId);
+            return;
+        }
+        String audioUrl;
+        try {
+            audioUrl = audioFileStorage
+                    .createDownloadUrl(audioFile.getStorageKey(), AudioFilePolicy.DOWNLOAD_URL_VALIDITY)
+                    .toString();
+        } catch (Exception e) {
+            log.error("화자 분리용 S3 presigned 다운로드 URL 발급에 실패했습니다. aiRequestId={}, audioFileId={}",
+                    aiRequestId, audioFile.getId(), e);
+            return;
+        }
+        aiRequestMessageWriter.write(aiRequest,
+                new DiarizationAiRequest(String.valueOf(aiRequest.getId()), meetingId, audioUrl, segments));
     }
 
     /**
@@ -138,6 +183,24 @@ public class DiarizationService {
             log.info("현재 Attempt가 아닌 화자 분리 성공 응답을 무시합니다. aiRequestId={}", aiRequestId);
             return;
         }
+        assignSpeakers(aiRequestId, meetingId, response);
+    }
+
+    @Transactional
+    public boolean completeDiarization(Long aiRequestId, DiarizationAiResponse response) {
+        AiRequest aiRequest = aiRequestRepository.findById(aiRequestId).orElseThrow();
+        Long meetingId = DiarizationPolicy.meetingIdOf(aiRequest.getIdempotencyKey());
+        Meeting meeting = meetingRepository.findByIdAndDeletedAtIsNull(meetingId).orElse(null);
+        if (meeting == null || !meetingId.equals(response.meetingId())) {
+            log.error("화자 분리 응답이 회의와 일치하지 않습니다. aiRequestId={}, meetingId={}, responseMeetingId={}",
+                    aiRequestId, meetingId, response.meetingId());
+            return false;
+        }
+        assignSpeakers(aiRequestId, meetingId, response);
+        return true;
+    }
+
+    private void assignSpeakers(Long aiRequestId, Long meetingId, DiarizationAiResponse response) {
         Meeting resultMeeting = meetingRepository.findByIdAndDeletedAtIsNull(meetingId).orElseThrow();
         Map<Long, TranscriptSegment> segmentsById = transcriptSegmentRepository
                 .findAllByMeetingIdOrderBySequence(meetingId).stream()
