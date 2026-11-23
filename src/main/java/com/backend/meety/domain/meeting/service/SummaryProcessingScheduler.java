@@ -28,7 +28,7 @@ public class SummaryProcessingScheduler {
 
     @Scheduled(fixedDelay = SummaryPolicy.SCHEDULER_POLL_DELAY_MILLIS)
     public void processAcceptedSummaries() {
-        List<AiRequest> targets = aiRequestRepository.findByRequestTypeAndStatusOrderByIdAsc(
+        List<AiRequest> targets = aiRequestRepository.findHttpProcessingTargets(
                 AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED, Limit.of(SummaryPolicy.SCHEDULER_BATCH_SIZE));
         for (AiRequest target : targets) {
             processOne(target.getId());

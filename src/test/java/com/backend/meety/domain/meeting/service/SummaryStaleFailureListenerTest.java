@@ -29,7 +29,7 @@ class SummaryStaleFailureListenerTest {
         listener.restoreCredit(event);
 
         // then
-        verify(summaryProcessingService).restoreCreditAfterStaleFailure(90L);
+        verify(summaryProcessingService).restoreCreditIfFailed(90L);
     }
 
     @Test
@@ -49,7 +49,7 @@ class SummaryStaleFailureListenerTest {
         listener.restoreCredit(metric);
 
         // then
-        verify(summaryProcessingService, never()).restoreCreditAfterStaleFailure(91L);
-        verify(summaryProcessingService, never()).restoreCreditAfterStaleFailure(92L);
+        verify(summaryProcessingService, never()).restoreCreditIfFailed(91L);
+        verify(summaryProcessingService, never()).restoreCreditIfFailed(92L);
     }
 }

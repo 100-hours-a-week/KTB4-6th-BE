@@ -4,11 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.backend.meety.domain.ai.entity.AiRequest;
+import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.entity.PublishStatus;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Limit;
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
 
 class AiRequestPublishColumnsMySqlIntegrationTest extends AiRequestMySqlTestSupport {
@@ -63,6 +66,21 @@ class AiRequestPublishColumnsMySqlIntegrationTest extends AiRequestMySqlTestSupp
         assertThat(request.getNextPublishAt()).isEqualTo(nextPublishAt);
         assertThat(request.getPublishStartedAt()).isEqualTo(publishStartedAt);
         assertThat(request.getPublishedAt()).isEqualTo(publishedAt);
+    }
+
+    @Test
+    @DisplayName("HTTP 처리 대상 조회는 발행 상태가 있는 MQ 요청을 제외한다")
+    void findsOnlyHttpProcessingTargets() {
+        long legacy = createRequest(AiRequestType.SUMMARY);
+        long mq = createRequest(AiRequestType.SUMMARY);
+        jdbc.update("update ai_requests set publish_status = 'UNPUBLISHED' where id = ?", mq);
+
+        List<Long> targetIds = transaction.execute(status -> aiRequests.findHttpProcessingTargets(
+                AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED, Limit.of(10)).stream()
+                .map(AiRequest::getId)
+                .toList());
+
+        assertThat(targetIds).containsExactly(legacy);
     }
 
     @Test

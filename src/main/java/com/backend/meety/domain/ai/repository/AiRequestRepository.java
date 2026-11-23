@@ -326,4 +326,14 @@ public interface AiRequestRepository extends JpaRepository<AiRequest, Long> {
             @Param("processingToken") String processingToken,
             @Param("lastRetryCount") long lastRetryCount,
             @Param("maxRetryCount") long maxRetryCount);
+
+    @Query("""
+            select a from AiRequest a
+            where a.requestType = :requestType
+              and a.status = :status
+              and a.publishStatus is null
+            order by a.id asc
+            """)
+    List<AiRequest> findHttpProcessingTargets(
+            @Param("requestType") AiRequestType requestType, @Param("status") AiRequestStatus status, Limit limit);
 }

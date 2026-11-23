@@ -60,7 +60,7 @@ class SummaryProcessingSchedulerTest {
     @Test
     @DisplayName("성공하면 결과를 저장한다")
     void processesAcceptedRequest() {
-        when(aiRequests.findByRequestTypeAndStatusOrderByIdAsc(
+        when(aiRequests.findHttpProcessingTargets(
                 AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED, Limit.of(SummaryPolicy.SCHEDULER_BATCH_SIZE)))
                 .thenReturn(List.of(request(900L)));
         when(processingService.startProcessing(900L))
@@ -76,7 +76,7 @@ class SummaryProcessingSchedulerTest {
     @Test
     @DisplayName("AI 호출이 실패해도 다음 건을 계속 처리한다")
     void continuesAfterFailure() {
-        when(aiRequests.findByRequestTypeAndStatusOrderByIdAsc(
+        when(aiRequests.findHttpProcessingTargets(
                 AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED, Limit.of(SummaryPolicy.SCHEDULER_BATCH_SIZE)))
                 .thenReturn(List.of(request(900L), request(901L)));
         when(processingService.startProcessing(anyLong()))
@@ -95,7 +95,7 @@ class SummaryProcessingSchedulerTest {
     @Test
     @DisplayName("4xx 응답이면 재시도 없이 즉시 실패 처리한다")
     void failsPermanentlyOnClientError() {
-        when(aiRequests.findByRequestTypeAndStatusOrderByIdAsc(
+        when(aiRequests.findHttpProcessingTargets(
                 AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED, Limit.of(SummaryPolicy.SCHEDULER_BATCH_SIZE)))
                 .thenReturn(List.of(request(900L)));
         when(processingService.startProcessing(900L))
@@ -113,7 +113,7 @@ class SummaryProcessingSchedulerTest {
     @Test
     @DisplayName("429 응답은 일시적 과부하이므로 재시도한다")
     void retriesOnTooManyRequests() {
-        when(aiRequests.findByRequestTypeAndStatusOrderByIdAsc(
+        when(aiRequests.findHttpProcessingTargets(
                 AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED, Limit.of(SummaryPolicy.SCHEDULER_BATCH_SIZE)))
                 .thenReturn(List.of(request(900L)));
         when(processingService.startProcessing(900L))
@@ -131,7 +131,7 @@ class SummaryProcessingSchedulerTest {
     @Test
     @DisplayName("선점당한 요청은 AI를 호출하지 않는다")
     void skipsWhenStartProcessingRejects() {
-        when(aiRequests.findByRequestTypeAndStatusOrderByIdAsc(
+        when(aiRequests.findHttpProcessingTargets(
                 AiRequestType.SUMMARY, AiRequestStatus.ACCEPTED, Limit.of(SummaryPolicy.SCHEDULER_BATCH_SIZE)))
                 .thenReturn(List.of(request(900L)));
         when(processingService.startProcessing(900L)).thenReturn(Optional.empty());

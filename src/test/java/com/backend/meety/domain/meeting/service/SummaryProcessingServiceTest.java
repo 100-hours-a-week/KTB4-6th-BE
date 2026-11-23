@@ -382,7 +382,7 @@ class SummaryProcessingServiceTest {
         when(credits.findByTeamIdForUpdate(2L)).thenReturn(Optional.of(teamCredit));
 
         // when
-        service.restoreCreditAfterStaleFailure(900L);
+        service.restoreCreditIfFailed(900L);
 
         // then
         assertThat(teamCredit.getBalance()).isEqualTo(980L);

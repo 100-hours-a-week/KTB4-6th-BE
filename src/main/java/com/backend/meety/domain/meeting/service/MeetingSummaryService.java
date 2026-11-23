@@ -4,6 +4,7 @@ import com.backend.meety.domain.ai.entity.AiFailureReason;
 import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestStatus;
 import com.backend.meety.domain.ai.entity.AiRequestType;
+import com.backend.meety.domain.ai.messaging.AiRequestPublishPreparer;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.credit.CreditPolicy;
 import com.backend.meety.domain.credit.entity.CreditLedger;
@@ -58,6 +59,8 @@ public class MeetingSummaryService {
     private final CreditLedgerRepository creditLedgerRepository;
     private final RecordingSessionRepository recordingSessionRepository;
     private final CreditPolicy creditPolicy;
+    private final SummaryAiRequestFactory summaryAiRequestFactory;
+    private final AiRequestPublishPreparer publishPreparer;
 
     @Transactional
     public SummaryCreateResponse requestSummary(
@@ -80,6 +83,7 @@ public class MeetingSummaryService {
                 AiRequest.create(meeting.getTeam(), member, idempotencyKey, AiRequestType.SUMMARY));
         useCredit(credit, meeting.getTeam(), aiRequest.getId());
         MeetingSummary summary = createNextVersion(aiRequest, meeting, normalizeReason(reason));
+        publishPreparer.prepare(aiRequest, summaryAiRequestFactory.create(aiRequest, summary));
         return SummaryCreateResponse.of(summary, credit.getBalance());
     }
 
@@ -117,7 +121,10 @@ public class MeetingSummaryService {
 
         AiRequest aiRequest = createFirstSummaryRequest(meeting, recordingSessionId, idempotencyKey);
         aiRequestRepository.save(aiRequest);
-        createNextVersion(aiRequest, meeting, null);
+        MeetingSummary summary = createNextVersion(aiRequest, meeting, null);
+        if (aiRequest.isAccepted()) {
+            publishPreparer.prepare(aiRequest, summaryAiRequestFactory.create(aiRequest, summary));
+        }
     }
 
     private AiRequest createFirstSummaryRequest(Meeting meeting, Long recordingSessionId, String idempotencyKey) {
