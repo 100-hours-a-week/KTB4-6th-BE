@@ -6,6 +6,7 @@ import com.backend.meety.domain.ai.entity.AiRequest;
 import com.backend.meety.domain.ai.entity.AiRequestType;
 import com.backend.meety.domain.ai.entity.PublishStatus;
 import com.backend.meety.domain.ai.repository.AiRequestMySqlTestSupport;
+import com.github.dockerjava.api.DockerClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -28,6 +29,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.rabbitmq.RabbitMQContainer;
 
 @ContextConfiguration(classes = AiRequestPublishSchedulerIntegrationTest.PublishConfig.class)
@@ -50,7 +52,7 @@ class AiRequestPublishSchedulerIntegrationTest extends AiRequestMySqlTestSupport
         registry.add("spring.rabbitmq.publisher-returns", () -> "true");
         registry.add("spring.rabbitmq.template.mandatory", () -> "true");
         registry.add("ai.request.publish.batch-size", () -> "20");
-        registry.add("ai.request.publish.confirm-timeout", () -> "5s");
+        registry.add("ai.request.publish.confirm-timeout", () -> "2s");
         registry.add("ai.request.publish.claim-timeout", () -> "1m");
     }
 
@@ -133,6 +135,31 @@ class AiRequestPublishSchedulerIntegrationTest extends AiRequestMySqlTestSupport
         AiRequest request = findRequest(requestId);
         assertThat(request.getPublishStatus()).isEqualTo(PublishStatus.UNPUBLISHED);
         assertThat(request.getRetryCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("브로커가 멈춰 Confirm이 오지 않으면 PUBLISHING으로 남기고, 선점 만료 후 회수해 다시 발행한다")
+    void keepsPublishingWhenConfirmNeverArrives() {
+        long requestId = createPublishable("summary");
+        DockerClient docker = DockerClientFactory.instance().client();
+        rabbitTemplate.execute(channel -> channel.isOpen());
+
+        docker.pauseContainerCmd(RABBIT.getContainerId()).exec();
+        try {
+            scheduler.publishPending();
+        } finally {
+            docker.unpauseContainerCmd(RABBIT.getContainerId()).exec();
+        }
+
+        AiRequest unconfirmed = findRequest(requestId);
+        assertThat(unconfirmed.getPublishStatus()).isEqualTo(PublishStatus.PUBLISHING);
+        assertThat(unconfirmed.getPublishedAt()).isNull();
+
+        jdbc.update("update ai_requests set publish_started_at = ? where id = ?", NOW.minusMinutes(2), requestId);
+        scheduler.publishPending();
+
+        assertThat(findRequest(requestId).getPublishStatus()).isEqualTo(PublishStatus.PUBLISHED);
+        assertThat(rabbitTemplate.receive(AiRabbitTopology.SUMMARY_REQUEST_QUEUE, 5_000)).isNotNull();
     }
 
     @Test
