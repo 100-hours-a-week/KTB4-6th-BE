@@ -11,6 +11,7 @@ import com.backend.meety.domain.ai.event.ChatFailedEvent;
 import com.backend.meety.domain.ai.event.ChatRequestedEvent;
 import com.backend.meety.domain.ai.exception.AiChatErrorCode;
 import com.backend.meety.domain.ai.exception.AiChatException;
+import com.backend.meety.domain.ai.messaging.AiRequestMessageWriter;
 import com.backend.meety.domain.ai.repository.AiChatbotMessageRepository;
 import com.backend.meety.domain.ai.repository.AiRequestRepository;
 import com.backend.meety.domain.credit.CreditPolicy;
@@ -57,6 +58,8 @@ public class AiChatService {
     private final CreditLedgerRepository creditLedgerRepository;
     private final CreditPolicy creditPolicy;
     private final ChatFailureHandler chatFailureHandler;
+    private final ChatAiRequestFactory chatAiRequestFactory;
+    private final AiRequestMessageWriter aiRequestMessageWriter;
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
@@ -118,6 +121,7 @@ public class AiChatService {
         useCredit(credit, aiRequest);
         AiChatbotMessage message = chatbotMessageRepository.save(
                 AiChatbotMessage.create(aiRequest, meeting, asker, inputType, question));
+        aiRequestMessageWriter.write(aiRequest, chatAiRequestFactory.create(message));
 
         eventPublisher.publishEvent(new ChatRequestedEvent(
                 aiRequest.getId(), meeting.getId(), message.getId(), credit.getBalance()));

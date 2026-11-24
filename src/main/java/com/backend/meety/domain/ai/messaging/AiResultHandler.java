@@ -10,4 +10,8 @@ public interface AiResultHandler {
     boolean handleSucceeded(Long aiRequestId, JsonNode result);
 
     void handleFinalFailure(Long aiRequestId);
+
+    default long maxRetryCount() {
+        return AiResponseRetryPolicy.MAX_RETRY_COUNT;
+    }
 }
